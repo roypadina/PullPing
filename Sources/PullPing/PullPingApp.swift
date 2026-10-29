@@ -20,8 +20,9 @@ struct PullPingApp: App {
     }
 
     var body: some Scene {
-        // The status item is AppKit (`StatusItem`); this never-opened scene only carries the main menu commands.
-        Settings { EmptyView() }
+        // The status item is AppKit (`StatusItem`); this never-inserted scene only carries the main menu commands.
+        // Not a `Settings` scene: SwiftUI opens that one as an empty "PullPing Settings" window on reopen.
+        MenuBarExtra("PullPing", isInserted: .constant(false)) { EmptyView() }
             .commands { AppCommands(store: store) }
     }
 }
@@ -63,7 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Opening PullPing again (Finder, Raycast) shows the main window: the way in when the icon is hidden (MBX-8).
     @MainActor func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { MainWindow.shared.show() }
-        return true
+        return false  // handled; `true` lets SwiftUI open a window of its own
     }
 
     @MainActor func applicationWillTerminate(_ notification: Notification) {

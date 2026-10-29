@@ -40,7 +40,7 @@ brew install --cask roypadina/tap/pullping
 - **Every pull request you are involved in, in one place.** Ones you opened, ones assigned to you, ones where your review is requested (directly or through a team), and ones where you commented, reviewed or were mentioned. Merged and closed ones stay listed for a few days.
 - **Several GitHub accounts at once.** Personal and work, each with its own token and a label you choose.
 - **Menu-bar panel.** Your pull requests in three groups (Mine, To Review, Involved), with CI status, review state, an unread dot and the latest activity on each row. Switch between All accounts and each account, and filter (Inbox, All, Mine, To Review, Involved, Recently Closed, Muted, Hidden). Right-click the icon for Refresh, Mark All as Read, Pause Notifications, Settings and Quit.
-- **A count that means something.** By default the menu-bar number counts only pull requests that need you: review requests, unread mentions, and your own pull requests with changes requested, failed CI, new comments, or ready to merge. The panel header spells it out ("2 to review · 1 ready to merge"). Or count everything unread, or show no number.
+- **A count that means something.** By default the menu-bar number counts only pull requests that need you: review requests, unread mentions, and your own pull requests with changes requested, failed CI, new comments, or ready to merge. The panel header spells it out ("2 to review · 1 ready to merge"). Settings → General → Count in the Menu Bar picks which of these count (team review requests have their own switch), or count everything unread, or show no number.
 - **Main window.** Mail-style sidebar: the same filters for All Accounts and for each account, with counts, then search and a detail view with reviewers, checks and the recent activity of the selected pull request. Prefer one inbox per account? Settings → General → Inbox → Per account.
 - **Phone notifications** through [ntfy](https://ntfy.sh), chosen per kind of event, separately from the desktop panels.
 - **Notifications that stay out of your way.** A small panel appears at the top right, never takes keyboard focus, and is grouped per pull request. Pick Off, Banner (hides itself) or Alert (stays) for each kind of event.
@@ -94,7 +94,7 @@ open dist/PullPing.app
    [Accounts and tokens](#accounts-and-tokens).
 3. Click the menu-bar icon. **↩** opens the selected pull request in your browser, **⌘↩** opens it in the
    main window, **Esc** closes the panel. Right-click a row for Open in Browser, Mark as Read,
-   Mute, Hide, Snooze and Stop Tracking. Right-click the menu-bar icon for its menu (Pause Notifications included).
+   Mute, Hide, Snooze and Stop Tracking. Right-click the menu-bar icon, or click **⋯** in the panel, for the same menu (Pause Notifications included).
 4. The first sync of an account is silent: PullPing learns what already exists, and only tells
    you about what happens afterwards (plus review requests, assignments and mentions it finds).
 

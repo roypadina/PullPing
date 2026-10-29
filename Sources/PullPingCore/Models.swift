@@ -20,6 +20,9 @@ public struct Account: Identifiable, Codable, Sendable, Equatable {
         self.authKind = authKind
         self.tokenService = Keychain.service(for: id)
     }
+
+    /// The name the user gave the account in Settings, else `@login`.
+    public var displayName: String { label.trimmingCharacters(in: .whitespaces).isEmpty ? "@\(login)" : label }
 }
 
 /// Also the error type thrown by `GitHubClient`.

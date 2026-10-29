@@ -55,6 +55,8 @@ final class AttentionTests: XCTestCase {
     func testNeedsMeAndBreakdown() {
         var review = pr("R", roles: [.reviewRequested])
         XCTAssertEqual(Attention.needReason(review), .toReview)
+        XCTAssertNil(Attention.needReason(review, counting: [.ciFailed]))  // reason switched off in Settings
+        XCTAssertEqual(Attention.needReason(pr("T", roles: [.teamReviewRequested])), .teamToReview)
         review.isDraft = true
         XCTAssertNil(Attention.needReason(review))
 
@@ -89,10 +91,10 @@ final class AttentionTests: XCTestCase {
         hidden.hidden = true
         muted.muted = true
         merged.state = .merged
-        XCTAssertFalse([hidden, muted, merged].contains(where: Attention.needsMe))
+        XCTAssertFalse([hidden, muted, merged].contains { Attention.needsMe($0) })
 
         let review2 = pr("R2", roles: [.teamReviewRequested])
-        XCTAssertEqual(Attention.breakdown([pr("R", roles: [.reviewRequested]), review2, changes, ready, hidden]), "2 to review · 1 changes requested")
+        XCTAssertEqual(Attention.breakdown([pr("R", roles: [.reviewRequested]), review2, changes, ready, hidden]), "1 to review · 1 team review · 1 changes requested")
         XCTAssertEqual(Attention.breakdown([]), "")
     }
 
