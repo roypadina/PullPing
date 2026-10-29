@@ -18,7 +18,7 @@ final class ScreenshotRenderTests: XCTestCase {
             let suffix = dark ? "-dark" : ""
             let store = Fixtures.sampleStore()
             store.selectedID = "PR_1"
-            store.filter = nil  // an offscreen sidebar selection renders as a black bar
+            store.selection = nil  // an offscreen sidebar selection renders as a black bar
             let pr = { store.tracked.prs[$0]! }
             func save(_ name: String, _ view: some View, _ size: NSSize) throws {
                 try render(view, size: size, dark: dark, to: URL(fileURLWithPath: dir).appendingPathComponent("\(name)\(suffix).png"))
@@ -31,6 +31,7 @@ final class ScreenshotRenderTests: XCTestCase {
                      NSSize(width: Theme.panelWidth + 40, height: Theme.panelHeight + 40))
             try save("settings-accounts", AccountsTab(store: store), NSSize(width: 520, height: AccountsTab.height))
             try save("settings-notifications", NotificationsTab(store: store), NSSize(width: 520, height: NotificationsTab.height))
+            try save("settings-phone", PhoneTab(store: store), NSSize(width: 520, height: PhoneTab.height))
             try save("settings-general", GeneralTab(store: store), NSSize(width: 520, height: GeneralTab.height))
         }
     }

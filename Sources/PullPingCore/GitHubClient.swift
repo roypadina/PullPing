@@ -1,6 +1,6 @@
 import Foundation
 
-/// The HTTP seam: URLSession in the app, scripted responses in tests. Also used by `DeviceFlow`.
+/// The HTTP seam: URLSession in the app, scripted responses in tests. Also used by `DeviceFlow` and `Ntfy`.
 public protocol GraphQLTransport: Sendable {
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
 }

@@ -2,48 +2,71 @@ import AppKit
 import Observation
 import PullPingCore
 
-/// Main-window sidebar filters.
-enum Filter: Hashable {
-    case all, mine, toReview, involved, recentlyClosed, muted
-    case account(UUID)
-
-    static let fixed: [Filter] = [.all, .mine, .toReview, .involved, .recentlyClosed, .muted]
+/// Status panel and sidebar filters. Hidden pull requests appear only under Hidden.
+enum Filter: String, CaseIterable {
+    case inbox, all, mine, toReview, involved, recentlyClosed, muted, hidden
 
     var title: String {
         switch self {
+        case .inbox: "Inbox"
         case .all: "All"
         case .mine: "Mine"
         case .toReview: "To Review"
         case .involved: "Involved"
         case .recentlyClosed: "Recently Closed"
         case .muted: "Muted"
-        case .account: "Account"
+        case .hidden: "Hidden"
         }
     }
 
     var symbol: String {
         switch self {
+        case .inbox: "tray"
         case .all: "tray.full"
         case .mine: "person"
         case .toReview: "eye"
         case .involved: "bubble.left.and.bubble.right"
         case .recentlyClosed: "archivebox"
         case .muted: "bell.slash"
-        case .account: "person.crop.circle"
+        case .hidden: "eye.slash"
         }
     }
 
+    /// Inbox and All hold the same rows; Inbox shows them in Mine · To Review · Involved sections.
     func matches(_ pr: TrackedPR) -> Bool {
+        guard self != .hidden else { return pr.hidden }
+        guard !pr.hidden else { return false }
         switch self {
-        case .all: true
-        case .mine: Attention.group(pr) == .mine
-        case .toReview: Attention.group(pr) == .toReview
-        case .involved: Attention.group(pr) == .involved
-        case .recentlyClosed: pr.state != .open
-        case .muted: pr.muted
-        case .account(let id): pr.accountID == id
+        case .inbox, .all, .hidden: return true
+        case .mine: return Attention.group(pr) == .mine
+        case .toReview: return Attention.group(pr) == .toReview
+        case .involved: return Attention.group(pr) == .involved
+        case .recentlyClosed: return pr.state != .open
+        case .muted: return pr.muted
         }
     }
+}
+
+/// Which accounts a list shows.
+enum Scope: Hashable {
+    case all, account(UUID)
+
+    func matches(_ pr: TrackedPR) -> Bool {
+        if case .account(let id) = self { return pr.accountID == id }
+        return true
+    }
+
+    /// `DefaultsKey.panelAccount` value: empty for All Accounts.
+    var key: String {
+        if case .account(let id) = self { return id.uuidString }
+        return ""
+    }
+}
+
+/// A main-window sidebar row: All Accounts or one account, plus a filter.
+struct SidebarItem: Hashable {
+    var scope: Scope
+    var filter: Filter
 }
 
 enum Snooze: CaseIterable {
@@ -120,9 +143,13 @@ final class Store {
     var offline = false
     /// Re-read every 30 s so relative times stay current without a per-view timer.
     private(set) var now = Date()
-    var filter: Filter? = .all
+    /// Main-window sidebar row; nil only in screenshots. Read `listSelection`.
+    var selection: SidebarItem? = SidebarItem(scope: .all, filter: .inbox)
     /// Main-window selection; the Pull Request menu acts on it.
     var selectedID: String?
+    /// Phone notification secrets: keychain only. The demo store never reads or writes the keychain.
+    var ntfyToken: String { didSet { if persist { Keychain.set(Keychain.ntfyTokenService, ntfyToken) } } }
+    var ntfyFallbackURL: String { didSet { if persist { Keychain.set(Keychain.ntfyFallbackService, ntfyFallbackURL) } } }
 
     init(state: StateStore, accounts: [Account], settings: AppSettings, persist: Bool) {
         self.state = state
@@ -130,6 +157,8 @@ final class Store {
         self.settings = settings
         self.persist = persist
         tracked = state.state
+        ntfyToken = persist ? Keychain.get(Keychain.ntfyTokenService) : ""
+        ntfyFallbackURL = persist ? Keychain.get(Keychain.ntfyFallbackService) : ""
     }
 
     /// The running app: the real state file, or a memory-only fixture store with `PULLPING_DEMO=1`.
@@ -180,7 +209,36 @@ final class Store {
         }
     }
 
-    var badgeCount: Int { Attention.badgeCount(Array(tracked.prs.values), enabledAccounts: enabledIDs) }
+    /// The menu-bar number (Settings > General > Menu bar count).
+    var badgeCount: Int { Attention.badgeCount(Array(tracked.prs.values), enabledAccounts: enabledIDs, mode: settings.badgeMode) }
+    /// "2 to review · 1 ready to merge": status panel header and the status item's label.
+    var breakdown: String { Attention.breakdown(prs) }
+    var isPaused: Bool { settings.isPaused(now) }
+
+    func prs(_ scope: Scope, _ filter: Filter) -> [TrackedPR] { prs.filter { scope.matches($0) && filter.matches($0) } }
+
+    /// Sidebar badges and panel segments, by the menu-bar measure ("all unread" when the count is off).
+    func count(_ scope: Scope, _ filter: Filter = .all) -> Int {
+        let enabled = enabledIDs, needsMe = settings.badgeMode == .needsMe
+        return tracked.prs.values.filter {
+            enabled.contains($0.accountID) && scope.matches($0) && filter.matches($0) && (needsMe ? Attention.needsMe($0) : Attention.isAttention($0))
+        }.count
+    }
+
+    /// The sidebar row the list shows: per-account layout has no All Accounts rows, a removed account falls back.
+    var listSelection: SidebarItem {
+        var item = selection ?? SidebarItem(scope: .all, filter: .inbox)
+        item.scope = resolve(item.scope)
+        return item
+    }
+
+    /// Status panel scope from its stored account id.
+    func panelScope(_ key: String) -> Scope { resolve(UUID(uuidString: key).map(Scope.account) ?? .all) }
+
+    private func resolve(_ scope: Scope) -> Scope {
+        if case .account(let id) = scope, account(id) != nil { return scope }
+        return settings.inboxLayout == .perAccount ? accounts.first.map { .account($0.id) } ?? .all : .all
+    }
     var multiAccount: Bool { accounts.count > 1 }
     var lastPollAt: Date? { tracked.lastPollAt.filter { enabledIDs.contains($0.key) }.values.max() }
     var selectedPR: TrackedPR? { selectedID.flatMap { tracked.prs[$0] } }
@@ -192,10 +250,18 @@ final class Store {
     func account(_ id: UUID) -> Account? { accounts.first { $0.id == id } }
     func login(for pr: TrackedPR) -> String? { multiAccount ? account(pr.accountID).map { "@\($0.login)" } : nil }
 
+    /// Status item accessibility label and tooltip (MBX-6): what the count means, and Pause.
     var menuBarLabel: String {
         if hasError { return "PullPing, account error" }
         if offline { return "PullPing, offline" }
-        return badgeCount > 0 ? "PullPing, \(badgeCount) need attention" : "PullPing"
+        var parts = ["PullPing"]
+        switch settings.badgeMode {
+        case .needsMe where !breakdown.isEmpty: parts.append(breakdown)
+        case .allUnread where badgeCount > 0: parts.append("\(badgeCount) need attention")
+        default: break
+        }
+        if let until = settings.pausedUntil, isPaused { parts.append("notifications paused until \(until.formatted(date: .omitted, time: .shortened))") }
+        return parts.joined(separator: ", ")
     }
 
     var freshness: String {
@@ -244,14 +310,14 @@ final class Store {
 
     // MARK: Notifications and reminders
 
-    /// Groups by PR, drops off/muted/snoozed, one panel per PR, one sound per batch.
+    /// Groups by PR, drops off/muted/snoozed/paused, one panel per PR, one sound per batch. Phone pushes go out per event.
     func show(_ events: [PREvent]) {
-        guard settings.notificationsEnabled else { return }
         let t = Date()
+        push(events, now: t)
         var shown = false
         let byPR = Dictionary(grouping: events, by: \.prID).sorted { ($0.value.map(\.at).max() ?? t) < ($1.value.map(\.at).max() ?? t) }
         for (prID, group) in byPR {
-            guard let pr = tracked.prs[prID], enabledIDs.contains(pr.accountID), !pr.muted, (pr.snoozedUntil ?? .distantPast) <= t else { continue }
+            guard let pr = tracked.prs[prID], enabledIDs.contains(pr.accountID), settings.allowsNotifications(for: pr, now: t) else { continue }
             let styled = group.map { ($0, settings.style(for: $0.kind, mine: pr.roles.contains(.author))) }.filter { $0.1 != .off }
             guard !styled.isEmpty else { continue }
             NotificationPanels.shared.show(pr: pr, events: styled.map(\.0), alert: styled.contains { $0.1 == .alert },
@@ -260,6 +326,32 @@ final class Store {
         }
         if shown && settings.playSound { NSSound(named: "Pop")?.play() }
     }
+
+    private var ntfyConfig: NtfyConfig {
+        NtfyConfig(server: settings.ntfyServer, topic: settings.ntfyTopic, token: ntfyToken, fallbackURL: ntfyFallbackURL)
+    }
+
+    /// One push per opted-in event, independent of the panel style. Alert-style kinds go out at priority 4.
+    private func push(_ events: [PREvent], now: Date) {
+        let config = ntfyConfig
+        for event in events {
+            guard let pr = tracked.prs[event.prID], enabledIDs.contains(pr.accountID), settings.pushesToPhone(event, pr: pr, now: now) else { continue }
+            let message = Ntfy.Message(
+                title: "\(event.kind.label): \(pr.repo) #\(pr.number)",
+                body: pr.title + "\n" + (event.summary.isEmpty ? event.line : "\(event.actor): \(event.summary)"),
+                priority: settings.style(for: event.kind, mine: pr.roles.contains(.author)) == .alert ? 4 : 3,
+                tags: [event.kind.rawValue], click: pr.url, flow: "pr-event")
+            Task { _ = await Ntfy.send(message, config: config, transport: URLSessionTransport()) }
+        }
+    }
+
+    func sendTestPush() async -> Bool {
+        await Ntfy.send(Ntfy.Message(title: "PullPing", body: "Phone notifications work.", priority: 3, tags: ["white_check_mark"],
+                                     click: nil, flow: "test"), config: ntfyConfig, transport: URLSessionTransport())
+    }
+
+    /// nil resumes. Covers panels, phone pushes and reminders.
+    func pause(until: Date?) { settings.pausedUntil = until }
 
     private func tick() {
         reload()
@@ -300,6 +392,24 @@ final class Store {
         let until = option.until(from: Date())
         mutate { for id in ids { $0.prs[id]?.snoozedUntil = until } }
         ids.forEach { NotificationPanels.shared.dismiss(prID: $0) }
+    }
+
+    /// Hidden rows show only under Hidden and leave every count; Edit > Undo reverses it (UND-1).
+    func setHidden(_ ids: Set<String>, _ hidden: Bool) {
+        let ids = ids.filter { tracked.prs[$0].map { $0.hidden != hidden } ?? false }
+        guard !ids.isEmpty else { return }
+        mutate { for id in ids { $0.prs[id]?.hidden = hidden } }
+        undoManager.registerUndo(withTarget: self) { store in
+            MainActor.assumeIsolated { store.setHidden(ids, !hidden) }
+        }
+        undoManager.setActionName(hidden ? "Hide" : "Unhide")
+    }
+
+    /// Main-window selection from outside (⌘↩, links): switches the sidebar when the pull request isn't in the current list.
+    func reveal(_ id: String) {
+        selectedID = id
+        guard let pr = tracked.prs[id], !(listSelection.scope.matches(pr) && listSelection.filter.matches(pr)) else { return }
+        selection = SidebarItem(scope: settings.inboxLayout == .unified ? .all : .account(pr.accountID), filter: pr.hidden ? .hidden : .all)
     }
 
     /// Removes the rows and ignores the ids; Edit > Undo puts them back (UND-1).

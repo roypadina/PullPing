@@ -205,9 +205,9 @@ final class NotificationPanels {
 final class ClosureMenuItem: NSMenuItem {
     private let run: () -> Void
 
-    init(title: String, run: @escaping () -> Void) {
+    init(title: String, key: String = "", run: @escaping () -> Void) {
         self.run = run
-        super.init(title: title, action: #selector(fire), keyEquivalent: "")
+        super.init(title: title, action: #selector(fire), keyEquivalent: key)
         target = self
     }
 

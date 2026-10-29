@@ -5,12 +5,9 @@ import SwiftUI
 /// Not `@main`: `main.swift` runs smoke mode first.
 struct PullPingApp: App {
     @NSApplicationDelegateAdaptor private var delegate: AppDelegate
-    @AppStorage(DefaultsKey.showMenuBarIcon) private var showIcon = true
     // Plain let, not @State: a @State read in init() is not the installed value, so a Store built there
     // would be a throwaway (MeetAlert lesson).
     private let store: Store
-    /// The packaged template glyph; the SF Symbol when running unbundled (`swift run`).
-    private let glyph: NSImage? = NSImage(named: "menubar").map { $0.isTemplate = true; return $0 }
 
     init() {
         let store = Store.launch()
@@ -23,21 +20,9 @@ struct PullPingApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra(isInserted: $showIcon) {
-            StatusPanelView(store: store)
-        } label: {
-            // Shape carries the state (MBX-5): warning triangle on account errors, count when something needs you.
-            if store.hasError {
-                Image(systemName: "exclamationmark.triangle").accessibilityLabel(store.menuBarLabel)
-            } else if let glyph {
-                Image(nsImage: glyph).opacity(store.offline ? 0.5 : 1).accessibilityLabel(store.menuBarLabel)
-            } else {
-                Image(systemName: "arrow.triangle.pull").opacity(store.offline ? 0.5 : 1).accessibilityLabel(store.menuBarLabel)
-            }
-            if store.badgeCount > 0 { Text("\(store.badgeCount)").monospacedDigit() }
-        }
-        .menuBarExtraStyle(.window)
-        .commands { AppCommands(store: store) }
+        // The status item is AppKit (`StatusItem`); this never-opened scene only carries the main menu commands.
+        Settings { EmptyView() }
+            .commands { AppCommands(store: store) }
     }
 }
 
@@ -45,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor static var store: Store?
 
     @MainActor func applicationDidFinishLaunching(_ notification: Notification) {
+        if let store = Self.store { StatusItem.shared.install(store: store) }
         let center = NSWorkspace.shared.notificationCenter
         center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { Self.store?.setPaused(true) }
@@ -116,6 +102,7 @@ struct AppCommands: Commands {
                 .keyboardShortcut("u", modifiers: [.command, .shift, .option])
             Divider()
             Button(pr?.muted == true ? "Unmute" : "Mute") { store.setMuted(ids, !(pr?.muted ?? false)) }.disabled(pr == nil)
+            Button(pr?.hidden == true ? "Unhide" : "Hide") { store.setHidden(ids, !(pr?.hidden ?? false)) }.disabled(pr == nil)
             Menu("Snooze") {
                 ForEach(Snooze.allCases, id: \.self) { option in
                     Button(option.title) { store.snooze(ids, option) }

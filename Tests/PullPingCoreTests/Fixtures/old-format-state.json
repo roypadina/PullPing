@@ -1,0 +1,52 @@
+{
+  "baselinedAccounts": [
+    "00000000-0000-0000-0000-000000000001"
+  ],
+  "ignoredIDs": [
+    "PR_9"
+  ],
+  "lastPollAt": [
+    "00000000-0000-0000-0000-000000000001",
+    "2027-01-15T08:00:00Z"
+  ],
+  "prs": {
+    "PR_1": {
+      "accountID": "00000000-0000-0000-0000-000000000001",
+      "assignees": [],
+      "authorLogin": "dana",
+      "checks": [],
+      "ci": "none",
+      "events": [
+        {
+          "actor": "alice",
+          "at": "2027-01-15T08:00:00Z",
+          "id": "IC_1",
+          "isOwn": false,
+          "kind": "comment",
+          "prID": "PR_1",
+          "summary": "Hi"
+        }
+      ],
+      "firstTrackedAt": "2027-01-15T08:00:00Z",
+      "headOID": "",
+      "id": "PR_1",
+      "isDraft": false,
+      "lastReadAt": "2027-01-15T08:00:00Z",
+      "lastSeenAt": "0001-01-01T00:00:00Z",
+      "mergeState": "",
+      "muted": true,
+      "number": 7,
+      "repo": "octo-org/widgets",
+      "requestedTeams": [],
+      "reviewers": [],
+      "roles": [
+        "author"
+      ],
+      "seenEventIDs": [],
+      "state": "open",
+      "title": "Add widget cache",
+      "updatedAt": "0001-01-01T00:00:00Z",
+      "url": "https://github.com/octo-org/widgets/pull/7"
+    }
+  }
+}

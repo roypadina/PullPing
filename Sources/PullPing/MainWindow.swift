@@ -10,6 +10,7 @@ final class AccessoryWindows: NSObject, NSWindowDelegate {
     var undoManager: UndoManager?
 
     func show(_ window: NSWindow) {
+        StatusItem.shared.closePopover()  // every window entry point: status panel, menus, links, Welcome
         window.delegate = self
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
@@ -35,7 +36,7 @@ final class MainWindow {
 
     func show(select id: String? = nil) {
         guard let store else { return }
-        if let id { store.selectedID = id }
+        if let id { store.reveal(id) }
         if window == nil {
             let host = NSHostingController(rootView: MainView(store: store))
             host.sceneBridgingOptions = [.toolbars, .title]  // SwiftUI .toolbar / .navigationTitle drive the NSWindow

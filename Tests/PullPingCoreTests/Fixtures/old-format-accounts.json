@@ -1,0 +1,10 @@
+[
+  {
+    "authKind": "pat",
+    "enabled": true,
+    "id": "00000000-0000-0000-0000-000000000001",
+    "label": "Personal",
+    "login": "dana",
+    "tokenService": "com.padina.pullping.token.00000000-0000-0000-0000-000000000001"
+  }
+]

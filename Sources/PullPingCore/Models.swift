@@ -126,11 +126,29 @@ public struct TrackedPR: Identifiable, Codable, Sendable, Equatable {
     public var snoozedUntil: Date?
     public var lastReminderAt: Date?
     public var firstTrackedAt: Date
+    /// Only under the Hidden filter, never counted; still notifies unless muted.
+    @FalseIfMissing public var hidden = false
 
     public init(id: String, accountID: UUID, firstTrackedAt: Date) {
         self.id = id
         self.accountID = accountID
         self.firstTrackedAt = firstTrackedAt
+    }
+}
+
+/// A Bool that decodes as false when its key is missing, so state files from before the field still load.
+@propertyWrapper
+public struct FalseIfMissing: Codable, Sendable, Equatable {
+    public var wrappedValue: Bool
+    public init(wrappedValue: Bool) { self.wrappedValue = wrappedValue }
+    public init(from decoder: Decoder) throws { wrappedValue = try decoder.singleValueContainer().decode(Bool.self) }
+    public func encode(to encoder: Encoder) throws { try wrappedValue.encode(to: encoder) }
+}
+
+extension KeyedDecodingContainer {
+    /// Picked by the synthesized `init(from:)` over the generic `decode`: a missing key is false, not an error.
+    func decode(_ type: FalseIfMissing.Type, forKey key: Key) throws -> FalseIfMissing {
+        try decodeIfPresent(type, forKey: key) ?? FalseIfMissing(wrappedValue: false)
     }
 }
 

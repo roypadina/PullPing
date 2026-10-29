@@ -8,6 +8,9 @@ public enum Keychain {
     private static let account = "pullping"
 
     public static func service(for accountID: UUID) -> String { "com.padina.pullping.token.\(accountID.uuidString)" }
+    /// Phone notifications: the ntfy access token and the fallback topic URL.
+    public static let ntfyTokenService = "com.padina.pullping.ntfy-token"
+    public static let ntfyFallbackService = "com.padina.pullping.ntfy-fallback"
 
     public static func get(_ service: String) -> String {
         security(["find-generic-password", "-s", service, "-a", account, "-g"]).flatMap(password) ?? ""

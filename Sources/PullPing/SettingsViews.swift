@@ -295,10 +295,93 @@ struct NotificationsTab: View {
     }
 }
 
+// MARK: Phone
+
+/// ntfy pushes (MeetAlert pattern): server and topic in settings, access token and fallback URL in the keychain.
+struct PhoneTab: View {
+    static let height: CGFloat = 640  // plan height; the 17-row table scrolls
+    @Bindable var store: Store
+    @State private var sending = false
+    @State private var testResult: Bool?
+    private static let kinds = EventKind.allCases.filter { $0 != .reviewReminder }
+    private static let column: CGFloat = 112
+
+    var body: some View {
+        Form {
+            Section {
+                TextField("Server", text: $store.settings.ntfyServer)
+                TextField("Topic", text: $store.settings.ntfyTopic, prompt: Text("Empty = phone notifications off"))
+                SecureField("Access token (optional)", text: $store.ntfyToken)
+                SecureField("Fallback topic URL (optional)", text: $store.ntfyFallbackURL, prompt: Text(verbatim: "https://ntfy.sh/…"))
+                HStack {
+                    Button("Send Test Notification") { test() }
+                        .disabled(store.settings.ntfyTopic.isEmpty || sending)
+                    if sending {
+                        ProgressView().controlSize(.small)
+                    } else if let ok = testResult {
+                        Label {
+                            Text(ok ? "Sent. Check your phone." : "Couldn't send. Check the server, topic and token, then try again.")
+                        } icon: {
+                            Image(systemName: ok ? "checkmark.circle" : "exclamationmark.triangle.fill").foregroundStyle(ok ? Theme.good : Theme.bad)
+                        }
+                        .font(.callout)
+                    }
+                }
+            } header: {
+                Text("ntfy")
+            } footer: {
+                Text("Subscribe to the same topic in the ntfy phone app. Keep the topic private: anyone who knows it can read it. The access token (for a protected server) and the fallback topic URL (used when the server can't be reached) are kept in your login keychain.").formFooter()
+            }
+            Section {
+                ForEach(Self.kinds, id: \.self) { kind in
+                    LabeledContent(kind.label) {
+                        HStack(spacing: 8) {
+                            checkbox(kind, mine: true)
+                            checkbox(kind, mine: false)
+                        }
+                    }
+                }
+            } header: {
+                HStack(spacing: 8) {
+                    Text("Send to Phone")
+                    Spacer()
+                    Text("My Pull Requests").frame(width: Self.column, alignment: .trailing)
+                    Text("Others").frame(width: Self.column, alignment: .trailing)
+                }
+            } footer: {
+                Text(!store.settings.notificationsEnabled ? "Notifications are off in Settings > Notifications, so nothing is sent."
+                     : store.settings.ntfyTopic.isEmpty ? "Add a topic to choose what goes to your phone."
+                     : "Sent whatever the desktop style, except for your own actions and muted, snoozed or paused pull requests. Review reminders follow Review requested.").formFooter()
+            }
+            .disabled(!store.settings.notificationsEnabled || store.settings.ntfyTopic.isEmpty)
+        }
+        .formStyle(.grouped)
+    }
+
+    private func checkbox(_ kind: EventKind, mine: Bool) -> some View {
+        let kinds = mine ? \AppSettings.phoneMine : \AppSettings.phoneOthers
+        return Toggle("\(kind.label), \(mine ? "my pull requests" : "others")", isOn: Binding(
+            get: { store.settings[keyPath: kinds].contains(kind) },
+            set: { if $0 { store.settings[keyPath: kinds].insert(kind) } else { store.settings[keyPath: kinds].remove(kind) } }))
+        .toggleStyle(.checkbox)
+        .labelsHidden()
+        .frame(width: Self.column, alignment: .trailing)
+    }
+
+    private func test() {
+        sending = true
+        testResult = nil
+        Task {
+            testResult = await store.sendTestPush()
+            sending = false
+        }
+    }
+}
+
 // MARK: General
 
 struct GeneralTab: View {
-    static let height: CGFloat = 450
+    static let height: CGFloat = 640
     @Bindable var store: Store
     @AppStorage(DefaultsKey.showMenuBarIcon) private var showIcon = true
 
@@ -310,8 +393,26 @@ struct GeneralTab: View {
                 }
                 LaunchAtLoginToggle()
                 Toggle("Show in the Menu Bar", isOn: $showIcon).controlSize(.mini)
+                    .onChange(of: showIcon) { StatusItem.shared.setVisible(showIcon) }
+                Picker("Menu bar count", selection: $store.settings.badgeMode) {
+                    Text("Pull requests that need me").tag(BadgeMode.needsMe)
+                    Text("All unread").tag(BadgeMode.allUnread)
+                    Text("Off").tag(BadgeMode.off)
+                }
+                .pickerStyle(.radioGroup)
             } footer: {
-                Text("Icon missing? Check System Settings > Menu Bar. Opening PullPing again from Applications shows the window.").formFooter()
+                Text("Need me: review requests, unread mentions, and your own pull requests with changes requested, failed CI, new comments, or ready to merge. Icon missing? Check System Settings > Menu Bar. Opening PullPing again from Applications shows the window.").formFooter()
+            }
+            Section {
+                Picker("Layout", selection: $store.settings.inboxLayout) {
+                    Text("Unified").tag(InboxLayout.unified)
+                    Text("Per account").tag(InboxLayout.perAccount)
+                }
+                .pickerStyle(.radioGroup)
+            } header: {
+                Text("Inbox")
+            } footer: {
+                Text("Unified lists all accounts together, then each account. Per account lists each account on its own.").formFooter()
             }
             Section("Tracking") {
                 Picker("Keep merged and closed pull requests for", selection: $store.settings.retentionDays) {

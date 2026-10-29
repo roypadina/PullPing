@@ -51,4 +51,59 @@ final class AttentionTests: XCTestCase {
         draft.isDraft = true
         XCTAssertEqual(Attention.group(draft), .involved)
     }
+
+    func testNeedsMeAndBreakdown() {
+        var review = pr("R", roles: [.reviewRequested])
+        XCTAssertEqual(Attention.needReason(review), .toReview)
+        review.isDraft = true
+        XCTAssertNil(Attention.needReason(review))
+
+        var changes = pr("C", roles: [.author])
+        changes.reviewDecision = "CHANGES_REQUESTED"
+        XCTAssertEqual(Attention.needReason(changes), .changesRequested)
+
+        var ci = pr("F", roles: [.author])
+        ci.ci = .failure
+        XCTAssertEqual(Attention.needReason(ci), .ciFailed)
+
+        var ready = pr("M", roles: [.author])
+        ready.reviewDecision = "APPROVED"
+        ready.ci = .success
+        ready.mergeState = "CLEAN"
+        XCTAssertEqual(Attention.needReason(ready), .readyToMerge)
+        ready.mergeState = "BLOCKED"
+        XCTAssertNil(Attention.needReason(ready))
+
+        let comments = pr("N", roles: [.author], events: [(t0, false)])
+        XCTAssertEqual(Attention.needReason(comments), .newComments)
+        XCTAssertNil(Attention.needReason(pr("O", roles: [.author], events: [(t0, true)])))  // own comment
+        XCTAssertNil(Attention.needReason(pr("I", roles: [.commenter], events: [(t0, false)])))  // others' chatter isn't "needs me"
+
+        var mention = pr("X", roles: [.commenter])
+        mention.events = [PREvent(id: "m", prID: "X", kind: .mentioned, actor: "alice", at: t0, summary: "", url: nil, isOwn: false)]
+        XCTAssertEqual(Attention.needReason(mention), .mentioned)
+        mention.lastReadAt = t0
+        XCTAssertNil(Attention.needReason(mention))
+
+        var hidden = changes, muted = changes, merged = changes
+        hidden.hidden = true
+        muted.muted = true
+        merged.state = .merged
+        XCTAssertFalse([hidden, muted, merged].contains(where: Attention.needsMe))
+
+        let review2 = pr("R2", roles: [.teamReviewRequested])
+        XCTAssertEqual(Attention.breakdown([pr("R", roles: [.reviewRequested]), review2, changes, ready, hidden]), "2 to review · 1 changes requested")
+        XCTAssertEqual(Attention.breakdown([]), "")
+    }
+
+    func testBadgeModesAndHidden() {
+        let id = UUID()
+        var hidden = pr("H", account: id, roles: [.reviewRequested])
+        hidden.hidden = true
+        let prs = [pr("A", account: id, roles: [.reviewRequested]), pr("B", account: id, roles: [.commenter], events: [(t0, false)]), hidden]
+        XCTAssertFalse(Attention.isAttention(hidden))
+        XCTAssertEqual(Attention.badgeCount(prs, enabledAccounts: [id], mode: .allUnread), 2)
+        XCTAssertEqual(Attention.badgeCount(prs, enabledAccounts: [id], mode: .needsMe), 1)
+        XCTAssertEqual(Attention.badgeCount(prs, enabledAccounts: [id], mode: .off), 0)
+    }
 }

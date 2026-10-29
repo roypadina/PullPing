@@ -39,11 +39,13 @@ brew install --cask roypadina/tap/pullping
 
 - **Every pull request you are involved in, in one place.** Ones you opened, ones assigned to you, ones where your review is requested (directly or through a team), and ones where you commented, reviewed or were mentioned. Merged and closed ones stay listed for a few days.
 - **Several GitHub accounts at once.** Personal and work, each with its own token and a label you choose.
-- **Menu-bar panel.** Your pull requests in three groups (Mine, To Review, Involved), with CI status, review state, an unread dot and the latest activity on each row. The menu-bar icon shows how many need your attention.
-- **Main window.** Sidebar filters (All, Mine, To Review, Involved, Recently Closed, Muted, one entry per account), search, and a detail view with reviewers, checks and the recent activity of the selected pull request.
+- **Menu-bar panel.** Your pull requests in three groups (Mine, To Review, Involved), with CI status, review state, an unread dot and the latest activity on each row. Switch between All accounts and each account, and filter (Inbox, All, Mine, To Review, Involved, Recently Closed, Muted, Hidden). Right-click the icon for Refresh, Mark All as Read, Pause Notifications, Settings and Quit.
+- **A count that means something.** By default the menu-bar number counts only pull requests that need you: review requests, unread mentions, and your own pull requests with changes requested, failed CI, new comments, or ready to merge. The panel header spells it out ("2 to review · 1 ready to merge"). Or count everything unread, or show no number.
+- **Main window.** Mail-style sidebar: the same filters for All Accounts and for each account, with counts, then search and a detail view with reviewers, checks and the recent activity of the selected pull request. Prefer one inbox per account? Settings → General → Inbox → Per account.
+- **Phone notifications** through [ntfy](https://ntfy.sh), chosen per kind of event, separately from the desktop panels.
 - **Notifications that stay out of your way.** A small panel appears at the top right, never takes keyboard focus, and is grouped per pull request. Pick Off, Banner (hides itself) or Alert (stays) for each kind of event.
 - **Review reminders.** While your review is requested, PullPing nudges you again every so often until you review, the request is removed, or the pull request is merged or closed.
-- **Snooze, mute, mark as read, stop tracking.** All of them from the panel, the menu bar and the main window, with Undo for Stop Tracking.
+- **Snooze, mute, hide, mark as read, stop tracking.** All of them from the panel, the menu bar and the main window, with Undo for Hide and Stop Tracking. Hidden pull requests leave every list and count but still notify you.
 - **Keyboard friendly.** Arrow keys and Return in the panel, menu commands with shortcuts, VoiceOver announcements for new notifications.
 - **`pullping://` links** for Shortcuts and Raycast.
 - Universal binary, no third-party dependencies, no analytics.
@@ -92,7 +94,7 @@ open dist/PullPing.app
    [Accounts and tokens](#accounts-and-tokens).
 3. Click the menu-bar icon. **↩** opens the selected pull request in your browser, **⌘↩** opens it in the
    main window, **Esc** closes the panel. Right-click a row for Open in Browser, Mark as Read,
-   Mute, Snooze and Stop Tracking.
+   Mute, Hide, Snooze and Stop Tracking. Right-click the menu-bar icon for its menu (Pause Notifications included).
 4. The first sync of an account is silent: PullPing learns what already exists, and only tells
    you about what happens afterwards (plus review requests, assignments and mentions it finds).
 
@@ -142,6 +144,8 @@ app is never interrupted.
 - **On each panel:** **Open** (opens the pull request and marks it read), **Snooze** (15 minutes, 1 hour, 3 hours, tomorrow 9:00), **Mute PR**, and a close button.
 - **Review reminders:** while your review is requested on an open, non-draft pull request, the "Review requested" panel shows again every 15, 30, 60 (default), 120 or 240 minutes, or never. It stops when you review, the request is removed, the pull request is merged or closed, or you mute or snooze it.
 - **Mute** keeps a pull request listed but silences its panels and reminders and leaves it out of the menu-bar count. **Snooze** silences them for a while. **Stop Tracking** removes the pull request and ignores it from then on (Edit → Undo brings it back).
+- **Pause:** right-click the menu-bar icon → **Pause Notifications** for 1 hour, 3 hours or until tomorrow 9:00. Panels, phone notifications and reminders stay quiet until then.
+- **Phone (ntfy):** in **Settings → Phone**, enter a server (default `https://ntfy.sh`) and a topic, subscribe to the same topic in the ntfy phone app, then tick the kinds of event to send, for your own pull requests and for others. Nothing is sent until you tick one. Sends follow the same rules as panels (never your own actions, never muted, snoozed or paused pull requests) but ignore the desktop style, so a kind can go to the phone only. An optional access token (for a protected server) and a fallback topic URL (used when the server fails) are kept in your login keychain. **Send Test Notification** checks the setup.
 - Your own actions never notify you. An optional sound plays once when panels appear. Every action on a panel also exists in the menu-bar panel and the menus, for keyboard and VoiceOver use.
 
 ## Permissions
@@ -163,9 +167,9 @@ only through the toggle you turn on yourself.
 
 ## Privacy
 
-- **Tokens** live in your login keychain, one item per account (`com.padina.pullping.token.<id>`). They are sent only to GitHub and never written to a file or a log.
+- **Tokens** live in your login keychain, one item per account (`com.padina.pullping.token.<id>`). They are sent only to GitHub and never written to a file or a log. The optional ntfy access token and fallback topic URL live there too (`com.padina.pullping.ntfy-token`, `com.padina.pullping.ntfy-fallback`).
 - **Your data stays on your Mac** in `~/Library/Application Support/PullPing` (pull request titles, activity and your mute and snooze choices) and in the app's preferences.
-- **Only `api.github.com` and `github.com` are contacted** (the second only for Sign in with GitHub).
+- **Only `api.github.com` and `github.com` are contacted** (the second only for Sign in with GitHub), plus your ntfy server once you set up phone notifications: it receives the title, repository and latest activity of the pull requests you chose to send.
 - **No analytics, no telemetry, no crash reporting, no accounts on any other service.**
 
 ## Uninstall

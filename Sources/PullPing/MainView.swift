@@ -31,34 +31,46 @@ struct MainView: View {
     }
 }
 
+/// Mail pattern: unified = All Accounts, then one collapsed section per account; per account = expanded account sections only.
+/// Each row is a scope plus a filter, with the menu-bar count as its badge.
 struct SidebarView: View {
     @Bindable var store: Store
+    @State private var expanded: [UUID: Bool] = [:]
 
     var body: some View {
-        List(selection: $store.filter) {
-            ForEach(Filter.fixed, id: \.self) { filter in
-                Label(filter.title, systemImage: filter.symbol).tag(filter)
+        let unified = store.settings.inboxLayout == .unified
+        List(selection: Binding(get: { store.selection.map { _ in store.listSelection } }, set: { store.selection = $0 })) {
+            if unified {
+                Section("All Accounts") { rows(.all) }
             }
-            if !store.accounts.isEmpty {
-                Section("Accounts") {
-                    ForEach(store.accounts) { account in
-                        HStack(spacing: 6) {
-                            Label {
-                                Text(verbatim: "@\(account.login)")
-                            } icon: {
-                                Avatar(url: account.avatarURL)
-                            }
-                            Spacer(minLength: 0)
-                            if let status = store.statuses[account.id], status.isError {
-                                Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.bad)
-                                    .help(status.word).accessibilityLabel(status.word)
-                            } else if !account.enabled {
-                                Text("Off").font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                        .tag(Filter.account(account.id))
-                    }
+            ForEach(store.accounts) { account in
+                Section(isExpanded: Binding(get: { expanded[account.id] ?? !unified }, set: { expanded[account.id] = $0 })) {
+                    rows(.account(account.id))
+                } header: {
+                    header(account)
                 }
+            }
+        }
+    }
+
+    private func rows(_ scope: Scope) -> some View {
+        ForEach(Filter.allCases, id: \.self) { filter in
+            Label(filter.title, systemImage: filter.symbol)
+                .badge(store.count(scope, filter))
+                .tag(SidebarItem(scope: scope, filter: filter))
+        }
+    }
+
+    private func header(_ account: Account) -> some View {
+        HStack(spacing: 6) {
+            Avatar(url: account.avatarURL)
+            Text(verbatim: "@\(account.login)")
+            Spacer(minLength: 0)
+            if let status = store.statuses[account.id], status.isError {
+                Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.bad)
+                    .help(status.word).accessibilityLabel(status.word)
+            } else if !account.enabled {
+                Text("Off").font(.caption).foregroundStyle(.secondary)
             }
         }
     }
@@ -84,21 +96,24 @@ struct PRListView: View {
     @Binding var query: String
 
     private var rows: [TrackedPR] {
-        let filter = store.filter ?? .all
+        let item = store.listSelection
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        return store.prs.filter { pr in
-            filter.matches(pr) && (q.isEmpty || "\(pr.repo) #\(pr.number) \(pr.title) \(pr.authorLogin)".lowercased().contains(q))
+        return store.prs(item.scope, item.filter).filter { pr in
+            q.isEmpty || "\(pr.repo) #\(pr.number) \(pr.title) \(pr.authorLogin)".lowercased().contains(q)
         }
     }
 
     var body: some View {
+        let rows = rows
+        let filter = store.listSelection.filter
         List(selection: $store.selectedID) {
             ForEach(store.errorAccounts) { account in  // FLW-17: inline, with the fix one click away
                 AccountErrorRow(account: account, status: store.statuses[account.id] ?? .ok)
             }
-            ForEach(rows) { pr in
-                PRRow(pr: pr, account: store.login(for: pr), now: store.now).tag(pr.id)
-            }
+            PRRows(store: store, prs: rows, sectioned: filter == .inbox)
+        }
+        .onChange(of: rows.map(\.id), initial: true) { _, ids in  // the detail never shows a row the list doesn't
+            if let id = store.selectedID, !ids.contains(id) { store.selectedID = nil }
         }
         .contextMenu(forSelectionType: String.self) { ids in
             PRMenuItems(store: store, ids: ids)
@@ -110,7 +125,7 @@ struct PRListView: View {
                 if !query.isEmpty {
                     ContentUnavailableView.search(text: query)
                 } else {
-                    EmptyState(store: store, filter: store.filter ?? .all)
+                    EmptyState(store: store, filter: filter)
                 }
             }
         }
@@ -166,12 +181,38 @@ struct EmptyState: View {
             }
         } else if let first = store.firstSync.first {
             ProgressView { Text(verbatim: "Syncing @\(first.login)…") }
-        } else if filter == .all {
+        } else if filter == .all || filter == .inbox {
             ContentUnavailableView("No Pull Requests", systemImage: "arrow.triangle.pull",
                                    description: Text("Pull requests you open, review or comment on appear here."))
         } else {
             ContentUnavailableView("No Pull Requests", systemImage: filter.symbol,
                                    description: Text("Nothing in \(filter.title) right now."))
+        }
+    }
+}
+
+/// List rows; `sectioned` groups them Mine · To Review · Involved (the Inbox filter).
+struct PRRows: View {
+    let store: Store
+    let prs: [TrackedPR]
+    let sectioned: Bool
+
+    var body: some View {
+        if sectioned {
+            ForEach(PRGroup.allCases, id: \.self) { group in
+                let rows = prs.filter { Attention.group($0) == group }
+                if !rows.isEmpty {
+                    Section(group.title) { rowViews(rows) }
+                }
+            }
+        } else {
+            rowViews(prs)
+        }
+    }
+
+    private func rowViews(_ prs: [TrackedPR]) -> some View {
+        ForEach(prs) { pr in
+            PRRow(pr: pr, account: store.login(for: pr), now: store.now).tag(pr.id)
         }
     }
 }
@@ -221,9 +262,11 @@ struct PRMenuItems: View {
     var body: some View {
         if !ids.isEmpty {
             let muted = ids.allSatisfy { store.tracked.prs[$0]?.muted == true }
+            let hidden = ids.allSatisfy { store.tracked.prs[$0]?.hidden == true }
             Button("Open in Browser") { ids.forEach(store.open) }
             Button("Mark as Read") { store.markRead(ids) }
             Button(muted ? "Unmute" : "Mute") { store.setMuted(ids, !muted) }
+            Button(hidden ? "Unhide" : "Hide") { store.setHidden(ids, !hidden) }
             Menu("Snooze") {
                 ForEach(Snooze.allCases, id: \.self) { option in
                     Button(option.title) { store.snooze(ids, option) }
@@ -306,6 +349,7 @@ struct PRDetailView: View {
                 Button("Open in Browser") { store.open(pr.id) }.buttonStyle(.borderedProminent)
                 Button("Mark as Read") { store.markRead([pr.id]) }
                 Button(pr.muted ? "Unmute" : "Mute") { store.setMuted([pr.id], !pr.muted) }
+                Button(pr.hidden ? "Unhide" : "Hide") { store.setHidden([pr.id], !pr.hidden) }
                 Button("Stop Tracking") { store.stopTracking([pr.id]) }
             }
             .padding(.top, 4)
