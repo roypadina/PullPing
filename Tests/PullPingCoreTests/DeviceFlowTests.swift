@@ -49,8 +49,8 @@ final class DeviceFlowTests: XCTestCase {
         }
     }
 
-    func testHiddenWithoutClientID() {
-        XCTAssertEqual(GitHubOAuth.clientID, "")
-        XCTAssertFalse(GitHubOAuth.isAvailable)
+    func testAvailableWithClientID() {
+        XCTAssertFalse(GitHubOAuth.clientID.isEmpty)
+        XCTAssertTrue(GitHubOAuth.isAvailable)
     }
 }

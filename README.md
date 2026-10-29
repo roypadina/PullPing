@@ -126,10 +126,9 @@ one token each.
 If a classic token lacks `repo` and `public_repo`, PullPing still adds the account and shows
 "Missing repo scope" next to it.
 
-**Sign in with GitHub** (OAuth device flow) is shown next to the token option once an OAuth
-client id is configured in the source (`GitHubOAuth.clientID`); it is empty in this repository,
-so the option is hidden. You copy a short code, approve it on github.com, and PullPing gets a
-token without you creating one. Organizations that restrict OAuth apps block this token until an
+**Sign in with GitHub** (OAuth device flow) is the other option in Add Account. You copy a short
+code, approve it on github.com, and PullPing gets a token (scopes `repo` and `read:org`) without you
+creating one. Organizations that restrict OAuth apps block this token until an
 owner approves PullPing. Use a personal access token if a repository stays invisible.
 
 ## Notifications
@@ -160,7 +159,7 @@ only through the toggle you turn on yourself.
 - **Polling, not push.** PullPing asks GitHub every 1 to 15 minutes (3 by default), so an event can arrive up to one interval late. Refresh now (⌘R) checks immediately, at most once every 10 seconds. It also checks after wake and when the network comes back.
 - **Focus and Do Not Disturb are not detected.** macOS offers no API for it, so panels appear even during a Focus. Turn off notifications in Settings → Notifications to silence PullPing.
 - **Fine-grained tokens and CI.** CI status may be incomplete with fine-grained tokens; use a classic token when CI matters.
-- **Sign in with GitHub** works only in builds that have an OAuth client id configured. Personal access tokens always work.
+- **Sign in with GitHub** tokens can be blocked by organizations that restrict OAuth apps until an owner approves PullPing. Personal access tokens always work.
 - **GitHub.com only.** GitHub Enterprise Server is not supported yet.
 - **Rate limit.** GitHub gives each token a budget of 5,000 API points per hour; PullPing uses a small fraction. When a token runs low it pauses refreshing until the limit resets and shows "Rate limited" on the account.
 - **Not notarized.** See [First launch](#first-launch).
