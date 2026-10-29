@@ -48,9 +48,9 @@ public enum Ntfy {
         guard !config.topic.isEmpty, let server = URL(string: config.server) else { return false }
         let event = eventID(now)
         if await post(payload(message, topic: config.topic, event: event), to: server, token: config.token,
-                      event: event, logTopic: config.topic, transport: transport) { return true }
+                      event: event, logTopic: "primary", transport: transport) { return true }
         guard let fallback = fallbackTarget(config.fallbackURL) else { return false }
-        // The fallback topic name is a secret: never logged.
+        // Topic names are secrets (on ntfy.sh the topic is the only key): never logged.
         return await post(payload(message, topic: fallback.topic, event: event), to: fallback.root, token: "",
                           event: event, logTopic: "fallback", transport: transport)
     }

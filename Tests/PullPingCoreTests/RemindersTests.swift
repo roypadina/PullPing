@@ -25,6 +25,13 @@ final class RemindersTests: XCTestCase {
         XCTAssertEqual(Reminders.nextReminder(pr: pr, settings: settings, now: t0), t0.addingTimeInterval(7200))
     }
 
+    func testReRequestAfterLastReminderRestartsTheInterval() {
+        var pr = requested(at: t0.addingTimeInterval(86_400))  // re-requested a day after the last reminder
+        pr.lastReminderAt = t0
+        let now = t0.addingTimeInterval(86_400 + 30)
+        XCTAssertEqual(Reminders.nextReminder(pr: pr, settings: settings, now: now), t0.addingTimeInterval(86_400 + 3600))
+    }
+
     func testStops() {
         var off = settings
         off.reminderMinutes = 0

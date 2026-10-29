@@ -73,6 +73,28 @@ final class PollerTests: XCTestCase {
         XCTAssertEqual(third.stats.batches, 0)
     }
 
+    /// The search index lags the PR: a team request found by the requested search later, with no PR update, still lands.
+    func testTeamRequestFoundByALaggingSearchIsRefreshed() async throws {
+        github.prs["PR_3"] = .init(updatedAt: t0, node: prNode("PR_3", number: 3, author: "bob", updatedAt: t0, teams: ["core"]))
+        github.involved = ["PR_3"]
+        let poller = poller()
+        _ = await poller.poll(account: account)
+        XCTAssertFalse(store.state.prs["PR_3"]!.roles.contains(.teamReviewRequested))
+
+        clock.now = t0.addingTimeInterval(180)
+        github.requested = ["PR_3"]
+        let caughtUp = try await polled(poller)
+        XCTAssertEqual(refreshedIDs().last, ["PR_3"])
+        XCTAssertEqual(caughtUp.events.map(\.summary), ["via team core"])
+        XCTAssertTrue(store.state.prs["PR_3"]!.roles.contains(.teamReviewRequested))
+        let steady = try await polled(poller)
+        XCTAssertEqual(steady.stats.batches, 0)
+
+        github.requested = []  // request gone from the search: the role follows
+        _ = try await polled(poller)
+        XCTAssertFalse(store.state.prs["PR_3"]!.roles.contains(.teamReviewRequested))
+    }
+
     func testTrackedPRsMissingFromSearchAreStampedOrDropped() async throws {
         seed()
         let poller = poller()

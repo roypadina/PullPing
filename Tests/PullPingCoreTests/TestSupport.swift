@@ -80,9 +80,10 @@ final class FakeGitHub: @unchecked Sendable {
 
 /// A `Refresh` node; `timeline` is a JSON array body.
 func prNode(_ id: String, number: Int, author: String = "dana", updatedAt: Date, state: String = "OPEN", head: String = "aaa1111",
-            ci: String? = nil, requested: [String] = [], timeline: String = "") -> String {
+            ci: String? = nil, requested: [String] = [], teams: [String] = [], timeline: String = "") -> String {
     let rollup = ci.map { #"{ "state": "\#($0)", "contexts": { "nodes": [] } }"# } ?? "null"
-    let reviewRequests = requested.map { #"{ "requestedReviewer": { "__typename": "User", "login": "\#($0)" } }"# }.joined(separator: ",")
+    let reviewRequests = (requested.map { #"{ "requestedReviewer": { "__typename": "User", "login": "\#($0)" } }"# }
+        + teams.map { #"{ "requestedReviewer": { "__typename": "Team", "slug": "\#($0)" } }"# }).joined(separator: ",")
     return #"""
     { "id": "\#(id)", "number": \#(number), "title": "PR \#(number)", "url": "https://github.com/octo-org/widgets/pull/\#(number)",
       "isDraft": false, "state": "\#(state)", "merged": \#(state == "MERGED"), "mergedAt": null, "closedAt": \#(state == "OPEN" ? "null" : "\"\(iso(updatedAt))\""),

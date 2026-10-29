@@ -26,7 +26,9 @@ public enum EventEngine {
         let mergedMinutes = Set((nodes.filter { $0.type == "MergedEvent" }.map(\.at) + pr.events.filter { $0.kind == .merged }.map(\.at)).map(minute))
         let recent = now.addingTimeInterval(-86_400)
         var forcePushed = false
-        for node in nodes where !seen.contains(node.id) {
+        // A batch shares the oldest watermark, so older nodes come back; `seen` is capped and can't be the only dedupe.
+        let floor = old.map { $0.lastSeenAt.addingTimeInterval(-60) } ?? .distantPast
+        for node in nodes where !seen.contains(node.id) && node.at >= floor {
             let own = mine(node.actor)
             let mentionsMe = !own && mentions(node.body + "\n" + (node.commentBody ?? ""), meLower)
             let silent = own || (isNew && !(mentionsMe && node.at > recent))
@@ -72,7 +74,10 @@ public enum EventEngine {
         let isRequested = s.reviewers.contains { $0.requested && mine($0.login) }
         if isRequested && !wasRequested {
             add("rr:\(me):\(stamp)", .reviewRequested, s.authorLogin, now, "", s.url, silent: mine(s.authorLogin))
-        } else if !isRequested, inRequestedSearch, let team = s.requestedTeams.first(where: { !(old?.requestedTeams ?? []).contains($0) }) {
+        } else if !isRequested, inRequestedSearch,
+                  // A new team, or the first poll the (lagging) search confirms a team already on the PR.
+                  let team = s.requestedTeams.first(where: { !(old?.requestedTeams ?? []).contains($0) })
+                    ?? (old?.roles.contains(.teamReviewRequested) == false ? s.requestedTeams.first : nil) {
             add("rr:team/\(team):\(stamp)", .reviewRequested, s.authorLogin, now, "via team \(team)", s.url, silent: mine(s.authorLogin))
         }
         if s.assignees.contains(where: mine) && !(old?.assignees ?? []).contains(where: mine) {
@@ -85,7 +90,7 @@ public enum EventEngine {
         // Roles: requested/assigned follow the snapshot, the rest only grow.
         pr.roles.subtract([.reviewRequested, .teamReviewRequested, .assigned])
         if mine(s.authorLogin) { pr.roles.insert(.author) }
-        if isRequested { pr.roles.insert(.reviewRequested) } else if inRequestedSearch && !s.requestedTeams.isEmpty { pr.roles.insert(.teamReviewRequested) }
+        if isRequested { pr.roles.insert(.reviewRequested) } else if inRequestedSearch { pr.roles.insert(.teamReviewRequested) }  // teams can be invisible (no read:org)
         if s.assignees.contains(where: mine) { pr.roles.insert(.assigned) }
         if inReviewedSearch || s.reviewers.contains(where: { mine($0.login) && !$0.state.isEmpty }) { pr.roles.insert(.reviewer) }
         if s.timeline.contains(where: { $0.type == "IssueComment" && mine($0.actor) }) { pr.roles.insert(.commenter) }

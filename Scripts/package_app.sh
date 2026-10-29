@@ -18,7 +18,7 @@ cd "$ROOT_DIR"
 # Universal binary (Apple Silicon + Intel). The output dir differs per build system, so ask SwiftPM for it.
 BUILD_ARGS=(-c "$BUILD_CONFIG" --arch arm64 --arch x86_64)
 # Release builds must not embed the build machine's home path (public repo).
-[[ -n "$RELEASE" ]] && BUILD_ARGS+=(-Xswiftc "-file-prefix-map=$PWD=.")
+[[ -n "$RELEASE" ]] && BUILD_ARGS+=(-Xswiftc -file-prefix-map -Xswiftc "$PWD=.")
 swift build "${BUILD_ARGS[@]}"
 BIN_DIR="$(swift build "${BUILD_ARGS[@]}" --show-bin-path)"
 

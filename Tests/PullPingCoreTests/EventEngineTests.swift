@@ -191,6 +191,14 @@ final class EventEngineTests: XCTestCase {
         XCTAssertEqual(pr.lastSeenAt, t0.addingTimeInterval(500))
     }
 
+    func testNodesOlderThanTheWatermarkStaySilentAfterSeenEviction() {
+        var old = tracked()  // watermark t0
+        old.seenEventIDs = (0..<300).map { "newer-\($0)" }  // IC_old was evicted from the 300 cap
+        let s = snap(timeline: [node("IC_old", by: "alice", at: t0.addingTimeInterval(-7200)),
+                                node("IC_new", by: "alice", at: t0.addingTimeInterval(-30))])
+        XCTAssertEqual(diff(old, s).events.map(\.id), ["IC_new"])
+    }
+
     func testCaps() {
         var old = tracked()
         old.seenEventIDs = (0..<300).map { "old-\($0)" }

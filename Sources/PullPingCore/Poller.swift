@@ -63,8 +63,8 @@ public actor Poller {
     /// (offline changes send an empty report with `offline` set).
     public func start(accounts: @escaping @Sendable () async -> [Account], onReport: @escaping @Sendable (PollReport) async -> Void) {
         guard loop == nil else { return }
-        monitor.pathUpdateHandler = { path in
-            Task { await self.networkChanged(online: path.status == .satisfied, accounts: accounts, onReport: onReport) }
+        monitor.pathUpdateHandler = { _ in
+            Task { await self.networkChanged(accounts: accounts, onReport: onReport) }
         }
         monitor.start(queue: .global(qos: .utility))
         loop = Task {
@@ -79,7 +79,9 @@ public actor Poller {
     /// The App pauses on `willSleep` and resumes + polls (`.wake`) on `didWake`.
     public func setPaused(_ paused: Bool) { self.paused = paused }
 
-    private func networkChanged(online: Bool, accounts: @Sendable () async -> [Account], onReport: @Sendable (PollReport) async -> Void) async {
+    private func networkChanged(accounts: @Sendable () async -> [Account], onReport: @Sendable (PollReport) async -> Void) async {
+        // The current path, not the one the update carried: these Tasks can reach the actor out of order.
+        let online = monitor.currentPath.status == .satisfied
         guard isOffline == online else { return }
         isOffline = !online
         if online {
@@ -164,11 +166,13 @@ public actor Poller {
             for stamp in extra { stamps[stamp.id] = stamp }
             stats.dropped = dropped.count
 
-            // 3. Changed = new, updated, state changed, or CI still pending (CI completion does not bump updatedAt).
+            // 3. Changed = new, updated, state changed, or CI still pending (CI completion does not bump updatedAt),
+            // or the requested search disagrees with the team-request role (the search index lags the PR).
             // shortcut: a PR seen by two accounts is one entry, owned by whichever account refreshed it last.
             let changed = stamps.values.filter { stamp in
                 guard let old = before.prs[stamp.id] else { return true }
                 return old.updatedAt != stamp.updatedAt || old.state != stamp.state || (old.state == .open && old.ci == .pending)
+                    || (stamp.inRequested != old.roles.contains(.teamReviewRequested) && !old.roles.contains(.reviewRequested))
             }.map(\.id).sorted()
             let fresh = changed.filter { before.prs[$0] == nil }
             let known = changed.filter { before.prs[$0] != nil }
