@@ -169,7 +169,7 @@ only through the toggle you turn on yourself.
 
 - **Tokens** live in your login keychain, one item per account (`com.padina.pullping.token.<id>`). They are sent only to GitHub and never written to a file or a log. The optional ntfy access token and fallback topic URL live there too (`com.padina.pullping.ntfy-token`, `com.padina.pullping.ntfy-fallback`).
 - **Your data stays on your Mac** in `~/Library/Application Support/PullPing` (pull request titles, activity and your mute and snooze choices) and in the app's preferences.
-- **Only `api.github.com` and `github.com` are contacted** (the second only for Sign in with GitHub), plus your ntfy server once you set up phone notifications: it receives the title, repository and latest activity of the pull requests you chose to send.
+- **Only `api.github.com`, `github.com` and `avatars.githubusercontent.com` are contacted** (`github.com` only for Sign in with GitHub; the avatars host for account pictures), plus your ntfy server once you set up phone notifications: it receives the title, repository and latest activity of the pull requests you chose to send, and a footer line naming the sender as `pullping@<your Mac's short hostname>`.
 - **No analytics, no telemetry, no crash reporting, no accounts on any other service.**
 
 ## Uninstall

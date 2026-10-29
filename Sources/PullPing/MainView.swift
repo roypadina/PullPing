@@ -305,7 +305,7 @@ struct PRDetailView: View {
                     LabeledContent {
                         HStack {
                             Chip(text: Self.word(check.state), symbol: Self.symbol(check.state), tint: Self.tint(check.state))
-                            if let url = check.url { Link("Details", destination: url) }
+                            if let url = check.url, ["http", "https"].contains(url.scheme?.lowercased()) { Link("Details", destination: url) }
                         }
                     } label: {
                         Text(check.name)

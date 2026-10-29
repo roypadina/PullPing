@@ -17,8 +17,9 @@ GitHub under **Settings → Developer settings → Personal access tokens**.
 
 ## Scope
 
-PullPing runs on your Mac and talks only to `api.github.com` and `github.com`. It requests no
-elevated privileges and has no analytics. Relevant areas:
+PullPing runs on your Mac and talks only to `api.github.com`, `github.com` (Sign in with GitHub),
+`avatars.githubusercontent.com` (account pictures) and, if you set it up, your own ntfy server.
+It requests no elevated privileges and has no analytics. Relevant areas:
 
 - **Tokens:** stored as generic-password items in the login keychain through `/usr/bin/security`;
   never written to disk elsewhere, never logged.
