@@ -29,6 +29,10 @@ let package = Package(
             name: "PullPingCoreTests",
             dependencies: ["PullPingCore"],
             resources: [.copy("Fixtures")]
+        ),
+        .testTarget(
+            name: "PullPingScreenshotTests",
+            dependencies: ["PullPing", "PullPingCore"]
         )
     ]
 )
