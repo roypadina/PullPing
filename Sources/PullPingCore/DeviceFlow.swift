@@ -2,7 +2,7 @@ import Foundation
 
 /// OAuth App for "Sign in with GitHub". Empty client id hides the option; no client secret is needed.
 public enum GitHubOAuth {
-    public static let clientID = ""
+    public static let clientID = "Ov23lixF3eKwgYprABzQ"
     public static let scopes = "repo read:org"
     public static var isAvailable: Bool { !clientID.isEmpty }
 }

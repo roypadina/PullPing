@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-30
+
+### Added
+- Sign in with GitHub: add an account by approving a short code on github.com (OAuth device flow), no personal access token needed. Organizations that restrict OAuth apps may need an owner to approve PullPing first.
+
 ## [0.1.0] - 2026-10-29
 
 First release.
