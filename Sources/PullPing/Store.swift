@@ -210,9 +210,9 @@ final class Store {
     }
 
     /// The menu-bar number (Settings > General > Menu bar count).
-    var badgeCount: Int { Attention.badgeCount(Array(tracked.prs.values), enabledAccounts: enabledIDs, mode: settings.badgeMode) }
+    var badgeCount: Int { Attention.badgeCount(Array(tracked.prs.values), enabledAccounts: enabledIDs, mode: settings.badgeMode, counting: settings.badgeReasons) }
     /// "2 to review · 1 ready to merge": status panel header and the status item's label.
-    var breakdown: String { Attention.breakdown(prs) }
+    var breakdown: String { Attention.breakdown(prs, counting: settings.badgeReasons) }
     var isPaused: Bool { settings.isPaused(now) }
 
     func prs(_ scope: Scope, _ filter: Filter) -> [TrackedPR] { prs.filter { scope.matches($0) && filter.matches($0) } }
@@ -221,7 +221,7 @@ final class Store {
     func count(_ scope: Scope, _ filter: Filter = .all) -> Int {
         let enabled = enabledIDs, needsMe = settings.badgeMode == .needsMe
         return tracked.prs.values.filter {
-            enabled.contains($0.accountID) && scope.matches($0) && filter.matches($0) && (needsMe ? Attention.needsMe($0) : Attention.isAttention($0))
+            enabled.contains($0.accountID) && scope.matches($0) && filter.matches($0) && (needsMe ? Attention.needsMe($0, counting: settings.badgeReasons) : Attention.isAttention($0))
         }.count
     }
 
@@ -248,7 +248,7 @@ final class Store {
     var firstSync: [Account] { accounts.filter { $0.enabled && tracked.lastPollAt[$0.id] == nil } }
 
     func account(_ id: UUID) -> Account? { accounts.first { $0.id == id } }
-    func login(for pr: TrackedPR) -> String? { multiAccount ? account(pr.accountID).map { "@\($0.login)" } : nil }
+    func login(for pr: TrackedPR) -> String? { multiAccount ? account(pr.accountID).map(\.displayName) : nil }
 
     /// Status item accessibility label and tooltip (MBX-6): what the count means, and Pause.
     var menuBarLabel: String {
@@ -338,7 +338,8 @@ final class Store {
             guard let pr = tracked.prs[event.prID], enabledIDs.contains(pr.accountID), settings.pushesToPhone(event, pr: pr, now: now) else { continue }
             let message = Ntfy.Message(
                 title: "\(event.kind.label): \(pr.repo) #\(pr.number)",
-                body: pr.title + "\n" + (event.summary.isEmpty ? event.line : "\(event.actor): \(event.summary)"),
+                body: pr.title + "\n" + (event.summary.isEmpty ? event.line : "\(event.actor): \(event.summary)")
+                    + (login(for: pr).map { "\nAccount: \($0)" } ?? ""),
                 priority: settings.style(for: event.kind, mine: pr.roles.contains(.author)) == .alert ? 4 : 3,
                 tags: [event.kind.rawValue], click: pr.url, flow: "pr-event")
             Task { _ = await Ntfy.send(message, config: config, transport: URLSessionTransport()) }

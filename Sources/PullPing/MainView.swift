@@ -64,7 +64,7 @@ struct SidebarView: View {
     private func header(_ account: Account) -> some View {
         HStack(spacing: 6) {
             Avatar(url: account.avatarURL)
-            Text(verbatim: "@\(account.login)")
+            Text(verbatim: account.displayName)
             Spacer(minLength: 0)
             if let status = store.statuses[account.id], status.isError {
                 Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.bad)
@@ -154,7 +154,7 @@ struct AccountErrorRow: View {
     var body: some View {
         HStack {
             Label {
-                Text(verbatim: "@\(account.login): \(status.word)").lineLimit(2)
+                Text(verbatim: "\(account.displayName): \(status.word)").lineLimit(2)
             } icon: {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.bad)
             }
@@ -180,7 +180,7 @@ struct EmptyState: View {
                 Button("Add Account…") { SettingsWindow.shared.show(tab: "Accounts") }
             }
         } else if let first = store.firstSync.first {
-            ProgressView { Text(verbatim: "Syncing @\(first.login)…") }
+            ProgressView { Text(verbatim: "Syncing \(first.displayName)…") }
         } else if filter == .all || filter == .inbox {
             ContentUnavailableView("No Pull Requests", systemImage: "arrow.triangle.pull",
                                    description: Text("Pull requests you open, review or comment on appear here."))

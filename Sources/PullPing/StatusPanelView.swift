@@ -55,12 +55,11 @@ struct StatusPanelView: View {
             }
             HStack(spacing: 8) {
                 if store.accounts.count > 1 {
-                    Picker("Account", selection: Binding(get: { scope.key }, set: { account = $0 })) {
-                        if store.settings.inboxLayout == .unified { Text(segment("All", .all)).tag("") }
-                        ForEach(store.accounts) { Text(segment("@\($0.login)", .account($0.id))).tag($0.id.uuidString) }
+                    // Segments while they fit the 380 pt panel; a menu once names get long (no header overflow).
+                    ViewThatFits(in: .horizontal) {
+                        scopePicker(scope).pickerStyle(.segmented)
+                        scopePicker(scope).pickerStyle(.menu).fixedSize()
                     }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
                 }
                 Spacer(minLength: 0)
                 Menu {  // a Menu, not a menu Picker: that one is as wide as its longest item
@@ -80,7 +79,15 @@ struct StatusPanelView: View {
         .padding(12)
     }
 
-    /// "@dana 2": the count uses the menu-bar measure.
+    private func scopePicker(_ scope: Scope) -> some View {
+        Picker("Account", selection: Binding(get: { scope.key }, set: { account = $0 })) {
+            if store.settings.inboxLayout == .unified { Text(segment("All", .all)).tag("") }
+            ForEach(store.accounts) { Text(segment($0.displayName, .account($0.id))).tag($0.id.uuidString) }
+        }
+        .labelsHidden()
+    }
+
+    /// "Work 2": the count uses the menu-bar measure.
     private func segment(_ name: String, _ scope: Scope) -> String {
         let count = store.count(scope)
         return count > 0 ? "\(name) \(count)" : name
@@ -97,18 +104,30 @@ struct StatusPanelView: View {
             Button("Mark All as Read") { store.markAllRead() }
             Button("Dismiss All Notifications") { NotificationPanels.shared.dismissAll() }
             Divider()
+            // Same items as the right-click menu (StatusItem), so both menus match.
+            Menu("Pause Notifications") {
+                ForEach([("1 Hour", Snooze.hour1), ("3 Hours", .hours3), ("Until Tomorrow 9:00", .tomorrow)], id: \.0) { title, option in
+                    Button(title) { store.pause(until: option.until(from: Date())) }
+                }
+                Divider()
+                Button("Resume") { store.pause(until: nil) }.disabled(!store.settings.isPaused(Date()))
+            }
+            if store.settings.isPaused(Date()), let until = store.settings.pausedUntil {
+                Text("Paused until \(until.formatted(date: .omitted, time: .shortened))")
+            }
+            Divider()
             Button("Settings…") { SettingsWindow.shared.show() }.keyboardShortcut(",")
             Button("About PullPing") { AboutWindow.show() }
             Button("Support on Ko-fi ☕") { NSWorkspace.shared.open(AboutInfo.kofi) }
             Divider()
             Button("Quit PullPing") { NSApp.terminate(nil) }.keyboardShortcut("q")
         } label: {
-            Label("More", systemImage: "gearshape").labelStyle(.iconOnly)
+            Label("More", systemImage: "ellipsis.circle").labelStyle(.iconOnly)  // a menu, not Settings: no gear (SYM-2)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Settings, About and Quit")
+        .help("More: Open Window, Pause Notifications, Settings, Quit")
     }
 
     @ViewBuilder private func content(_ scope: Scope) -> some View {

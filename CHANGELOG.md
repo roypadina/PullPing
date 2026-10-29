@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-30
+
+### Added
+- Settings → General → Count in the Menu Bar: choose which reasons count toward the menu-bar number. Review requests from your team now have their own switch and their own line in the panel header.
+
+### Changed
+- Account names you set in Settings now show everywhere: the panel's account switch, row chips, notification panels, the main window sidebar, error lines and phone notifications ("Account: …").
+- The panel's menu button is now ⋯ (More) instead of a gear, with the same items as the right-click menu, including Pause Notifications.
+
+### Fixed
+- An empty "PullPing Settings" window could appear after closing Settings or reopening PullPing.
+- The panel header no longer overflows and clips with long account names; the account switch becomes a menu when it doesn't fit.
+
 ## [0.1.1] - 2026-10-30
 
 ### Added

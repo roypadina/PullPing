@@ -40,7 +40,7 @@ struct AccountsTab: View {
         }
         .formStyle(.grouped)
         .sheet(isPresented: $adding) { AddAccountSheet(store: store) }
-        .confirmationDialog(removing.map { "Remove @\($0.login)?" } ?? "", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
+        .confirmationDialog(removing.map { "Remove \($0.displayName)?" } ?? "", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
             Button("Remove", role: .destructive) { if let removing { store.removeAccount(removing.id) } }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -401,7 +401,22 @@ struct GeneralTab: View {
                 }
                 .pickerStyle(.radioGroup)
             } footer: {
-                Text("Need me: review requests, unread mentions, and your own pull requests with changes requested, failed CI, new comments, or ready to merge. Icon missing? Check System Settings > Menu Bar. Opening PullPing again from Applications shows the window.").formFooter()
+                Text("Icon missing? Check System Settings > Menu Bar. Opening PullPing again from Applications shows the window.").formFooter()
+            }
+            if store.settings.badgeMode == .needsMe {
+                Section {
+                    ForEach(NeedReason.allCases, id: \.self) { reason in
+                        Toggle(reason.settingsLabel, isOn: Binding(
+                            get: { store.settings.badgeReasons.contains(reason) },
+                            set: { on in
+                                if on { store.settings.badgeReasons.insert(reason) } else { store.settings.badgeReasons.remove(reason) }
+                            }))
+                    }
+                } header: {
+                    Text("Count in the Menu Bar")
+                } footer: {
+                    Text("Each pull request counts once. Muted, hidden, merged and closed pull requests never count.").formFooter()
+                }
             }
             Section {
                 Picker("Layout", selection: $store.settings.inboxLayout) {
@@ -430,5 +445,20 @@ struct GeneralTab: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+extension NeedReason {
+    /// Settings > General > Count in the Menu Bar.
+    var settingsLabel: String {
+        switch self {
+        case .toReview: "Review requested from me"
+        case .teamToReview: "Review requested from my team"
+        case .changesRequested: "Changes requested on my pull requests"
+        case .ciFailed: "CI failed on my pull requests"
+        case .mentioned: "Unread mentions of me"
+        case .newComments: "New comments or reviews on my pull requests"
+        case .readyToMerge: "My pull requests ready to merge"
+        }
     }
 }

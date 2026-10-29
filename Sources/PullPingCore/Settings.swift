@@ -36,6 +36,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var otherStyles = AppSettings.defaultOtherStyles
     public var inboxLayout = InboxLayout.unified
     public var badgeMode = BadgeMode.needsMe
+    /// What "Pull requests that need me" counts (Settings > General); all reasons by default.
+    public var badgeReasons = Set(NeedReason.allCases)
     /// Panels, phone pushes and reminders stay quiet until then.
     public var pausedUntil: Date?
     /// ntfy server and topic; the access token and the fallback topic URL live in the keychain.
@@ -63,6 +65,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         otherStyles = try value(.otherStyles, otherStyles)
         inboxLayout = try value(.inboxLayout, inboxLayout)
         badgeMode = try value(.badgeMode, badgeMode)
+        badgeReasons = try value(.badgeReasons, badgeReasons)
         pausedUntil = try c.decodeIfPresent(Date.self, forKey: .pausedUntil)
         ntfyServer = try value(.ntfyServer, ntfyServer)
         ntfyTopic = try value(.ntfyTopic, ntfyTopic)
