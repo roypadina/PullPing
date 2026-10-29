@@ -1,0 +1,54 @@
+name: Bug report
+description: Something isn't working as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Please **don't paste access tokens, or private repository or organization names** you'd rather keep out of a public issue. Use placeholders like `owner/repo`.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Add an account with a fine-grained token
+        2. Wait for the next check
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "15.3"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: PullPing version and install method
+      placeholder: "0.1.0, Homebrew"
+    validations:
+      required: true
+  - type: dropdown
+    id: token
+    attributes:
+      label: Token type
+      options:
+        - Classic personal access token
+        - Fine-grained personal access token
+        - Sign in with GitHub
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: status
+    attributes:
+      label: Account status (optional)
+      description: The status shown next to the account in Settings > Accounts, for example "Needs SSO" or "Missing repo scope".

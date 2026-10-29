@@ -1,0 +1,26 @@
+# Changelog
+
+All notable changes to PullPing are documented here.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.1.0] - 2026-10-29
+
+First release.
+
+### Added
+- Tracks every open pull request you are involved in, across any number of GitHub accounts: ones you opened, ones assigned to you, ones where your review is requested (directly or through a team), and ones where you commented, reviewed or were mentioned. Merged and closed pull requests stay listed for a few days (1, 3, 7 or 14, your choice).
+- Menu-bar panel with your pull requests in three groups (Mine, To Review, Involved), each row showing CI status, review state, draft, merged or closed, and an unread dot. The menu-bar icon shows how many need your attention.
+- Main window with a sidebar (All, Mine, To Review, Involved, Recently Closed, Muted, and one entry per account), search, and a detail view with reviewers, checks and the recent activity of each pull request.
+- Notifications for comments, mentions, reviews (approved, changes requested, commented), review requests, assignments, new commits, CI passed or failed, ready for review, converted to draft, merged, closed, reopened, dismissed reviews and title changes. Your own actions never notify you.
+- Notification panels that appear at the top right without taking keyboard focus, one per pull request, with a choice of Off, Banner (hides itself) or Alert (stays) for each kind of event, separately for your own pull requests and the ones you review or follow. Open, Snooze (15 minutes, 1 hour, 3 hours, tomorrow 9:00), Mute and Dismiss are one click away; an optional sound plays when a panel appears.
+- Review reminders: while your review is requested on an open, non-draft pull request, PullPing reminds you again every 15 to 240 minutes (every 60 by default) until you review it, the request is removed, or it is merged or closed.
+- Mark as read, mute (keeps the row, silences panels and reminders), snooze, and Stop Tracking with Undo.
+- Accounts with personal access tokens (classic or fine-grained), checked when you add them, with a clear status when a token is rejected, lacks a scope, needs SSO approval or hits the rate limit. "Sign in with GitHub" (device flow) appears once an OAuth client id is configured. Tokens live in your login keychain.
+- Settings for how often to check GitHub (1 to 15 minutes, 3 by default), how long to keep merged and closed pull requests, launch at login, and showing the menu-bar icon.
+- `pullping://` links: `open`, `open?pr=<id>`, `refresh` and `settings`, for Shortcuts and Raycast.
+- Welcome and About windows, with a link to support the project on Ko-fi.
+- Universal app (Apple Silicon and Intel) for macOS 14 or later.
