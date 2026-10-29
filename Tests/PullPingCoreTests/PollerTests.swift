@@ -1,0 +1,150 @@
+import XCTest
+@testable import PullPingCore
+
+final class PollerTests: XCTestCase {
+    let account = Account(login: "dana")
+    let github = FakeGitHub()
+    let clock = Clock()
+    var store = StateStore(url: nil)
+
+    func poller(_ transport: GraphQLTransport? = nil) -> Poller {
+        let clock = clock
+        return Poller(transport: transport ?? github.transport, tokenProvider: { _ in "test-token" }, state: store, settings: { AppSettings() }, now: { clock.now })
+    }
+
+    /// PR_1: mine, CI pending. PR_2: bob's, requests my review.
+    func seed() {
+        github.prs["PR_1"] = .init(updatedAt: t0, node: prNode("PR_1", number: 1, updatedAt: t0, ci: "PENDING"))
+        github.prs["PR_2"] = .init(updatedAt: t0, node: prNode("PR_2", number: 2, author: "bob", updatedAt: t0, requested: [me]))
+        github.involved = ["PR_1", "PR_2"]
+        github.requested = ["PR_2"]
+    }
+
+    func polled(_ poller: Poller) async throws -> AccountResult {
+        let result = await poller.poll(account: account)
+        return try XCTUnwrap(result)
+    }
+
+    func refreshedIDs() -> [[String]] {
+        github.transport.requests.map(FakeTransport.operation).filter { $0.name == "Refresh" }.map { $0.variables["ids"] as! [String] }
+    }
+
+    func testBaselineThenIncrementalPoll() async throws {
+        seed()
+        let poller = poller()
+        let first = try await polled(poller)
+        XCTAssertEqual(first.status, .ok)
+        XCTAssertTrue(first.stats.baseline)
+        XCTAssertTrue(first.events.isEmpty)  // first sync is silent, even the review request
+        XCTAssertEqual([first.stats.changed, first.stats.new, first.stats.batches, first.stats.refreshed], [2, 2, 1, 2])
+        XCTAssertEqual(store.state.prs["PR_2"]?.roles, [.reviewRequested])
+        XCTAssertEqual(store.state.prs["PR_1"]?.lastReadAt, t0)  // baseline = read
+        XCTAssertEqual(Attention.group(store.state.prs["PR_2"]!), .toReview)
+
+        // alice comments on PR_2; PR_1 is unchanged but its CI is still pending.
+        clock.now = t0.addingTimeInterval(180)
+        let comment = #"{ "__typename": "IssueComment", "id": "IC_1", "createdAt": "\#(iso(t0.addingTimeInterval(100)))", "url": null, "body": "Ready?", "author": { "login": "alice" } }"#
+        github.prs["PR_2"] = .init(updatedAt: t0.addingTimeInterval(100),
+                                   node: prNode("PR_2", number: 2, author: "bob", updatedAt: t0.addingTimeInterval(100), requested: [me], timeline: comment))
+        let report = await poller.pollAll(accounts: [account], reason: .timer)
+        let result = try XCTUnwrap(report.results[account.id])
+        XCTAssertFalse(result.stats.baseline)
+        XCTAssertEqual(result.stats.tracked, 2)
+        XCTAssertEqual(report.events.map(\.id), ["IC_1"])
+        XCTAssertEqual(report.events.first?.prID, "PR_2")
+        XCTAssertEqual(refreshedIDs().last, ["PR_1", "PR_2"])
+        let since = FakeTransport.operation(github.transport.requests.last!).variables["since"] as? String
+        XCTAssertEqual(since, iso(t0.addingTimeInterval(-60)))  // min watermark − 60 s
+        XCTAssertEqual(Attention.unread(store.state.prs["PR_2"]!), 1)
+    }
+
+    /// CI completion does not bump updatedAt: a stored pending CI keeps the PR in the changed set.
+    func testPendingCIIsRefreshedUntilItSettles() async throws {
+        seed()
+        let poller = poller()
+        _ = await poller.poll(account: account)
+        github.prs["PR_1"]?.node = prNode("PR_1", number: 1, updatedAt: t0, ci: "SUCCESS")
+        let second = try await polled(poller)
+        XCTAssertEqual(second.stats.changed, 1)
+        XCTAssertEqual(second.events.map(\.kind), [.ciPassed])
+        XCTAssertEqual(second.events.first?.id, "ci:aaa1111:success")
+        let third = try await polled(poller)
+        XCTAssertEqual(third.stats.changed, 0)
+        XCTAssertEqual(third.stats.batches, 0)
+    }
+
+    func testTrackedPRsMissingFromSearchAreStampedOrDropped() async throws {
+        seed()
+        let poller = poller()
+        _ = await poller.poll(account: account)
+        // PR_1 merged (left the open search), PR_2 deleted.
+        github.involved = []
+        github.requested = []
+        github.prs["PR_1"] = .init(updatedAt: t0.addingTimeInterval(50), state: "MERGED",
+                                   node: prNode("PR_1", number: 1, updatedAt: t0.addingTimeInterval(50), state: "MERGED"))
+        github.prs["PR_2"] = nil
+        let result = try await polled(poller)
+        XCTAssertEqual(result.stats.dropped, 1)
+        XCTAssertEqual(Set(store.state.prs.keys), ["PR_1"])
+        XCTAssertEqual(store.state.prs["PR_1"]?.state, .merged)
+        XCTAssertEqual(store.state.prs["PR_1"]?.closedAt, t0.addingTimeInterval(50))
+    }
+
+    func testIgnoredPRsAreNotTracked() async {
+        seed()
+        store.update { $0.ignoredIDs = ["PR_2"] }
+        _ = await poller().poll(account: account)
+        XCTAssertEqual(Set(store.state.prs.keys), ["PR_1"])
+    }
+
+    func testBusyAccountIsSkipped() async throws {
+        seed()
+        let slow = FakeTransport(delay: 300_000_000) { [github] in github.reply($0) }
+        let poller = poller(slow)
+        let first = Task { await poller.poll(account: account) }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let skipped = await poller.poll(account: account)
+        XCTAssertNil(skipped)
+        let finished = await first.value
+        XCTAssertNotNil(finished)
+    }
+
+    func testFailureBacksOffTimerPolls() async {
+        XCTAssertEqual(Poller.backoff(failures: 1, interval: 180), 360)
+        XCTAssertEqual(Poller.backoff(failures: 2, interval: 180), 720)
+        XCTAssertEqual(Poller.backoff(failures: 9, interval: 180), 1800)
+
+        seed()
+        github.failing = true
+        let poller = poller()
+        let failed = await poller.pollAll(accounts: [account], reason: .timer)
+        XCTAssertEqual(failed.results[account.id]?.status, .failed("HTTP 500"))
+        clock.now = t0.addingTimeInterval(300)  // inside the 360 s backoff
+        let skipped = await poller.pollAll(accounts: [account], reason: .timer)
+        XCTAssertTrue(skipped.results.isEmpty)
+        github.failing = false
+        let manual = await poller.pollAll(accounts: [account], reason: .manual)
+        XCTAssertEqual(manual.results[account.id]?.status, .ok)
+        let tooSoon = await poller.pollAll(accounts: [account], reason: .manual)
+        XCTAssertTrue(tooSoon.results.isEmpty)  // manual refresh at most every 10 s
+    }
+
+    func testLowRateLimitSkipsRefresh() async throws {
+        seed()
+        github.remaining = 120
+        let result = try await polled(poller())
+        XCTAssertEqual(result.status, .rateLimited(resetAt: t0.addingTimeInterval(3600)))
+        XCTAssertTrue(refreshedIDs().isEmpty)
+    }
+
+    func testDisabledAccountsAndMissingTokens() async {
+        seed()
+        var disabled = account
+        disabled.enabled = false
+        let none = await poller().pollAll(accounts: [disabled], reason: .manual)
+        XCTAssertTrue(none.results.isEmpty)
+        let noToken = Poller(transport: github.transport, tokenProvider: { _ in nil }, state: store, settings: { AppSettings() })
+        let result = await noToken.poll(account: account)
+        XCTAssertEqual(result?.status, .badToken)
+    }
+}

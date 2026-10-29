@@ -1,0 +1,9 @@
+{
+  "data": {
+    "search": {
+      "pageInfo": { "hasNextPage": false, "endCursor": null },
+      "nodes": [ { "id": "PR_4", "updatedAt": "2026-10-28T12:00:00Z" } ]
+    },
+    "rateLimit": { "cost": 1, "remaining": 4989, "resetAt": "2026-10-29T11:00:00Z" }
+  }
+}

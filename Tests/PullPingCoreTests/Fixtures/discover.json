@@ -1,0 +1,24 @@
+{
+  "data": {
+    "viewer": { "login": "dana" },
+    "involved": {
+      "issueCount": 3,
+      "pageInfo": { "hasNextPage": true, "endCursor": "cursor-1" },
+      "nodes": [
+        { "id": "PR_1", "updatedAt": "2026-10-29T10:00:00Z" },
+        { "id": "PR_2", "updatedAt": "2026-10-29T09:00:00Z" }
+      ]
+    },
+    "requested": {
+      "issueCount": 1,
+      "pageInfo": { "hasNextPage": false, "endCursor": null },
+      "nodes": [ { "id": "PR_3", "updatedAt": "2026-10-29T08:00:00Z" } ]
+    },
+    "reviewed": {
+      "issueCount": 1,
+      "pageInfo": { "hasNextPage": false, "endCursor": null },
+      "nodes": [ { "id": "PR_2", "updatedAt": "2026-10-29T09:00:00Z" } ]
+    },
+    "rateLimit": { "cost": 1, "remaining": 4990, "resetAt": "2026-10-29T11:00:00Z" }
+  }
+}

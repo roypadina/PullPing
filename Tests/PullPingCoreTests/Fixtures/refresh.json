@@ -1,0 +1,55 @@
+{
+  "data": {
+    "nodes": [
+      {
+        "id": "PR_1", "number": 1, "title": "Add widget cache", "url": "https://github.com/octo-org/widgets/pull/1",
+        "isDraft": false, "state": "OPEN", "merged": false, "mergedAt": null, "closedAt": null,
+        "updatedAt": "2026-10-29T10:00:00Z", "headRefOid": "abc1234def5678", "body": "Adds a cache. cc @carol",
+        "reviewDecision": "CHANGES_REQUESTED", "mergeStateStatus": "BLOCKED",
+        "author": { "login": "dana", "avatarUrl": "https://avatars.githubusercontent.com/u/1" },
+        "repository": { "nameWithOwner": "octo-org/widgets", "url": "https://github.com/octo-org/widgets", "isPrivate": false },
+        "assignees": { "nodes": [ { "login": "dana" } ] },
+        "reviewRequests": { "nodes": [
+          { "requestedReviewer": { "__typename": "User", "login": "carol" } },
+          { "requestedReviewer": { "__typename": "Team", "slug": "core", "name": "Core" } },
+          { "requestedReviewer": { "__typename": "Bot" } }
+        ] },
+        "latestReviews": { "nodes": [
+          { "author": { "login": "alice" }, "state": "APPROVED", "submittedAt": "2026-10-29T09:10:00Z", "url": "https://github.com/octo-org/widgets/pull/1#pullrequestreview-1" },
+          { "author": { "login": "bob" }, "state": "CHANGES_REQUESTED", "submittedAt": "2026-10-29T09:20:00Z", "url": "https://github.com/octo-org/widgets/pull/1#pullrequestreview-2" }
+        ] },
+        "commits": { "nodes": [ { "commit": {
+          "oid": "abc1234def5678", "committedDate": "2026-10-29T08:00:00Z", "author": { "user": { "login": "dana" }, "name": "Dana" },
+          "statusCheckRollup": { "state": "FAILURE", "contexts": { "nodes": [
+            { "__typename": "CheckRun", "name": "build", "conclusion": "SUCCESS", "status": "COMPLETED", "detailsUrl": "https://github.com/octo-org/widgets/actions/runs/1" },
+            { "__typename": "CheckRun", "name": "lint", "conclusion": null, "status": "IN_PROGRESS", "detailsUrl": null },
+            { "__typename": "CheckRun", "name": "docs", "conclusion": "SKIPPED", "status": "COMPLETED", "detailsUrl": null },
+            { "__typename": "StatusContext", "context": "ci/legacy", "state": "ERROR", "targetUrl": "https://ci.example.com/1" }
+          ] } }
+        } } ] },
+        "timelineItems": {
+          "pageInfo": { "hasNextPage": false, "endCursor": "t-1" },
+          "nodes": [
+            { "__typename": "IssueComment", "id": "IC_1", "createdAt": "2026-10-29T09:00:00Z", "url": "https://github.com/octo-org/widgets/pull/1#issuecomment-1", "body": "Looks good\nsecond line", "author": { "login": "alice" } },
+            { "__typename": "PullRequestReview", "id": "PRR_1", "submittedAt": "2026-10-29T09:10:00Z", "url": "https://github.com/octo-org/widgets/pull/1#pullrequestreview-1", "body": "LGTM", "state": "APPROVED", "author": { "login": "alice" }, "comments": { "totalCount": 0, "nodes": [] } },
+            { "__typename": "PullRequestReview", "id": "PRR_3", "submittedAt": "2026-10-29T09:15:00Z", "url": "https://github.com/octo-org/widgets/pull/1#pullrequestreview-3", "body": "", "state": "COMMENTED", "author": { "login": "bob" }, "comments": { "totalCount": 3, "nodes": [ { "body": "Rename this\nplease", "path": "Sources/Cache.swift" } ] } },
+            { "__typename": "PullRequestReview", "id": "PRR_4", "submittedAt": null, "url": "https://github.com/octo-org/widgets/pull/1#pullrequestreview-4", "body": "", "state": "PENDING", "author": { "login": "dana" }, "comments": { "totalCount": 0, "nodes": [] } },
+            { "__typename": "ReadyForReviewEvent", "id": "RFR_1", "createdAt": "2026-10-29T08:30:00Z", "actor": { "login": "dana" } },
+            { "__typename": "ConvertToDraftEvent", "id": "CTD_1", "createdAt": "2026-10-29T08:20:00Z", "actor": { "login": "dana" } },
+            { "__typename": "MergedEvent", "id": "ME_1", "createdAt": "2026-10-29T09:50:00Z", "actor": { "login": "carol" } },
+            { "__typename": "ClosedEvent", "id": "CE_1", "createdAt": "2026-10-29T09:50:10Z", "actor": { "login": "carol" } },
+            { "__typename": "ReopenedEvent", "id": "RE_1", "createdAt": "2026-10-29T09:55:00Z", "actor": { "login": "carol" } },
+            { "__typename": "HeadRefForcePushedEvent", "id": "HFP_1", "createdAt": "2026-10-29T08:40:00Z", "actor": null, "afterCommit": { "abbreviatedOid": "abc1234" } },
+            { "__typename": "ReviewDismissedEvent", "id": "RD_1", "createdAt": "2026-10-29T09:30:00Z", "actor": { "login": "bob" } },
+            { "__typename": "RenamedTitleEvent", "id": "RT_1", "createdAt": "2026-10-29T08:10:00Z", "actor": { "login": "dana" }, "currentTitle": "Add widget cache" }
+          ]
+        }
+      },
+      null
+    ],
+    "rateLimit": { "cost": 1, "remaining": 4987, "resetAt": "2026-10-29T11:00:00Z" }
+  },
+  "errors": [
+    { "type": "FORBIDDEN", "path": ["nodes", 1], "message": "Resource protected by organization SAML enforcement. You must grant your Personal Access token access to this organization." }
+  ]
+}

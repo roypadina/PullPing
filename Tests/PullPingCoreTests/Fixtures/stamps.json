@@ -1,0 +1,12 @@
+{
+  "data": {
+    "nodes": [
+      { "id": "PR_5", "updatedAt": "2026-10-28T15:00:00Z", "state": "MERGED" },
+      null
+    ],
+    "rateLimit": { "cost": 1, "remaining": 4988, "resetAt": "2026-10-29T11:00:00Z" }
+  },
+  "errors": [
+    { "type": "NOT_FOUND", "path": ["nodes", 1], "message": "Could not resolve to a node with the global id of 'PR_6'" }
+  ]
+}
