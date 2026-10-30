@@ -2,7 +2,7 @@ import ServiceManagement
 import SwiftUI
 
 /// First-launch welcome (MBX-18): where the icon is, what a notification looks like, how to get back in
-/// without the icon (MBX-8, MBX-9), and the login item (MBX-17). Shown once from AppDelegate.
+/// without the icon (MBX-8, MBX-9), and the login item (MBX-17). Shown once from AppDelegate, and again from "Welcome Guide…".
 @MainActor
 enum WelcomeWindow {
     private static var window: NSWindow?
@@ -17,6 +17,11 @@ enum WelcomeWindow {
             w.isReleasedWhenClosed = false
             w.center()
             window = w
+            // Release on close: a kept-alive window keeps the login toggle's activation subscription running.
+            Task { @MainActor in
+                for await _ in NotificationCenter.default.notifications(named: NSWindow.willCloseNotification, object: w) { break }
+                window = nil
+            }
         }
         if let window { AccessoryWindows.shared.show(window) }
     }
@@ -28,7 +33,14 @@ struct WelcomeView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Welcome to PullPing").font(.title2.bold())
+            HStack(alignment: .top, spacing: 12) {
+                Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 56, height: 56).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Welcome to PullPing").font(.title2.bold())
+                    Text("Pull request emails get buried and reviews wait on you without you knowing. PullPing tracks every pull request you are part of, across your GitHub accounts, and tells you when something happens.")
+                        .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
             row("arrow.triangle.pull", "PullPing lives in the menu bar.",
                 "Click its icon for your pull requests: Mine, To Review and Involved. A number shows how many need you.")
             row("bell.badge", "Notifications stay out of your way.",
@@ -36,6 +48,7 @@ struct WelcomeView: View {
             row("questionmark.circle", "Icon missing?",
                 "Open PullPing again from Applications to get the window, or check System Settings > Menu Bar.")
             LaunchAtLoginToggle()
+            SupportBox()
             HStack {
                 Button("Add Account…", action: onAddAccount)
                 Spacer()
@@ -43,7 +56,7 @@ struct WelcomeView: View {
             }
         }
         .padding(24)
-        .frame(width: 420)
+        .frame(width: 440)
     }
 
     private func row(_ symbol: String, _ title: String, _ detail: String) -> some View {
@@ -53,6 +66,24 @@ struct WelcomeView: View {
                 Text(title).font(.headline)
                 Text(detail).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+}
+
+/// Free-and-open-source note with the Ko-fi link; the welcome window's own next step stays the primary action.
+struct SupportBox: View {
+    var body: some View {
+        GroupBox {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Free and open source").font(.headline)
+                    Text("If PullPing saves you time, a coffee on Ko-fi keeps the next one coming.")
+                        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Link("Support on Ko-fi ☕", destination: AboutInfo.kofi).buttonStyle(.bordered)
+            }
+            .padding(4)
         }
     }
 }

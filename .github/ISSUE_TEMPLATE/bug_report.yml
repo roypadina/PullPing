@@ -33,7 +33,7 @@ body:
     id: version
     attributes:
       label: PullPing version and install method
-      placeholder: "0.1.2, Homebrew"
+      placeholder: "0.2.0, Homebrew"
     validations:
       required: true
   - type: dropdown

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-30
+
+### Added
+- The welcome window now says why PullPing exists and shows the app icon, a Ko-fi support box and a wider layout.
+- **Welcome Guide…** in Settings → General → About reopens the welcome window.
+
 ## [0.1.2] - 2026-10-30
 
 ### Added
