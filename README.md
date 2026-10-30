@@ -21,6 +21,8 @@ check, a request for your review.
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-support-F16061?logo=ko-fi&logoColor=white)](https://ko-fi.com/roypadina)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
+<img src="docs/demo.gif" alt="PullPing in action: the menu bar counts the pull requests that need you, a review request arrives as a panel that stays until you close it, and the status panel lists Mine, To Review and Involved, then just the Work account." width="720">
+
 <br>
 
 ```bash
