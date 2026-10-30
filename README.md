@@ -72,8 +72,8 @@ PullPing. Or clear quarantine once:
 xattr -dr com.apple.quarantine /Applications/PullPing.app
 ```
 
-A **Welcome** window then offers to open PullPing at login (you can change it later in
-Settings → General); PullPing never adds itself silently.
+A **Welcome** window then explains where PullPing lives and offers to open it at login (you can change it later in
+Settings → General); PullPing never adds itself silently. **Settings → General → About → Welcome Guide…** opens it again.
 
 ### Build from source
 
