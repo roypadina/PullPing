@@ -69,13 +69,17 @@ public struct TimelineNode: Codable, Sendable, Equatable {
     public var commentCount = 0
     public var commentPath: String?
     public var commentBody: String?
-    /// HeadRefForcePushedEvent: abbreviated oid; RenamedTitleEvent: the new title.
+    /// HeadRefForcePushedEvent: abbreviated oid; RenamedTitleEvent: the new title; LabeledEvent/UnlabeledEvent: the label name;
+    /// ClosedEvent (issues): the state reason in words ("not planned").
     public var detail: String?
 }
 
-/// Normalized output of `Refresh` for one PR.
+/// Normalized output of `Refresh` for one PR or issue.
 public struct PRSnapshot: Codable, Sendable, Equatable {
     public let id: String
+    public var isIssue = false
+    /// Issues: COMPLETED, NOT_PLANNED, DUPLICATE, REOPENED; nil for pull requests.
+    public var stateReason: String?
     public var repo = ""
     public var number = 0
     public var title = ""
@@ -100,9 +104,13 @@ public struct PRSnapshot: Codable, Sendable, Equatable {
     public init(id: String) { self.id = id }
 }
 
+/// A tracked pull request, or an issue (`isIssue`): issues leave the pull-request-only fields empty.
 public struct TrackedPR: Identifiable, Codable, Sendable, Equatable {
     public let id: String  // GraphQL node id
     public var accountID: UUID
+    @FalseIfMissing public var isIssue = false
+    /// Issues: COMPLETED, NOT_PLANNED, DUPLICATE, REOPENED; nil for pull requests.
+    public var stateReason: String?
     public var repo = ""  // owner/name
     public var number = 0
     public var title = ""
@@ -157,7 +165,7 @@ extension KeyedDecodingContainer {
 
 public enum EventKind: String, Codable, Sendable, CaseIterable, CodingKeyRepresentable {
     case comment, mentioned, reviewApproved, reviewChangesRequested, reviewCommented, reviewRequested, assigned, newCommits,
-         ciPassed, ciFailed, readyForReview, convertedToDraft, merged, closed, reopened, reviewDismissed, retitled, reviewReminder
+         ciPassed, ciFailed, readyForReview, convertedToDraft, merged, closed, reopened, reviewDismissed, retitled, labeled, reviewReminder
 }
 
 public struct PREvent: Identifiable, Codable, Sendable, Equatable {
@@ -183,6 +191,8 @@ public struct TrackedState: Codable, Sendable, Equatable {
     public var prs: [String: TrackedPR] = [:]
     public var ignoredIDs: Set<String> = []
     public var baselinedAccounts: Set<UUID> = []
+    /// Accounts whose issues have had their silent first sync; nil in files from before issue tracking.
+    public var baselinedIssueAccounts: Set<UUID>?
     public var lastPollAt: [UUID: Date] = [:]
     public init() {}
 }

@@ -3,9 +3,9 @@ import Foundation
 /// Status panel sections; a PR is in exactly one, checked in this order.
 public enum PRGroup: String, Sendable, CaseIterable { case mine, toReview, involved }
 
-/// Why a pull request needs me, in breakdown order; the raw value is the breakdown wording.
+/// Why a pull request or issue needs me, in breakdown order; the raw value is the breakdown wording.
 public enum NeedReason: String, Codable, Sendable, CaseIterable {
-    case toReview = "to review", teamToReview = "team review", changesRequested = "changes requested", ciFailed = "CI failed"
+    case toReview = "to review", teamToReview = "team review", assigned, changesRequested = "changes requested", ciFailed = "CI failed"
     case mentioned, newComments = "with new comments", readyToMerge = "ready to merge"
 }
 
@@ -23,17 +23,18 @@ public enum Attention {
         !pr.muted && !pr.hidden && (unread(pr) > 0 || awaitingMyReview(pr))
     }
 
-    /// Open, shown, unmuted, and: my review is awaited (directly or via a team), an unread mention, or I'm the author and it
-    /// has changes requested, failed CI, unread comments or reviews, or is ready to merge. Only reasons in `counting`
-    /// (Settings > General) apply; the first match wins, so each pull request counts once.
+    /// Open, shown, unmuted, and: my review is awaited (directly or via a team), an unread assignment or mention, or I'm the
+    /// author (of an issue: or assignee) and it has changes requested, failed CI, unread comments or reviews, or is ready
+    /// to merge. Only reasons in `counting` (Settings > General) apply; the first match wins, so each item counts once.
     public static func needReason(_ pr: TrackedPR, counting: Set<NeedReason> = Set(NeedReason.allCases)) -> NeedReason? {
         guard pr.state == .open, !pr.muted, !pr.hidden else { return nil }
         let unread = pr.events.filter { !$0.isOwn && $0.at > (pr.lastReadAt ?? .distantPast) }
-        let mine = pr.roles.contains(.author), reviewable = !pr.isDraft
+        let mine = pr.roles.contains(.author) || (pr.isIssue && pr.roles.contains(.assigned)), reviewable = !pr.isDraft
         let talk: Set<EventKind> = [.comment, .reviewApproved, .reviewChangesRequested, .reviewCommented]
         let checks: [(NeedReason, Bool)] = [
             (.toReview, reviewable && pr.roles.contains(.reviewRequested)),
             (.teamToReview, reviewable && pr.roles.contains(.teamReviewRequested)),
+            (.assigned, unread.contains { $0.kind == .assigned }),
             (.changesRequested, mine && pr.reviewDecision == "CHANGES_REQUESTED"),
             (.ciFailed, mine && pr.ci == .failure),
             (.mentioned, unread.contains { $0.kind == .mentioned }),

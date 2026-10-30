@@ -7,7 +7,7 @@ public enum PollReason: Sendable { case timer, manual, wake, networkBack, accoun
 /// Counts for logs and smoke mode.
 public struct PollStats: Sendable, Equatable {
     public var login = ""
-    public var involved = 0, requested = 0, reviewed = 0, pages = 0, discoverCost = 0
+    public var involved = 0, requested = 0, reviewed = 0, issues = 0, pages = 0, discoverCost = 0
     public var tracked = 0, changed = 0, new = 0, dropped = 0
     public var batches = 0, refreshed = 0, refreshCost = 0
     public var rateLimit: RateLimit?
@@ -151,16 +151,17 @@ public actor Poller {
         guard let token = tokenProvider(account), !token.isEmpty else { return AccountResult(status: .badToken, events: [], stats: stats) }
         let client = GitHubClient(transport: transport, token: token)
         do {
-            // 1. Discover open PRs.
-            let found = try await client.discover()
+            // 1. Discover open PRs (and open issues unless tracking them is off).
+            let trackIssues = settings().trackIssues
+            let found = try await client.discover(issues: trackIssues)
             stats.login = found.login
-            (stats.involved, stats.requested, stats.reviewed, stats.pages) = (found.involved, found.requested, found.reviewed, found.pages)
+            (stats.involved, stats.requested, stats.reviewed, stats.issues, stats.pages) = (found.involved, found.requested, found.reviewed, found.issues, found.pages)
             stats.discoverCost = client.cost
             let before = store.state
             var stamps = found.stamps.filter { !before.ignoredIDs.contains($0.key) }
 
             // 2. Stamps for tracked PRs the searches missed (closed ones in retention, search lag).
-            let tracked = before.prs.values.filter { $0.accountID == account.id }
+            let tracked = before.prs.values.filter { $0.accountID == account.id && (trackIssues || !$0.isIssue) }
             stats.tracked = tracked.count
             let (extra, dropped) = try await client.stamps(tracked.map(\.id).filter { stamps[$0] == nil })
             for stamp in extra { stamps[stamp.id] = stamp }
@@ -213,6 +214,18 @@ public actor Poller {
                 }
                 StateStore.prune(&state, retentionDays: retention, now: t)
                 state.lastPollAt[account.id] = t
+                // Issues came after accounts were baselined: an account's first poll that tracks them is silent for issues.
+                var issueAccounts = state.baselinedIssueAccounts ?? []
+                let issueBaseline = trackIssues && issueAccounts.insert(account.id).inserted
+                if !trackIssues {
+                    issueAccounts.remove(account.id)
+                    state.prs = state.prs.filter { !($0.value.isIssue && $0.value.accountID == account.id) }
+                }
+                state.baselinedIssueAccounts = issueAccounts
+                if issueBaseline {
+                    for (id, pr) in state.prs where pr.isIssue && pr.accountID == account.id { state.prs[id]?.lastReadAt = t }
+                    events.removeAll { state.prs[$0.prID]?.isIssue == true }
+                }
                 guard state.baselinedAccounts.insert(account.id).inserted else { return false }
                 for id in state.prs.keys where state.prs[id]?.accountID == account.id { state.prs[id]?.lastReadAt = t }
                 return true

@@ -44,12 +44,14 @@ public enum EventEngine {
                 if mentionsMe { add("mention:" + node.id, .mentioned, node.actor, node.at, reviewSummary(node), node.url, silent: silent) }
             case "ClosedEvent":
                 if mergedMinutes.contains(minute(node.at)) { seen.insert(node.id); pr.seenEventIDs.append(node.id) }  // merged says it
-                else { add(node.id, .closed, node.actor, node.at, "", s.url, silent: silent) }
+                else { add(node.id, .closed, node.actor, node.at, node.detail.map { "as \($0)" } ?? "", s.url, silent: silent) }
             case "HeadRefForcePushedEvent":
                 forcePushed = true
                 add(node.id, .newCommits, node.actor, node.at, "force-pushed \(node.detail ?? "")", s.url, silent: silent)
             case "RenamedTitleEvent":
                 add(node.id, .retitled, node.actor, node.at, node.detail ?? "", s.url, silent: silent)
+            case "LabeledEvent", "UnlabeledEvent":
+                add(node.id, .labeled, node.actor, node.at, (node.type == "LabeledEvent" ? "added " : "removed ") + (node.detail ?? ""), s.url, silent: silent)
             default:
                 if let kind = simple[node.type] { add(node.id, kind, node.actor, node.at, "", s.url, silent: silent) }
             }
@@ -96,6 +98,8 @@ public enum EventEngine {
         if s.timeline.contains(where: { $0.type == "IssueComment" && mine($0.actor) }) { pr.roles.insert(.commenter) }
 
         pr.accountID = accountID
+        pr.isIssue = s.isIssue
+        pr.stateReason = s.stateReason
         pr.repo = s.repo
         pr.number = s.number
         pr.title = s.title

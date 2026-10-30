@@ -311,28 +311,30 @@ struct PRDetailView: View {
     var body: some View {
         List {
             header
-            Section("Reviewers") {
-                if pr.reviewers.isEmpty && pr.requestedTeams.isEmpty {
-                    Text("No reviewers").foregroundStyle(.secondary)
+            if !pr.isIssue {  // reviewers and checks are pull request only
+                Section("Reviewers") {
+                    if pr.reviewers.isEmpty && pr.requestedTeams.isEmpty {
+                        Text("No reviewers").foregroundStyle(.secondary)
+                    }
+                    ForEach(pr.reviewers, id: \.login) { reviewer in
+                        let look = Self.review(reviewer)
+                        LabeledContent { Chip(text: look.word, symbol: look.symbol, tint: look.tint) } label: { Text(verbatim: "@\(reviewer.login)") }
+                    }
+                    ForEach(pr.requestedTeams, id: \.self) { team in
+                        LabeledContent { Chip(text: "Requested", symbol: "clock", tint: Theme.needsYou) } label: { Text(verbatim: "team/\(team)") }
+                    }
                 }
-                ForEach(pr.reviewers, id: \.login) { reviewer in
-                    let look = Self.review(reviewer)
-                    LabeledContent { Chip(text: look.word, symbol: look.symbol, tint: look.tint) } label: { Text(verbatim: "@\(reviewer.login)") }
-                }
-                ForEach(pr.requestedTeams, id: \.self) { team in
-                    LabeledContent { Chip(text: "Requested", symbol: "clock", tint: Theme.needsYou) } label: { Text(verbatim: "team/\(team)") }
-                }
-            }
-            Section("Checks") {
-                if pr.checks.isEmpty { Text("No checks").foregroundStyle(.secondary) }
-                ForEach(Array(pr.checks.enumerated()), id: \.offset) { _, check in
-                    LabeledContent {
-                        HStack {
-                            Chip(text: Self.word(check.state), symbol: Self.symbol(check.state), tint: Self.tint(check.state))
-                            if let url = check.url, ["http", "https"].contains(url.scheme?.lowercased()) { Link("Details", destination: url) }
+                Section("Checks") {
+                    if pr.checks.isEmpty { Text("No checks").foregroundStyle(.secondary) }
+                    ForEach(Array(pr.checks.enumerated()), id: \.offset) { _, check in
+                        LabeledContent {
+                            HStack {
+                                Chip(text: Self.word(check.state), symbol: Self.symbol(check.state), tint: Self.tint(check.state))
+                                if let url = check.url, ["http", "https"].contains(url.scheme?.lowercased()) { Link("Details", destination: url) }
+                            }
+                        } label: {
+                            Text(check.name)
                         }
-                    } label: {
-                        Text(check.name)
                     }
                 }
             }

@@ -225,7 +225,7 @@ struct AddAccountSheet: View {
 
 struct NotificationsTab: View {
     @Bindable var store: Store
-    static let height: CGFloat = 640  // plan height; the 17-row table scrolls
+    static let height: CGFloat = 640  // plan height; the 18-row table scrolls
     private static let kinds = EventKind.allCases.filter { $0 != .reviewReminder }
     private static let column: CGFloat = 112
 
@@ -260,11 +260,11 @@ struct NotificationsTab: View {
                 HStack(spacing: 8) {
                     Text("Notify Me About")
                     Spacer()
-                    Text("My Pull Requests").frame(width: Self.column, alignment: .trailing)
+                    Text("Mine").frame(width: Self.column, alignment: .trailing)
                     Text("Others").frame(width: Self.column, alignment: .trailing)
                 }
             } footer: {
-                Text("Others: pull requests you review, are assigned to, are mentioned in or comment on. A banner hides after a few seconds; an alert stays until you act on it.").formFooter()
+                Text("Mine: pull requests and issues you opened. Others: ones you review, are assigned to, are mentioned in or comment on. A banner hides after a few seconds; an alert stays until you act on it.").formFooter()
             }
             .disabled(!store.settings.notificationsEnabled)
             Section {
@@ -282,7 +282,7 @@ struct NotificationsTab: View {
     }
 
     private func stylePicker(_ kind: EventKind, mine: Bool) -> some View {
-        Picker("\(kind.label), \(mine ? "my pull requests" : "others")", selection: Binding(
+        Picker("\(kind.label), \(mine ? "mine" : "others")", selection: Binding(
             get: { store.settings.style(for: kind, mine: mine) },
             set: { if mine { store.settings.styles[kind] = $0 } else { store.settings.otherStyles[kind] = $0 } })) {
             Text("Off").tag(NotificationStyle.off)
@@ -299,7 +299,7 @@ struct NotificationsTab: View {
 
 /// ntfy pushes (MeetAlert pattern): server and topic in settings, access token and fallback URL in the keychain.
 struct PhoneTab: View {
-    static let height: CGFloat = 640  // plan height; the 17-row table scrolls
+    static let height: CGFloat = 640  // plan height; the 18-row table scrolls
     @Bindable var store: Store
     @State private var sending = false
     @State private var testResult: Bool?
@@ -345,13 +345,13 @@ struct PhoneTab: View {
                 HStack(spacing: 8) {
                     Text("Send to Phone")
                     Spacer()
-                    Text("My Pull Requests").frame(width: Self.column, alignment: .trailing)
+                    Text("Mine").frame(width: Self.column, alignment: .trailing)
                     Text("Others").frame(width: Self.column, alignment: .trailing)
                 }
             } footer: {
                 Text(!store.settings.notificationsEnabled ? "Notifications are off in Settings > Notifications, so nothing is sent."
                      : store.settings.ntfyTopic.isEmpty ? "Add a topic to choose what goes to your phone."
-                     : "Sent whatever the desktop style, except for your own actions and muted, snoozed or paused pull requests. Review reminders follow Review requested.").formFooter()
+                     : "Mine: pull requests and issues you opened. Others: ones you review, are assigned to, are mentioned in or comment on. Sent whatever the desktop style, except for your own actions and muted, snoozed or paused ones. Review reminders follow Review requested.").formFooter()
             }
             .disabled(!store.settings.notificationsEnabled || store.settings.ntfyTopic.isEmpty)
         }
@@ -360,7 +360,7 @@ struct PhoneTab: View {
 
     private func checkbox(_ kind: EventKind, mine: Bool) -> some View {
         let kinds = mine ? \AppSettings.phoneMine : \AppSettings.phoneOthers
-        return Toggle("\(kind.label), \(mine ? "my pull requests" : "others")", isOn: Binding(
+        return Toggle("\(kind.label), \(mine ? "mine" : "others")", isOn: Binding(
             get: { store.settings[keyPath: kinds].contains(kind) },
             set: { if $0 { store.settings[keyPath: kinds].insert(kind) } else { store.settings[keyPath: kinds].remove(kind) } }))
         .toggleStyle(.checkbox)
@@ -415,7 +415,7 @@ struct GeneralTab: View {
                 } header: {
                     Text("Count in the Menu Bar")
                 } footer: {
-                    Text("Each pull request counts once. Muted, hidden, merged and closed pull requests never count.").formFooter()
+                    Text("Each pull request or issue counts once. Muted, hidden, merged and closed ones never count.").formFooter()
                 }
             }
             Section {
@@ -429,13 +429,19 @@ struct GeneralTab: View {
             } footer: {
                 Text("Unified lists all accounts together, then each account. Per account lists each account on its own.").formFooter()
             }
-            Section("Tracking") {
+            Section {
+                Toggle("Track Issues", isOn: $store.settings.trackIssues).controlSize(.mini)
+                    .onChange(of: store.settings.trackIssues) { store.refresh() }  // the next poll adds or drops them
                 Picker("Keep merged and closed pull requests for", selection: $store.settings.retentionDays) {
                     ForEach(AppSettings.retentionOptions, id: \.self) { Text($0 == 1 ? "1 day" : "\($0) days").tag($0) }
                 }
                 // Last row of the section (SET-9); Edit > Undo reverses it (UND-4).
                 Button("Reset Ignored Pull Requests (\(store.ignoredCount))", role: .destructive) { store.resetIgnored() }
                     .disabled(store.ignoredCount == 0)
+            } header: {
+                Text("Tracking")
+            } footer: {
+                Text("Track Issues adds open issues you opened, are assigned to, are mentioned in or comment on. Turning it off removes them from the lists.").formFooter()
             }
             Section("About") {
                 HStack {
@@ -455,10 +461,11 @@ extension NeedReason {
         switch self {
         case .toReview: "Review requested from me"
         case .teamToReview: "Review requested from my team"
+        case .assigned: "Assigned to me"
         case .changesRequested: "Changes requested on my pull requests"
         case .ciFailed: "CI failed on my pull requests"
         case .mentioned: "Unread mentions of me"
-        case .newComments: "New comments or reviews on my pull requests"
+        case .newComments: "New comments or reviews on my pull requests and issues"
         case .readyToMerge: "My pull requests ready to merge"
         }
     }

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-30
+
+### Added
+- **Issues.** Open issues you opened, are assigned to, are mentioned in or commented on are tracked next to your pull requests, with an **Issue** chip on their rows. Comments, mentions, assignments, renames, reopening and closing notify like pull request events; a closed issue shows **Completed** or **Not planned**. Settings → General → Track Issues turns them off and removes them from the lists. Issues you were already involved in arrive quietly, marked read.
+- **Label changes** on pull requests and issues: a new **Labels changed** kind in Settings → Notifications and Phone (banner on yours, off for others by default).
+- **Assigned to me** in Settings → General → Count in the Menu Bar: an unread assignment, on a pull request or an issue, counts toward the menu-bar number. New comments on an issue assigned to you count as new comments.
+
+### Changed
+- The Notifications and Phone tables call their first column **Mine**: pull requests and issues you opened.
+- Upgrade only: a 0.3.0 build cannot read state or settings written by this version (state moves to state.broken.json, settings reset).
+
 ## [0.3.0] - 2026-10-30
 
 ### Changed

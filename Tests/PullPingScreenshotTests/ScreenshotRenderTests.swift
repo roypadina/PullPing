@@ -29,6 +29,8 @@ final class ScreenshotRenderTests: XCTestCase {
                      NSSize(width: Theme.panelWidth + 40, height: Theme.panelHeight + 40))
             try save("notification-alert", panel(PanelModel(pr: pr("PR_2"), events: pr("PR_2").events, alert: true, account: "@dana")),
                      NSSize(width: Theme.panelWidth + 40, height: Theme.panelHeight + 40))
+            try save("notification-issue", panel(PanelModel(pr: pr("I_1"), events: pr("I_1").events, alert: false, account: "@dana")),
+                     NSSize(width: Theme.panelWidth + 40, height: Theme.panelHeight + 40))
             try save("settings-accounts", AccountsTab(store: store), NSSize(width: 520, height: AccountsTab.height))
             try save("settings-notifications", NotificationsTab(store: store), NSSize(width: 520, height: NotificationsTab.height))
             try save("settings-phone", PhoneTab(store: store), NSSize(width: 520, height: PhoneTab.height))

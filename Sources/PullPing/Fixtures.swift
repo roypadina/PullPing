@@ -101,6 +101,33 @@ enum Fixtures {
                 $0.reviewers = [ReviewSummary(login: "dana-work", state: "APPROVED", submittedAt: ago(400), requested: false)]
                 $0.events = [event("E11", "PR_8", .reviewApproved, "dana-work", 400, "", own: true)]
             },
+            // Issues: mine with an unread comment (needs me), one assigned and completed, one closed as not planned.
+            pr("I_1", personal, "octo-org/widgets", 134, "Crash when the sync folder is renamed", author: "dana", roles: [.author]) {
+                $0.isIssue = true
+                $0.url = URL(string: "https://github.com/octo-org/widgets/issues/134")!
+                $0.mergeState = ""
+                $0.events = [event("E12", "I_1", .labeled, "alice", 30, "added bug"),
+                             event("E13", "I_1", .comment, "erin", 3, "Same here on macOS 14.6, logs attached.")]
+            },
+            pr("I_2", work, "octo-org/gadgets", 61, "Upload stalls on slow networks", author: "carol", roles: [.assigned]) {
+                $0.isIssue = true
+                $0.url = URL(string: "https://github.com/octo-org/gadgets/issues/61")!
+                $0.mergeState = ""
+                $0.state = .closed
+                $0.stateReason = "COMPLETED"
+                $0.closedAt = ago(240)
+                $0.events = [event("E14", "I_2", .assigned, "carol", 2000, ""),
+                             event("E15", "I_2", .closed, "carol", 240, "as completed")]
+            },
+            pr("I_3", work, "octo-org/docs", 20, "Add a dark mode screenshot to the README", author: "erin", roles: [.commenter]) {
+                $0.isIssue = true
+                $0.url = URL(string: "https://github.com/octo-org/docs/issues/20")!
+                $0.mergeState = ""
+                $0.state = .closed
+                $0.stateReason = "NOT_PLANNED"
+                $0.closedAt = ago(900)
+                $0.events = [event("E16", "I_3", .closed, "bob", 900, "as not planned")]
+            },
         ]
     }
 }

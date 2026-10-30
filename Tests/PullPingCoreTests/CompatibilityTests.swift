@@ -14,6 +14,9 @@ final class CompatibilityTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent("state.broken.json").path))
         let pr = try XCTUnwrap(state.prs["PR_1"])
         XCTAssertFalse(pr.hidden)
+        XCTAssertFalse(pr.isIssue)
+        XCTAssertNil(pr.stateReason)
+        XCTAssertNil(state.baselinedIssueAccounts)  // issue baseline still to come
         XCTAssertTrue(pr.muted)
         XCTAssertEqual(pr.events.count, 1)
         XCTAssertEqual(state.ignoredIDs, ["PR_9"])
@@ -31,6 +34,20 @@ final class CompatibilityTests: XCTestCase {
         XCTAssertEqual(settings.ntfyTopic, "")
         XCTAssertEqual(settings.phoneMine, [])
         XCTAssertEqual(settings.phoneOthers, [])
+        XCTAssertTrue(settings.trackIssues)
+        XCTAssertEqual(settings.style(for: .labeled, mine: true), .banner)
+        XCTAssertEqual(settings.style(for: .labeled, mine: false), .off)
+    }
+
+    /// Reasons saved before issue tracking gain `assigned`; a later choice to turn it off sticks.
+    func testAssignedReasonMigration() throws {
+        let old = try JSONDecoder().decode(AppSettings.self, from: Data(#"{ "badgeReasons": ["to review", "mentioned"] }"#.utf8))
+        XCTAssertEqual(old.badgeReasons, [.toReview, .mentioned, .assigned])
+        var mine = old
+        mine.badgeReasons.remove(.assigned)
+        let again = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(mine))
+        XCTAssertEqual(again.badgeReasons, [.toReview, .mentioned])
+        XCTAssertTrue(again.trackIssues)
     }
 
     func testOldAccountsLoad() throws {
