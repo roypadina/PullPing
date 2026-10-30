@@ -166,6 +166,41 @@ final class EventEngineTests: XCTestCase {
         XCTAssertEqual(kinds, [.readyForReview, .convertedToDraft, .closed, .reopened, .reviewDismissed, .retitled])
     }
 
+    func testLabelEventsOnPullRequests() {
+        var added = node("LE_1", "LabeledEvent", by: "alice", at: t0)
+        added.detail = "bug"
+        var removed = node("UNLE_1", "UnlabeledEvent", by: "alice", at: t0.addingTimeInterval(1))
+        removed.detail = "needs-triage"
+        let events = diff(tracked(), snap(timeline: [added, removed])).events
+        XCTAssertEqual(events.map(\.kind), [.labeled, .labeled])
+        XCTAssertEqual(events.map(\.summary), ["added bug", "removed needs-triage"])
+        XCTAssertFalse(events.contains(where: \.isOwn))
+    }
+
+    func testIssueClosedReasonLabelsAndAssignment() {
+        var s = snap(author: me)
+        s.isIssue = true
+        let old = tracked(s)
+        XCTAssertTrue(old.isIssue)
+        var closed = node("CE_1", "ClosedEvent", by: "alice", at: t0)
+        closed.detail = "not planned"
+        var label = node("LE_1", "LabeledEvent", by: "alice", at: t0.addingTimeInterval(1))
+        label.detail = "wontfix"
+        s.timeline = [closed, label]
+        s.state = .closed
+        s.stateReason = "NOT_PLANNED"
+        s.assignees = [me]
+        let (pr, events) = diff(old, s)
+        XCTAssertEqual(events.map(\.kind), [.closed, .labeled, .assigned])
+        XCTAssertEqual(events.map(\.summary), ["as not planned", "added wontfix", ""])
+        XCTAssertTrue(pr.isIssue)
+        XCTAssertEqual(pr.stateReason, "NOT_PLANNED")
+        XCTAssertTrue(pr.roles.isSuperset(of: [.author, .assigned]))
+        // A pull request's ClosedEvent carries no reason.
+        let prClosed = diff(tracked(), snap(timeline: [node("CE_2", "ClosedEvent", by: "bob", at: t0)])).events
+        XCTAssertEqual(prClosed.map(\.summary), [""])
+    }
+
     func testRequestRemovedDropsRoleWithoutEvent() {
         let old = diff(tracked(), snap(requested: [me]), requestedSearch: true).pr
         XCTAssertTrue(old.roles.contains(.reviewRequested))

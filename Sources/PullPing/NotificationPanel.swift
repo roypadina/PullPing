@@ -168,7 +168,7 @@ final class NotificationPanels {
 
     /// The panel is never key and the app never active, so VoiceOver gets an announcement (A11Y-6), ≤ 1 per 0.5 s.
     private func announce(_ model: PanelModel) {
-        let text = model.moreCount.map { "\($0) more pull requests need attention" }
+        let text = model.moreCount.map { "\($0) more need attention" }
             ?? "\(model.events.last?.kind.label ?? "Update"): \(model.pr.repo) number \(model.pr.number), \(model.pr.title)"
         let at = max(Date(), nextAnnouncement)
         nextAnnouncement = at.addingTimeInterval(0.5)
@@ -233,7 +233,7 @@ struct NotificationContent: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
                 if let more = model.moreCount {
-                    Label("\(more) more pull requests need attention", systemImage: "tray.full")
+                    Label("\(more) more need attention", systemImage: "tray.full")
                         .font(.callout.weight(.semibold)).foregroundStyle(hue)
                 } else {
                     Label(kindLine, systemImage: latest?.kind.symbol ?? "bell")
@@ -262,14 +262,14 @@ struct NotificationContent: View {
                     Label(model.moreCount == nil ? "Open" : "Open Window", systemImage: "arrow.up.right.square")
                 }
                 .buttonStyle(SignalButtonStyle(signal: hue, prominent: true))
-                .help(model.moreCount == nil ? "Open the pull request in the browser" : "Open the PullPing window")
+                .help(model.moreCount == nil ? "Open the \(noun) in the browser" : "Open the PullPing window")
                 if model.moreCount == nil {
                     Button("Snooze…", action: onSnooze)
                         .buttonStyle(SignalButtonStyle(signal: hue))
-                        .help("Snooze this pull request")
-                    Button("Mute PR", action: onMute)
+                        .help("Snooze this \(noun)")
+                    Button(model.pr.isIssue ? "Mute Issue" : "Mute PR", action: onMute)
                         .buttonStyle(SignalButtonStyle(signal: hue))
-                        .help("Stop notifications and reminders for this pull request")
+                        .help("Stop notifications and reminders for this \(noun)")
                 }
                 Spacer(minLength: 4)
                 if let account = model.account { Chip(text: account, symbol: "person.crop.circle").fixedSize() }
@@ -284,6 +284,8 @@ struct NotificationContent: View {
         .onTapGesture(perform: onOpen)  // body click = Open; the Open button is the accessible path
         .onHover(perform: onHover)
     }
+
+    private var noun: String { model.pr.isIssue ? "issue" : "pull request" }
 
     private var kindLine: String {
         let kinds = model.events.map(\.kind.verb)

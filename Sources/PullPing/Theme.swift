@@ -52,6 +52,7 @@ extension EventKind {
         case .reopened: ("Reopened", "reopened", "arrow.uturn.left.circle", Theme.neutral)
         case .reviewDismissed: ("Review dismissed", "dismissed a review", "hand.raised.slash", Theme.neutral)
         case .retitled: ("Title changed", "renamed", "pencil", Theme.neutral)
+        case .labeled: ("Labels changed", "changed labels", "tag", Theme.neutral)
         case .reviewReminder: ("Reminder: review requested", "reminder", "bell.badge", Theme.needsYou)
         }
     }
@@ -81,11 +82,14 @@ struct Chip: View {
 }
 
 extension TrackedPR {
-    /// State, review decision, CI and muted chips, in reading order.
+    /// Issue, state, review decision, CI and muted chips, in reading order. Pull requests carry no kind chip.
     var chips: [Chip] {
         var chips: [Chip] = []
+        if isIssue { chips.append(Chip(text: "Issue", symbol: "smallcircle.filled.circle")) }
         switch state {
         case .merged: chips.append(Chip(text: "Merged", symbol: "arrow.triangle.merge", tint: Theme.merged))
+        case .closed where isIssue && stateReason == "COMPLETED": chips.append(Chip(text: "Completed", symbol: "checkmark.circle", tint: Theme.merged))
+        case .closed where isIssue && stateReason == "NOT_PLANNED": chips.append(Chip(text: "Not planned", symbol: "slash.circle"))
         case .closed: chips.append(Chip(text: "Closed", symbol: "xmark.circle"))
         case .open: if isDraft { chips.append(Chip(text: "Draft", symbol: "circle.dashed")) }
         }

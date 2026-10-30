@@ -4,7 +4,7 @@ extension GitHubClient {
     static let refreshBatch = 20
     static let maxTimelinePages = 10
 
-    /// Full refresh of ≤ 20 PRs (the caller batches); a PR with more timeline gets follow-up calls alone.
+    /// Full refresh of ≤ 20 PRs or issues (the caller batches); one with more timeline gets follow-up calls alone.
     /// Null nodes are skipped (the next `stamps` call drops them).
     public func refresh(_ ids: [String], since: Date?) async throws -> [PRSnapshot] {
         let since: Any = since?.ISO8601Format() ?? NSNull()
@@ -34,14 +34,16 @@ extension GitHubClient {
         s.url = raw.url
         s.authorLogin = raw.author?.login ?? "ghost"
         s.body = raw.body
-        s.isDraft = raw.isDraft
-        s.state = raw.merged ? .merged : PRState(rawValue: raw.state.lowercased()) ?? .open
+        s.isIssue = raw.__typename == "Issue"
+        s.isDraft = raw.isDraft ?? false
+        s.state = raw.merged == true ? .merged : PRState(rawValue: (raw.state ?? raw.issueState ?? "").lowercased()) ?? .open
+        s.stateReason = raw.stateReason
         s.reviewDecision = raw.reviewDecision
-        s.mergeState = raw.mergeStateStatus
+        s.mergeState = raw.mergeStateStatus ?? ""
         s.updatedAt = raw.updatedAt
         s.closedAt = raw.closedAt ?? raw.mergedAt
-        s.headOID = raw.headRefOid
-        let commit = raw.commits.items.first?.commit
+        s.headOID = raw.headRefOid ?? ""
+        let commit = raw.commits?.items.first?.commit
         s.headAuthorLogin = commit?.author?.user?.login ?? commit?.author?.name
         s.ci = CIState(rollup: commit?.statusCheckRollup?.state)
         s.checks = commit?.statusCheckRollup?.contexts.items.map { c in
@@ -69,7 +71,8 @@ extension GitHubClient {
         return TimelineNode(id: id, type: item.__typename, at: at, actor: (item.author ?? item.actor)?.login ?? "ghost",
                             body: item.body ?? "", url: item.url.flatMap(URL.init(string:)), reviewState: item.state,
                             commentCount: item.comments?.totalCount ?? 0, commentPath: comment?.path, commentBody: comment?.body,
-                            detail: item.afterCommit?.abbreviatedOid ?? item.currentTitle)
+                            detail: item.afterCommit?.abbreviatedOid ?? item.currentTitle ?? item.label?.name
+                                ?? item.stateReason.map { $0.lowercased().replacingOccurrences(of: "_", with: " ") })
     }
 }
 

@@ -98,6 +98,38 @@ final class AttentionTests: XCTestCase {
         XCTAssertEqual(Attention.breakdown([]), "")
     }
 
+    func testAssignedAndIssueReasons() {
+        func event(_ kind: EventKind) -> PREvent { PREvent(id: kind.rawValue, prID: "X", kind: kind, actor: "alice", at: t0, summary: "", url: nil, isOwn: false) }
+        func issue(_ roles: Set<Role>, _ kinds: [EventKind]) -> TrackedPR {
+            var p = pr("X", roles: roles)
+            p.isIssue = true
+            p.events = kinds.map(event)
+            return p
+        }
+        // An unread assignment needs me, on an issue or a pull request; once read it doesn't, but it isn't Done either.
+        var assigned = issue([.assigned], [.assigned])
+        XCTAssertEqual(Attention.needReason(assigned), .assigned)
+        XCTAssertNil(Attention.needReason(assigned, counting: [.mentioned]))
+        var assignedPR = pr("P", roles: [.assigned])
+        assignedPR.events = [event(.assigned)]
+        XCTAssertEqual(Attention.needReason(assignedPR), .assigned)
+        assigned.lastReadAt = t0
+        XCTAssertNil(Attention.needReason(assigned))
+        XCTAssertFalse(Attention.isDone(assigned))
+
+        // New comments by others: my issue, or an issue assigned to me; not a pull request I'm only assigned to.
+        XCTAssertEqual(Attention.needReason(issue([.author], [.comment])), .newComments)
+        XCTAssertEqual(Attention.needReason(issue([.assigned], [.comment])), .newComments)
+        XCTAssertNil(Attention.needReason(pr("Q", roles: [.assigned], events: [(t0, false)])))
+        XCTAssertEqual(Attention.needReason(issue([.commenter], [.mentioned])), .mentioned)
+        XCTAssertNil(Attention.needReason(issue([.commenter], [.comment, .labeled])))
+
+        var involved = issue([.commenter], [.comment])
+        involved.lastReadAt = t0
+        XCTAssertTrue(Attention.isDone(involved))
+        XCTAssertEqual(Attention.breakdown([pr("R", roles: [.reviewRequested]), issue([.assigned], [.assigned])]), "1 to review · 1 assigned")
+    }
+
     func testIsDone() {
         var merged = pr(roles: [.author])
         merged.state = .merged

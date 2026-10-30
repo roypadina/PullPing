@@ -84,6 +84,54 @@ final class GraphQLDecodingTests: XCTestCase {
         XCTAssertEqual(snapshots.first?.timeline.count, 22)
     }
 
+    func testDiscoverIssuesAliasFollowsTheSwitch() async throws {
+        let github = FakeGitHub()
+        github.prs["PR_1"] = .init(updatedAt: t0, node: "")
+        github.prs["I_1"] = .init(updatedAt: t0, node: "", issue: true)
+        github.involved = ["PR_1"]
+        github.issues = ["I_1"]
+        let client = GitHubClient(transport: github.transport, token: "t")
+        let on = try await client.discover(issues: true)
+        XCTAssertEqual(Set(on.stamps.keys), ["PR_1", "I_1"])
+        XCTAssertEqual(on.issues, 1)
+        let off = try await client.discover(issues: false)
+        XCTAssertEqual(Set(off.stamps.keys), ["PR_1"])
+        XCTAssertEqual(off.issues, 0)
+        let variables = github.transport.requests.map { FakeTransport.operation($0).variables }
+        XCTAssertEqual(variables.map { $0["withIssues"] as? Bool }, [true, false])
+        XCTAssertEqual(variables.first?["issues"] as? String, SearchQueries.issues)
+    }
+
+    func testIssueStampsAndMixedRefresh() async throws {
+        let github = FakeGitHub()
+        let timeline = [
+            #"{ "__typename": "LabeledEvent", "id": "LE_1", "createdAt": "\#(iso(t0))", "actor": { "login": "alice" }, "label": { "name": "bug" } }"#,
+            #"{ "__typename": "UnlabeledEvent", "id": "UNLE_1", "createdAt": "\#(iso(t0))", "actor": { "login": "bot" }, "label": { "name": "needs-triage" } }"#,
+            #"{ "__typename": "ClosedEvent", "id": "CE_1", "createdAt": "\#(iso(t0))", "actor": { "login": "alice" }, "stateReason": "NOT_PLANNED" }"#,
+        ].joined(separator: ",")
+        github.prs["I_1"] = .init(updatedAt: t0, state: "CLOSED", node: issueNode("I_1", number: 7, updatedAt: t0, state: "CLOSED", stateReason: "NOT_PLANNED",
+                                                                                   assignees: [me], timeline: timeline), issue: true)
+        github.prs["PR_1"] = .init(updatedAt: t0, node: prNode("PR_1", number: 1, updatedAt: t0))
+        let client = GitHubClient(transport: github.transport, token: "t")
+
+        let (stamps, _) = try await client.stamps(["I_1", "PR_1"])
+        XCTAssertEqual(stamps.map(\.state), [.closed, .open])
+
+        let snapshots = try await client.refresh(["I_1", "PR_1"], since: nil)
+        let issue = try XCTUnwrap(snapshots.first)
+        XCTAssertTrue(issue.isIssue)
+        XCTAssertEqual(issue.state, .closed)
+        XCTAssertEqual(issue.stateReason, "NOT_PLANNED")
+        XCTAssertEqual(issue.closedAt, t0)
+        XCTAssertEqual(issue.assignees, [me])
+        XCTAssertEqual([issue.headOID, issue.mergeState], ["", ""])
+        XCTAssertEqual(issue.ci, CIState.none)
+        XCTAssertEqual(issue.timeline.map(\.type), ["LabeledEvent", "UnlabeledEvent", "ClosedEvent"])
+        XCTAssertEqual(issue.timeline.map(\.detail), ["bug", "needs-triage", "not planned"])
+        XCTAssertFalse(snapshots[1].isIssue)
+        XCTAssertNil(snapshots[1].stateReason)
+    }
+
     func testCINormalization() {
         XCTAssertEqual(CIState(rollup: nil), CIState.none)
         XCTAssertEqual(CIState(rollup: "SUCCESS"), .success)

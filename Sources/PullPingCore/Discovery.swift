@@ -11,21 +11,25 @@ public struct PRStamp: Sendable, Equatable {
 public struct Discovered: Sendable, Equatable {
     public var login: String
     public var stamps: [String: PRStamp] = [:]
-    public var involved = 0, requested = 0, reviewed = 0
+    public var involved = 0, requested = 0, reviewed = 0, issues = 0
     public var pages = 0
 }
 
 extension GitHubClient {
     static let maxPages = 5
 
-    /// Open PRs from the three searches, up to 5 pages of 100 per search.
-    public func discover() async throws -> Discovered {
+    /// Open PRs from the three searches, plus open issues when `issues` is on, up to 5 pages of 100 per search.
+    public func discover(issues: Bool = true) async throws -> Discovered {
         let data: DiscoverData = try await run(GraphQL.discover, [
             "involved": SearchQueries.involved, "requested": SearchQueries.requested, "reviewed": SearchQueries.reviewed,
+            "issues": SearchQueries.issues, "withIssues": issues,
         ])
         var result = Discovered(login: data.viewer.login, involved: data.involved.issueCount ?? 0,
-                                requested: data.requested.issueCount ?? 0, reviewed: data.reviewed.issueCount ?? 0)
-        for (first, query) in [(data.involved, SearchQueries.involved), (data.requested, SearchQueries.requested), (data.reviewed, SearchQueries.reviewed)] {
+                                requested: data.requested.issueCount ?? 0, reviewed: data.reviewed.issueCount ?? 0,
+                                issues: data.issues?.issueCount ?? 0)
+        let searches = [(data.involved, SearchQueries.involved), (data.requested, SearchQueries.requested), (data.reviewed, SearchQueries.reviewed)]
+            + (data.issues.map { [($0, SearchQueries.issues)] } ?? [])
+        for (first, query) in searches {
             var page = first, count = 1
             while true {
                 for node in page.items {
@@ -51,7 +55,7 @@ extension GitHubClient {
             let data: NodesData<StampNode> = try await run(GraphQL.stamps, ["ids": batch])
             for (id, node) in zip(batch, data.nodes) {
                 if let node {
-                    stamps.append(PRStamp(id: node.id, updatedAt: node.updatedAt, state: PRState(rawValue: node.state?.lowercased() ?? "") ?? .open))
+                    stamps.append(PRStamp(id: node.id, updatedAt: node.updatedAt, state: PRState(rawValue: (node.state ?? node.issueState)?.lowercased() ?? "") ?? .open))
                 } else {
                     dropped.append(id)
                 }

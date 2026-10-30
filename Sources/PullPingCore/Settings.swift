@@ -46,6 +46,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
     /// Kinds pushed to the phone, for my pull requests and for others. Empty until the user opts in.
     public var phoneMine: Set<EventKind> = []
     public var phoneOthers: Set<EventKind> = []
+    /// Open issues I'm involved in are tracked alongside pull requests (Settings > General > Tracking).
+    public var trackIssues = true
 
     public init() {}
 
@@ -71,6 +73,9 @@ public struct AppSettings: Codable, Sendable, Equatable {
         ntfyTopic = try value(.ntfyTopic, ntfyTopic)
         phoneMine = try value(.phoneMine, phoneMine)
         phoneOthers = try value(.phoneOthers, phoneOthers)
+        trackIssues = try value(.trackIssues, trackIssues)
+        // Saved before issue tracking (no trackIssues key): the newer `assigned` reason starts on, like the rest.
+        if !c.contains(.trackIssues) { badgeReasons.insert(.assigned) }
     }
 
     public func isPaused(_ now: Date) -> Bool { (pausedUntil ?? .distantPast) > now }

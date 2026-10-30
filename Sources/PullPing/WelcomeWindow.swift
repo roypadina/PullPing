@@ -37,7 +37,7 @@ struct WelcomeView: View {
                 Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 56, height: 56).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Welcome to PullPing").font(.title2.bold())
-                    Text("Pull request emails get buried and reviews wait on you without you knowing. PullPing tracks every pull request you are part of, across your GitHub accounts, and tells you when something happens.")
+                    Text("Pull request emails get buried and reviews wait on you without you knowing. PullPing tracks every pull request and issue you are part of, across your GitHub accounts, and tells you when something happens.")
                         .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             }

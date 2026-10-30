@@ -43,12 +43,13 @@ final class FakeTransport: GraphQLTransport, @unchecked Sendable {
     func operations() -> [String] { requests.map { Self.operation($0).name } }
 }
 
-/// A tiny GitHub: open PRs found by the involved/requested searches, node JSON per id, a rate limit.
+/// A tiny GitHub: open PRs found by the involved/requested searches, open issues by the issues search, node JSON per id, a rate limit.
 final class FakeGitHub: @unchecked Sendable {
-    struct PR { var updatedAt: Date; var state = "OPEN"; var node: String }
+    struct PR { var updatedAt: Date; var state = "OPEN"; var node: String; var issue = false }
     var prs: [String: PR] = [:]
     var involved: [String] = []
     var requested: [String] = []
+    var issues: [String] = []
     var remaining = 4000
     var failing = false
     lazy var transport = FakeTransport { [unowned self] in self.reply($0) }
@@ -65,9 +66,10 @@ final class FakeGitHub: @unchecked Sendable {
         let body: String
         switch name {
         case "Discover":
-            body = #"{ "data": { "viewer": { "login": "dana" }, "involved": \#(search(involved)), "requested": \#(search(requested)), "reviewed": \#(search([])), \#(rate) } }"#
+            let issuesAlias = variables["withIssues"] as? Bool == true ? #""issues": \#(search(issues)),"# : ""  // @include
+            body = #"{ "data": { "viewer": { "login": "dana" }, "involved": \#(search(involved)), "requested": \#(search(requested)), "reviewed": \#(search([])), \#(issuesAlias) \#(rate) } }"#
         case "Stamps":
-            let nodes = ids.map { id in prs[id].map { #"{ "id": "\#(id)", "updatedAt": "\#(iso($0.updatedAt))", "state": "\#($0.state)" }"# } ?? "null" }
+            let nodes = ids.map { id in prs[id].map { #"{ "id": "\#(id)", "updatedAt": "\#(iso($0.updatedAt))", "\#($0.issue ? "issueState" : "state")": "\#($0.state)" }"# } ?? "null" }
             body = #"{ "data": { "nodes": [\#(nodes.joined(separator: ","))], \#(rate) } }"#
         case "Refresh":
             body = #"{ "data": { "nodes": [\#(ids.map { prs[$0]?.node ?? "null" }.joined(separator: ","))], \#(rate) } }"#
@@ -91,6 +93,18 @@ func prNode(_ id: String, number: Int, author: String = "dana", updatedAt: Date,
       "author": { "login": "\#(author)" }, "repository": { "nameWithOwner": "octo-org/widgets" },
       "assignees": { "nodes": [] }, "reviewRequests": { "nodes": [\#(reviewRequests)] }, "latestReviews": { "nodes": [] },
       "commits": { "nodes": [ { "commit": { "oid": "\#(head)", "author": { "user": { "login": "\#(author)" } }, "statusCheckRollup": \#(rollup) } } ] },
+      "timelineItems": { "pageInfo": { "hasNextPage": false, "endCursor": null }, "nodes": [\#(timeline)] } }
+    """#
+}
+
+/// A `Refresh` Issue node; `timeline` is a JSON array body.
+func issueNode(_ id: String, number: Int, author: String = "dana", updatedAt: Date, state: String = "OPEN", stateReason: String? = nil,
+               assignees: [String] = [], body: String = "", timeline: String = "") -> String {
+    #"""
+    { "__typename": "Issue", "id": "\#(id)", "number": \#(number), "title": "Issue \#(number)", "url": "https://github.com/octo-org/widgets/issues/\#(number)",
+      "issueState": "\#(state)", "stateReason": \#(stateReason.map { "\"\($0)\"" } ?? "null"), "closedAt": \#(state == "OPEN" ? "null" : "\"\(iso(updatedAt))\""),
+      "updatedAt": "\#(iso(updatedAt))", "body": "\#(body)", "author": { "login": "\#(author)" }, "repository": { "nameWithOwner": "octo-org/widgets" },
+      "assignees": { "nodes": [\#(assignees.map { #"{ "login": "\#($0)" }"# }.joined(separator: ","))] },
       "timelineItems": { "pageInfo": { "hasNextPage": false, "endCursor": null }, "nodes": [\#(timeline)] } }
     """#
 }

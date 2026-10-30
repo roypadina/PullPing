@@ -7,9 +7,11 @@ final class PollerTests: XCTestCase {
     let clock = Clock()
     var store = StateStore(url: nil)
 
-    func poller(_ transport: GraphQLTransport? = nil) -> Poller {
+    func poller(_ transport: GraphQLTransport? = nil, trackIssues: Bool = true) -> Poller {
         let clock = clock
-        return Poller(transport: transport ?? github.transport, tokenProvider: { _ in "test-token" }, state: store, settings: { AppSettings() }, now: { clock.now })
+        var settings = AppSettings()
+        settings.trackIssues = trackIssues
+        return Poller(transport: transport ?? github.transport, tokenProvider: { _ in "test-token" }, state: store, settings: { settings }, now: { clock.now })
     }
 
     /// PR_1: mine, CI pending. PR_2: bob's, requests my review.
@@ -168,5 +170,72 @@ final class PollerTests: XCTestCase {
         let noToken = Poller(transport: github.transport, tokenProvider: { _ in nil }, state: store, settings: { AppSettings() })
         let result = await noToken.poll(account: account)
         XCTAssertEqual(result?.status, .badToken)
+    }
+
+    /// I_1: carol's issue, assigned to me and mentioning me in its body (loud if it weren't a baseline).
+    func seedIssue(updatedAt: Date = t0, timeline: String = "") {
+        github.prs["I_1"] = .init(updatedAt: updatedAt, node: issueNode("I_1", number: 9, author: "carol", updatedAt: updatedAt, assignees: [me],
+                                                                         body: "cc @dana", timeline: timeline), issue: true)
+        github.issues = ["I_1"]
+    }
+
+    func comment(_ id: String, at: Date) -> String {
+        #"{ "__typename": "IssueComment", "id": "\#(id)", "createdAt": "\#(iso(at))", "url": null, "body": "Any news?", "author": { "login": "alice" } }"#
+    }
+
+    func testUpgradeFirstPollWithIssuesIsSilentThenTheSwitchDropsThem() async throws {
+        seed()
+        _ = try await polled(poller())
+        store.update { $0.baselinedIssueAccounts = nil }  // state written by 0.3.0
+        seedIssue()
+        clock.now = t0.addingTimeInterval(180)
+        let upgrade = try await polled(poller())
+        XCTAssertFalse(upgrade.stats.baseline)
+        XCTAssertEqual(upgrade.stats.issues, 1)
+        XCTAssertTrue(upgrade.events.isEmpty)  // assignment and body mention stay quiet on the issue baseline
+        let issue = try XCTUnwrap(store.state.prs["I_1"])
+        XCTAssertTrue(issue.isIssue)
+        XCTAssertEqual(issue.lastReadAt, clock.now)
+        XCTAssertNil(Attention.needReason(issue))
+        XCTAssertEqual(store.state.baselinedIssueAccounts, [account.id])
+
+        // A new comment on the issue notifies.
+        clock.now = t0.addingTimeInterval(360)
+        seedIssue(updatedAt: t0.addingTimeInterval(300), timeline: comment("IC_9", at: t0.addingTimeInterval(300)))
+        let next = try await polled(poller())
+        XCTAssertEqual(next.events.map(\.kind), [.comment])
+        XCTAssertEqual(Attention.needReason(store.state.prs["I_1"]!), .newComments)  // assigned to me
+
+        // Track Issues off: not searched, not refreshed, dropped, baseline forgotten.
+        clock.now = t0.addingTimeInterval(540)
+        let sent = github.transport.requests.count
+        let off = try await polled(poller(trackIssues: false))
+        XCTAssertTrue(off.events.isEmpty)
+        XCTAssertNil(store.state.prs["I_1"])
+        XCTAssertNotNil(store.state.prs["PR_1"])
+        XCTAssertEqual(store.state.baselinedIssueAccounts, [])
+        let offRequests = github.transport.requests[sent...].map(FakeTransport.operation)
+        XCTAssertEqual(offRequests.first?.variables["withIssues"] as? Bool, false)
+        XCTAssertFalse(offRequests.contains { ($0.variables["ids"] as? [String])?.contains("I_1") == true })  // neither stamped nor refreshed
+
+        // On again: back, silently.
+        clock.now = t0.addingTimeInterval(720)
+        let on = try await polled(poller())
+        XCTAssertTrue(on.events.isEmpty)
+        XCTAssertNotNil(store.state.prs["I_1"])
+        XCTAssertEqual(store.state.baselinedIssueAccounts, [account.id])
+    }
+
+    func testNewAccountBaselinesIssuesWithPullRequests() async throws {
+        seed()
+        seedIssue()
+        let first = try await polled(poller())
+        XCTAssertTrue(first.stats.baseline)
+        XCTAssertTrue(first.events.isEmpty)
+        XCTAssertEqual(store.state.baselinedIssueAccounts, [account.id])
+        clock.now = t0.addingTimeInterval(180)
+        seedIssue(updatedAt: t0.addingTimeInterval(100), timeline: comment("IC_9", at: t0.addingTimeInterval(100)))
+        let next = try await polled(poller())
+        XCTAssertEqual(next.events.map(\.kind), [.comment])
     }
 }
