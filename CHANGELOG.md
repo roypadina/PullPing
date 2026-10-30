@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-30
+
+### Changed
+- Lists are sorted by what needs you: pull requests waiting on you first, then ones with unread activity, then the most recently active. The panel, the main window and every filter use the same order.
+- Pull requests with nothing left for you move to a **Done** group at the bottom: merged or closed ones, and others' pull requests you're only involved in once everything is read and no review is asked of you or your team. In the panel Done is collapsed, like Hidden; in the main window it's a section you can collapse, and PullPing remembers your choice.
+
 ## [0.2.0] - 2026-10-30
 
 ### Added

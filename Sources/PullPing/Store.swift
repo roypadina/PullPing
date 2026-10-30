@@ -32,6 +32,9 @@ enum Filter: String, CaseIterable {
         }
     }
 
+    /// Lists that show active rows first and Done pull requests (`Attention.isDone`) in their own group below.
+    var splitsDone: Bool { ![.recentlyClosed, .muted, .hidden].contains(self) }
+
     /// Inbox and All hold the same rows; Inbox shows them in Mine · To Review · Involved sections.
     func matches(_ pr: TrackedPR) -> Bool {
         guard self != .hidden else { return pr.hidden }
@@ -199,14 +202,10 @@ final class Store {
 
     var enabledIDs: Set<UUID> { Set(accounts.filter(\.enabled).map(\.id)) }
 
-    /// PRs of enabled accounts: attention first, then open before closed, newest first.
+    /// PRs of enabled accounts in `Attention.sorted` order.
     var prs: [TrackedPR] {
         let enabled = enabledIDs
-        return tracked.prs.values.filter { enabled.contains($0.accountID) }.sorted {
-            let a = (Attention.isAttention($0), $0.state == .open), b = (Attention.isAttention($1), $1.state == .open)
-            if a != b { return a.0 != b.0 ? a.0 : a.1 }
-            return $0.updatedAt > $1.updatedAt
-        }
+        return Attention.sorted(tracked.prs.values.filter { enabled.contains($0.accountID) }, counting: settings.badgeReasons)
     }
 
     /// The menu-bar number (Settings > General > Menu bar count).

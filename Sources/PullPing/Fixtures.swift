@@ -95,6 +95,12 @@ enum Fixtures {
                 $0.ci = .success
                 $0.events = [event("E10", "PR_7", .merged, "dana", 1500, "", own: true)]
             },
+            pr("PR_8", work, "octo-org/docs", 15, "Fix typos in the FAQ", author: "erin", roles: [.reviewer]) {  // reviewed, nothing unread: Done
+                $0.reviewDecision = "APPROVED"
+                $0.ci = .success
+                $0.reviewers = [ReviewSummary(login: "dana-work", state: "APPROVED", submittedAt: ago(400), requested: false)]
+                $0.events = [event("E11", "PR_8", .reviewApproved, "dana-work", 400, "", own: true)]
+            },
         ]
     }
 }
