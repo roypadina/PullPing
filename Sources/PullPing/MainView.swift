@@ -94,6 +94,7 @@ struct Avatar: View {
 struct PRListView: View {
     @Bindable var store: Store
     @Binding var query: String
+    @AppStorage(DefaultsKey.showDone) private var showDone = true
 
     private var rows: [TrackedPR] {
         let item = store.listSelection
@@ -106,11 +107,29 @@ struct PRListView: View {
     var body: some View {
         let rows = rows
         let filter = store.listSelection.filter
+        let done = filter.splitsDone ? rows.filter(Attention.isDone) : []
+        let active = filter.splitsDone ? rows.filter { !Attention.isDone($0) } : rows
         List(selection: $store.selectedID) {
             ForEach(store.errorAccounts) { account in  // FLW-17: inline, with the fix one click away
                 AccountErrorRow(account: account, status: store.statuses[account.id] ?? .ok)
             }
-            PRRows(store: store, prs: rows, sectioned: filter == .inbox)
+            if active.isEmpty && !done.isEmpty && query.isEmpty {
+                EmptyState(store: store, filter: filter, done: true).frame(maxWidth: .infinity).padding(.vertical, 24)
+            }
+            PRRows(store: store, prs: active, sectioned: filter == .inbox)
+            if !done.isEmpty {
+                // This list style draws no disclosure for collapsible sections, so the header is the toggle.
+                Section(isExpanded: $showDone) {
+                    PRRows(store: store, prs: done, sectioned: false)
+                } header: {
+                    Button { showDone.toggle() } label: {
+                        Label("Done (\(done.count))", systemImage: showDone ? "chevron.down" : "chevron.right")
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityValue(showDone ? "Expanded" : "Collapsed")
+                }
+            }
         }
         .onChange(of: rows.map(\.id), initial: true) { _, ids in  // the detail never shows a row the list doesn't
             if let id = store.selectedID, !ids.contains(id) { store.selectedID = nil }
@@ -169,9 +188,14 @@ struct AccountErrorRow: View {
 struct EmptyState: View {
     let store: Store
     var filter: Filter = .all
+    /// The list has only Done pull requests (shown below this).
+    var done = false
 
     var body: some View {
-        if store.accounts.isEmpty {
+        if done {
+            ContentUnavailableView("Nothing Needs You", systemImage: "checkmark.circle",
+                                   description: Text("Pull requests with nothing left for you are in Done."))
+        } else if store.accounts.isEmpty {
             ContentUnavailableView {
                 Label("No Accounts", systemImage: "person.crop.circle.badge.plus")
             } description: {

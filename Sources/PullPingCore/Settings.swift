@@ -111,6 +111,8 @@ public enum DefaultsKey {
     /// Status panel: last filter and account (empty = All Accounts).
     public static let panelFilter = "panelFilter"
     public static let panelAccount = "panelAccount"
+    /// Main window: the Done section is expanded.
+    public static let showDone = "showDone"
 }
 
 extension Account {

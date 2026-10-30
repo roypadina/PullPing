@@ -7,6 +7,7 @@ struct StatusPanelView: View {
     let store: Store
     @State private var selection: String?
     @State private var showHidden = false
+    @State private var showDone = false
     @FocusState private var listFocused: Bool
     @AppStorage(DefaultsKey.panelFilter) private var filter = Filter.inbox
     /// Account id, empty = All Accounts; `Store.panelScope` resolves it.
@@ -132,19 +133,19 @@ struct StatusPanelView: View {
 
     @ViewBuilder private func content(_ scope: Scope) -> some View {
         let prs = store.prs(scope, filter)
+        let done = filter.splitsDone ? prs.filter(Attention.isDone) : []
+        let active = filter.splitsDone ? prs.filter { !Attention.isDone($0) } : prs
         let hidden = filter == .hidden ? [] : store.prs(scope, .hidden)
         if prs.isEmpty && hidden.isEmpty {
             EmptyState(store: store, filter: filter).frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             List(selection: $selection) {
-                PRRows(store: store, prs: prs, sectioned: filter == .inbox)
-                if !hidden.isEmpty {
-                    Section(isExpanded: $showHidden) {
-                        PRRows(store: store, prs: hidden, sectioned: false)
-                    } header: {
-                        Text("Hidden (\(hidden.count))")
-                    }
+                if active.isEmpty && !done.isEmpty {
+                    EmptyState(store: store, filter: filter, done: true).frame(maxWidth: .infinity).padding(.vertical, 16)
                 }
+                PRRows(store: store, prs: active, sectioned: filter == .inbox)
+                collapsed("Done", done, $showDone)
+                collapsed("Hidden", hidden, $showHidden)
             }
             .listStyle(.sidebar)
             .onChange(of: (prs + hidden).map(\.id)) { _, ids in  // never act on a row the list no longer shows
@@ -162,6 +163,17 @@ struct StatusPanelView: View {
                 return .handled
             }
             .onAppear { listFocused = true }
+        }
+    }
+
+    /// "Done (3)", "Hidden (2)": collapsed until opened; nothing when empty.
+    @ViewBuilder private func collapsed(_ title: String, _ prs: [TrackedPR], _ isExpanded: Binding<Bool>) -> some View {
+        if !prs.isEmpty {
+            Section(isExpanded: isExpanded) {
+                PRRows(store: store, prs: prs, sectioned: false)
+            } header: {
+                Text("\(title) (\(prs.count))")
+            }
         }
     }
 }

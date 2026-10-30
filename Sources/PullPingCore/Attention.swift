@@ -66,6 +66,30 @@ public enum Attention {
         }
     }
 
+    /// Nothing left for me: merged or closed, or open and not mine, not assigned to me, no review asked of me or my team,
+    /// nothing unread. Ignores the badge settings, so a switched-off reason never moves a request into Done.
+    public static func isDone(_ pr: TrackedPR) -> Bool {
+        guard pr.state == .open else { return true }
+        return pr.roles.isDisjoint(with: [.author, .assigned, .reviewRequested, .teamReviewRequested])
+            && unread(pr) == 0 && !awaitingMyReview(pr)
+    }
+
+    /// Latest of updated, closed and the newest event.
+    public static func lastActivity(_ pr: TrackedPR) -> Date {
+        max(pr.updatedAt, pr.closedAt ?? .distantPast, pr.events.map(\.at).max() ?? .distantPast)
+    }
+
+    /// The one list order: needs me, then unread (`isAttention`), then latest activity; ties by number, highest first.
+    /// Done pull requests rank by activity alone.
+    public static func sorted(_ prs: [TrackedPR], counting: Set<NeedReason> = Set(NeedReason.allCases)) -> [TrackedPR] {
+        prs.map { pr -> (TrackedPR, (Int, Date, Int, String)) in
+            let rank = isDone(pr) ? 0 : needsMe(pr, counting: counting) ? 2 : isAttention(pr) ? 1 : 0
+            return (pr, (rank, lastActivity(pr), pr.number, pr.id))  // id: a stable order when numbers tie across repos
+        }
+        .sorted { $0.1 > $1.1 }
+        .map(\.0)
+    }
+
     public static func group(_ pr: TrackedPR) -> PRGroup {
         if pr.roles.contains(.author) { return .mine }
         return awaitingMyReview(pr) ? .toReview : .involved
