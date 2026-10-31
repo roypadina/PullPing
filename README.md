@@ -29,7 +29,10 @@ check, a request for your review.
 brew install --cask roypadina/tap/pullping
 ```
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/status-panel-dark.png">
 <img src="docs/screenshots/status-panel.png" alt="PullPing status panel: pull requests grouped into Mine, To Review and Involved, with CI and review chips" width="320">
+</picture>
 &nbsp;
 <img src="docs/screenshots/main-window.png" alt="PullPing main window: a sidebar of filters and accounts, the list of pull requests, and the details of the selected one" width="620">
 
