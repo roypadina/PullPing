@@ -51,6 +51,7 @@ brew install --cask roypadina/tap/pullping
 - **Phone notifications** through [ntfy](https://ntfy.sh), chosen per kind of event, separately from the desktop panels.
 - **Agent automations.** Start Claude Code or Codex in a terminal when a pull request event arrives: rules you write in Settings, or hooks an agent attaches from the command line ("resume this session when the pull request is approved"). Asks first by default.
 - **Notifications that stay out of your way.** A small panel appears at the top right, never takes keyboard focus, and is grouped per pull request. Pick Off, Banner (hides itself) or Alert (stays) for each kind of event.
+- **Activity.** Everything PullPing saw and did, in one list: every event, whether it showed a banner or an alert, went to your phone, or was not shown and why, plus every automation run.
 - **Review reminders.** While your review is requested, PullPing nudges you again every so often until you review, the request is removed, or the pull request is merged or closed.
 - **Snooze, mute, hide, mark as read, stop tracking.** All of them from the panel, the menu bar and the main window, with Undo for Hide and Stop Tracking. Hidden pull requests leave every list and count but still notify you.
 - **Keyboard friendly.** Arrow keys and Return in the panel, menu commands with shortcuts, VoiceOver announcements for new notifications.
@@ -153,6 +154,20 @@ app is never interrupted.
 - **Pause:** right-click the menu-bar icon → **Pause Notifications** for 1 hour, 3 hours or until tomorrow 9:00. Panels, phone notifications and reminders stay quiet until then.
 - **Phone (ntfy):** in **Settings → Phone**, enter a server (default `https://ntfy.sh`) and a topic, subscribe to the same topic in the ntfy phone app, then tick the kinds of event to send, for your own pull requests and for others. Nothing is sent until you tick one. Sends follow the same rules as panels (never your own actions, never muted, snoozed or paused pull requests) but ignore the desktop style, so a kind can go to the phone only. An optional access token (for a protected server) and a fallback topic URL (used when the server fails) are kept in your login keychain. **Send Test Notification** checks the setup.
 - Your own actions never notify you. An optional sound plays once when panels appear. Every action on a panel also exists in the menu-bar panel and the menus, for keyboard and VoiceOver use.
+
+### Activity
+
+**Activity**, in the main window's sidebar for All Accounts and for each account (also in the menu-bar icon's menu),
+keeps everything that happened, whether or not it showed a panel: every event on a tracked pull request or issue with
+what PullPing did with it (**Banner**, **Alert**, **Phone**, or **Not shown** and why: your own, notifications off,
+paused, muted, snoozed, or off in Settings), review reminders, and every automation run and Handle with Agent launch.
+Newest first, by day, with search. Select a row to see its pull request; double-click opens it in the browser, also
+once PullPing no longer tracks it. A newly tracked pull request's earlier history is not listed. Entries are kept for 30
+days (**Settings → General → Keep activity for**: 7, 30 or 90 days), at most 5000, in
+`~/Library/Application Support/PullPing/activity.jsonl`. `pullping activity [--since 2d] [--pr <ref>] [--json]` prints
+them, also while PullPing is not running.
+
+<img src="docs/screenshots/activity.png" alt="The Activity list: today's events newest first, each with its pull request, the event and who did it, and badges such as Alert, Phone, Banner, Not shown: muted, Not shown: off in Settings and Ran Fix failing CI" width="380">
 
 ## Agent automations
 
@@ -294,7 +309,8 @@ Everything the Automations tab does has a command: `pullping rule|hook add|edit|
 `pullping session set|show|list|rm|find|resume` (linked and earlier sessions), `pullping handler show|set|on|off` (Handle with Agent),
 `pullping run <id> --pr <ref>` (Run Automation; `--dry-run` only prints what it would start), `pullping runs` (Recent
 Runs), `pullping automations on|off|status`, `pullping automations folders|fallback|repos` (Repository Folders),
-`pullping kinds` (the event names) and `pullping launchers` (where it can open). Every reader takes `--json` and
+`pullping kinds` (the event names), `pullping launchers` (where it can open) and `pullping activity` (the
+[Activity](#activity) list). Every reader takes `--json` and
 prints what `automations.json` stores, so an agent can read an automation and write it back with flags.
 `pullping --help`, `pullping rule --help` and `pullping hook --help` list every option (Codex: `--agent codex --session
 <thread id>`; `--auto` starts without asking). It works while PullPing is not running: the app picks changes up within
