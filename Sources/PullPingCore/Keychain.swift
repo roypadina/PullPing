@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Generic-password items for account tokens: never in UserDefaults or the state file.
 /// Created and read by Apple-signed `/usr/bin/security`, never `SecItemAdd`: with no Team ID an item this
@@ -6,6 +7,7 @@ import Foundation
 /// CLI-made item trusts the CLI (partition `apple-tool:`), so every build reads it silently.
 public enum Keychain {
     private static let account = "pullping"
+    private static let log = Logger(subsystem: "com.padina.pullping", category: "keychain")
 
     public static func service(for accountID: UUID) -> String { "com.padina.pullping.token.\(accountID.uuidString)" }
     /// Phone notifications: the ntfy access token and the fallback topic URL.
@@ -16,17 +18,21 @@ public enum Keychain {
         security(["find-generic-password", "-s", service, "-a", account, "-g"]).flatMap(password) ?? ""
     }
 
-    /// Empty value deletes the item.
-    public static func set(_ service: String, _ value: String) {
-        guard get(service) != value else { return }
-        guard !value.isEmpty else {
-            _ = security(["delete-generic-password", "-s", service, "-a", account])
-            return
+    /// Empty value deletes the item. False (logged, service name only) when `security` fails.
+    @discardableResult
+    public static func set(_ service: String, _ value: String) -> Bool {
+        guard get(service) != value else { return true }
+        let ok: Bool
+        if value.isEmpty {
+            ok = security(["delete-generic-password", "-s", service, "-a", account]) != nil
+        } else {
+            // Secret goes in as hex on stdin, never argv: other users' `ps` can read argv.
+            // shortcut: `security -i` truncates lines past ~4 KB (a ~2 KB secret); fine for GitHub tokens.
+            let hex = Data(value.utf8).map { String(format: "%02x", $0) }.joined()
+            ok = security(["-i"], stdin: "add-generic-password -U -s \"\(service)\" -a \"\(account)\" -X \(hex)\n") != nil
         }
-        // Secret goes in as hex on stdin, never argv: other users' `ps` can read argv.
-        // shortcut: `security -i` truncates lines past ~4 KB (a ~2 KB secret); fine for GitHub tokens.
-        let hex = Data(value.utf8).map { String(format: "%02x", $0) }.joined()
-        _ = security(["-i"], stdin: "add-generic-password -U -s \"\(service)\" -a \"\(account)\" -X \(hex)\n")
+        if !ok { log.error("keychain write failed: \(service, privacy: .public)") }
+        return ok
     }
 
     /// The `-g` stderr line: `password: "text"` when printable, `password: 0xHEX` otherwise.

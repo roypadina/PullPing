@@ -4,7 +4,7 @@
       {
         "id": "PR_1", "number": 1, "title": "Add widget cache", "url": "https://github.com/octo-org/widgets/pull/1",
         "isDraft": false, "state": "OPEN", "merged": false, "mergedAt": null, "closedAt": null,
-        "updatedAt": "2026-10-29T10:00:00Z", "headRefOid": "abc1234def5678", "body": "Adds a cache. cc @carol",
+        "updatedAt": "2026-10-29T10:00:00Z", "headRefOid": "abc1234def5678", "headRefName": "feature/cache", "body": "Adds a cache. cc @carol",
         "reviewDecision": "CHANGES_REQUESTED", "mergeStateStatus": "BLOCKED",
         "author": { "login": "dana", "avatarUrl": "https://avatars.githubusercontent.com/u/1" },
         "repository": { "nameWithOwner": "octo-org/widgets", "url": "https://github.com/octo-org/widgets", "isPrivate": false },

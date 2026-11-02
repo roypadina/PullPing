@@ -75,7 +75,7 @@ public final class StateStore: @unchecked Sendable {
         return encoder
     }()
 
-    static let decoder: JSONDecoder = {
+    public static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return decoder

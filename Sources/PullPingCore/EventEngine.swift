@@ -112,6 +112,7 @@ public enum EventEngine {
         pr.ci = s.ci
         pr.checks = s.checks
         pr.headOID = s.headOID
+        pr.headRef = s.headRef
         pr.reviewers = s.reviewers
         pr.requestedTeams = s.requestedTeams
         pr.assignees = s.assignees

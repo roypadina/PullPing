@@ -38,6 +38,62 @@ final class ScreenshotRenderTests: XCTestCase {
         }
     }
 
+    /// Agent automations, light only: Settings → Automations, the rule editor, and panels with the agent buttons.
+    func test_renderAutomationScreenshots() throws {
+        guard let dir = ProcessInfo.processInfo.environment["RENDER_SCREENSHOTS"] else {
+            throw XCTSkip("set RENDER_SCREENSHOTS=<dir> to render")
+        }
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        func save(_ name: String, _ view: some View, _ size: NSSize) throws {
+            try render(view, size: size, dark: false, to: URL(fileURLWithPath: dir).appendingPathComponent("\(name).png"))
+        }
+        let store = Fixtures.sampleStore()
+        var ci = Automation(name: "Fix failing CI", kinds: [.ciFailed],
+                            prompt: "CI failed on {pr_url}. Read the failing check with `gh pr checks {pr_number} --repo {repo}`, fix it on the branch and push.",
+                            workingDirectory: "{worktree_dir}")
+        ci.scope = .mine
+        var review = Automation(name: "Answer review feedback", kinds: [.reviewChangesRequested, .reviewCommented, .comment],
+                                prompt: "{event_label} by @{actor} on {pr_url}. Read it with `gh pr view {pr_number} --repo {repo} --comments`, address what you agree with, push, and reply on the pull request.",
+                                workingDirectory: "{worktree_dir}")
+        review.scope = .mine
+        review.repos = ["octo-org/widgets"]
+        review.sessionID = Automation.linkedSession
+        var triage = Automation(name: "Triage assigned issues", kinds: [.assigned], workingDirectory: "{repo_dir}")
+        triage.agent = .codex
+        triage.mode = .auto
+        triage.actors = ["carol"]
+        triage.source = "cli"
+        store.automationStore.mutate { file in
+            file.automations = [ci, review, triage]
+            file.handler.enabled = true
+        }
+        // A linked session before the tab renders: it once pushed Fallback folder out of its card. Also the editor's Try target,
+        // so the linked-session rule can run.
+        let latest = try XCTUnwrap(store.prs.first)
+        store.automationStore.mutate {
+            $0.setLink(SessionLink(pr: PRRef(repo: latest.repo, number: latest.number), agent: .claude,
+                                   sessionID: "0f3c2a1e-5b7d-4c9e-8a10-2b4d6f8e1c3a", cwd: "~/Code/widgets", setAt: Date(), source: "cli", by: "claude"))
+        }
+        store.setFindSessions(false)  // reloads the store's copy
+        store.mutateRepoFolders { $0.roots = ["~/Code", "~/src"] }  // also reloads the store's copy
+        try save("settings-automations", AutomationsTab(store: store), NSSize(width: 520, height: 945))  // down to Repository Folders
+        // Scrolled to its end (agent, session, prompt); 32 pt taller than the sheet so the top edge falls between sections.
+        try render(RuleEditorSheet(store: store, rule: review), size: NSSize(width: 560, height: 672), dark: false, scrollToEnd: true,
+                   to: URL(fileURLWithPath: dir).appendingPathComponent("rule-editor.png"))
+        let pr = { store.tracked.prs[$0]! }
+        let handle = PanelModel(pr: pr("PR_5"), events: pr("PR_5").events, alert: false, account: "@dana-work",
+                                actions: [PanelAction(id: Automation.handlerID, title: "Handle with Agent") {}])
+        let resume = PanelModel(pr: pr("PR_2"), events: Array(pr("PR_2").events.prefix(1)), alert: false, account: "@dana",
+                                actions: [PanelAction(id: Automation.handlerResumeActionID, title: "Resume Session") {},
+                                          PanelAction(id: Automation.handlerID, title: "New Session") {}])
+        let panels = VStack(spacing: 10) {
+            NotificationContent(model: resume, onOpen: {}, onSnooze: {}, onMute: {}, onDismiss: {}, onHover: { _ in })
+            NotificationContent(model: handle, onOpen: {}, onSnooze: {}, onMute: {}, onDismiss: {}, onHover: { _ in })
+        }
+        .padding(20)
+        try save("notification-agent", panels, NSSize(width: Theme.panelWidth + 40, height: Theme.panelHeight * 2 + 50))
+    }
+
     /// The panel on a plain backdrop with room for its edge.
     private func panel(_ model: PanelModel) -> some View {
         NotificationContent(model: model, onOpen: {}, onSnooze: {}, onMute: {}, onDismiss: {}, onHover: { _ in })
@@ -45,7 +101,8 @@ final class ScreenshotRenderTests: XCTestCase {
             .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    private func render(_ view: some View, size: NSSize, dark: Bool, to url: URL) throws {
+    /// `scrollToEnd`: the first scroll view (a grouped Form's) scrolled to its end before the capture.
+    private func render(_ view: some View, size: NSSize, dark: Bool, scrollToEnd: Bool = false, to url: URL) throws {
         let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height)
             .background(Color(nsColor: .windowBackgroundColor))  // cacheDisplay skips the window background
             .environment(\.controlActiveState, .key))
@@ -55,6 +112,14 @@ final class ScreenshotRenderTests: XCTestCase {
         win.contentView = host
         host.layoutSubtreeIfNeeded()
         RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+        if scrollToEnd {
+            func first(_ view: NSView) -> NSScrollView? { view.subviews.lazy.compactMap { ($0 as? NSScrollView) ?? first($0) }.first }
+            let scroller = try XCTUnwrap(first(host))
+            let end = (scroller.documentView?.frame.height ?? 0) - scroller.contentView.bounds.height
+            scroller.contentView.scroll(to: NSPoint(x: 0, y: max(0, end)))
+            scroller.reflectScrolledClipView(scroller.contentView)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        }
         let scale = 2
         let rep = try XCTUnwrap(NSBitmapImageRep(
             bitmapDataPlanes: nil, pixelsWide: Int(size.width) * scale, pixelsHigh: Int(size.height) * scale,

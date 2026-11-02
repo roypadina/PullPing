@@ -21,6 +21,9 @@ public struct Account: Identifiable, Codable, Sendable, Equatable {
         self.tokenService = Keychain.service(for: id)
     }
 
+    /// Keychain item of the Sign in with GitHub refresh token, next to the access token.
+    public var refreshService: String { "\(tokenService).refresh" }
+
     /// The name the user gave the account in Settings, else `@login`.
     public var displayName: String { label.trimmingCharacters(in: .whitespaces).isEmpty ? "@\(login)" : label }
 }
@@ -93,6 +96,8 @@ public struct PRSnapshot: Codable, Sendable, Equatable {
     public var ci = CIState.none
     public var checks: [CheckSummary] = []
     public var headOID = ""
+    /// The head branch (`{branch}`); nil for issues.
+    public var headRef: String?
     public var headAuthorLogin: String?
     public var reviewers: [ReviewSummary] = []
     public var requestedTeams: [String] = []
@@ -123,6 +128,8 @@ public struct TrackedPR: Identifiable, Codable, Sendable, Equatable {
     public var ci = CIState.none
     public var checks: [CheckSummary] = []
     public var headOID = ""
+    /// The head branch (`{branch}`, session discovery); nil for issues and until the first refresh after 0.5.0.
+    public var headRef: String?
     public var reviewers: [ReviewSummary] = []
     public var requestedTeams: [String] = []
     public var assignees: [String] = []
@@ -166,6 +173,33 @@ extension KeyedDecodingContainer {
 public enum EventKind: String, Codable, Sendable, CaseIterable, CodingKeyRepresentable {
     case comment, mentioned, reviewApproved, reviewChangesRequested, reviewCommented, reviewRequested, assigned, newCommits,
          ciPassed, ciFailed, readyForReview, convertedToDraft, merged, closed, reopened, reviewDismissed, retitled, labeled, reviewReminder
+}
+
+extension EventKind {
+    /// Settings label and panel kind word; also `{event_label}` and `pullping hook kinds`.
+    public var label: String {
+        switch self {
+        case .comment: "Comment added"
+        case .mentioned: "Mentioned"
+        case .reviewApproved: "Review approved"
+        case .reviewChangesRequested: "Changes requested"
+        case .reviewCommented: "Review comments"
+        case .reviewRequested: "Review requested"
+        case .assigned: "Assigned to me"
+        case .newCommits: "New commits"
+        case .ciPassed: "CI passed"
+        case .ciFailed: "CI failed"
+        case .readyForReview: "Ready for review"
+        case .convertedToDraft: "Converted to draft"
+        case .merged: "Merged"
+        case .closed: "Closed"
+        case .reopened: "Reopened"
+        case .reviewDismissed: "Review dismissed"
+        case .retitled: "Title changed"
+        case .labeled: "Labels changed"
+        case .reviewReminder: "Reminder: review requested"
+        }
+    }
 }
 
 public struct PREvent: Identifiable, Codable, Sendable, Equatable {

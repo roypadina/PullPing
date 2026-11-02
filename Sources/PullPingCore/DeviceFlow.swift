@@ -20,7 +20,7 @@ public struct DeviceCode: Decodable, Sendable, Equatable {
 }
 
 public enum DeviceFlowError: Error, Equatable {
-    case expired, denied, disabled, badClient, failed(String)
+    case expired, denied, disabled, badClient, badRefreshToken, failed(String)
 
     public var message: String {
         switch self {
@@ -28,12 +28,19 @@ public enum DeviceFlowError: Error, Equatable {
         case .denied: "Access was denied on GitHub."
         case .disabled: "Device flow is not enabled for this OAuth app."
         case .badClient: "The OAuth app client ID is not valid."
+        case .badRefreshToken: "The GitHub sign-in expired. Sign in again."
         case .failed(let message): message
         }
     }
 }
 
-/// GitHub device flow: `start` gets the user code, `poll` waits for approval and returns the token.
+/// `refresh` is empty unless the OAuth app issues expiring tokens (access 8 h, refresh 6 months).
+public struct OAuthTokens: Sendable, Equatable {
+    public var access: String
+    public var refresh: String
+}
+
+/// GitHub device flow: `start` gets the user code, `poll` waits for approval and returns the tokens.
 public enum DeviceFlow {
     public static func start(clientID: String = GitHubOAuth.clientID, transport: GraphQLTransport) async throws -> DeviceCode {
         let data = try await post("https://github.com/login/device/code", ["client_id": clientID, "scope": GitHubOAuth.scopes], transport)
@@ -43,7 +50,7 @@ public enum DeviceFlow {
 
     /// Sleeps `interval` seconds before each request; `slow_down` adds 5 s. Cancel the task to stop.
     public static func poll(code: DeviceCode, clientID: String = GitHubOAuth.clientID, transport: GraphQLTransport,
-                            sleep: @Sendable (Int) async throws -> Void = { try await Task.sleep(nanoseconds: UInt64($0) * 1_000_000_000) }) async throws -> String {
+                            sleep: @Sendable (Int) async throws -> Void = { try await Task.sleep(nanoseconds: UInt64($0) * 1_000_000_000) }) async throws -> OAuthTokens {
         var interval = code.interval
         while true {
             try await sleep(interval)
@@ -51,7 +58,7 @@ public enum DeviceFlow {
                 "client_id": clientID, "device_code": code.deviceCode, "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
             ], transport)
             let response = try? JSONDecoder().decode(TokenResponse.self, from: data)
-            if let token = response?.access_token, !token.isEmpty { return token }
+            if let token = response?.access_token, !token.isEmpty { return OAuthTokens(access: token, refresh: response?.refresh_token ?? "") }
             switch response?.error {
             case "authorization_pending": continue
             case "slow_down": interval = response?.interval ?? interval + 5
@@ -60,8 +67,20 @@ public enum DeviceFlow {
         }
     }
 
+    /// Trades a refresh token for new tokens. Both old ones stop working, so save the new pair at once.
+    /// No client secret: GitHub does not need one for tokens from the device flow.
+    public static func refresh(_ refreshToken: String, clientID: String = GitHubOAuth.clientID, transport: GraphQLTransport) async throws -> OAuthTokens {
+        let data = try await post("https://github.com/login/oauth/access_token", [
+            "client_id": clientID, "grant_type": "refresh_token", "refresh_token": refreshToken,
+        ], transport)
+        let response = try? JSONDecoder().decode(TokenResponse.self, from: data)
+        guard let token = response?.access_token, !token.isEmpty else { throw error(response) }
+        return OAuthTokens(access: token, refresh: response?.refresh_token ?? "")
+    }
+
     struct TokenResponse: Decodable {
         var access_token: String?
+        var refresh_token: String?
         var error: String?
         var error_description: String?
         var interval: Int?
@@ -73,6 +92,7 @@ public enum DeviceFlow {
         case "access_denied": .denied
         case "device_flow_disabled": .disabled
         case "incorrect_client_credentials": .badClient
+        case "bad_refresh_token": .badRefreshToken
         default: .failed(response?.error_description ?? response?.error ?? "Unexpected response from GitHub.")
         }
     }
