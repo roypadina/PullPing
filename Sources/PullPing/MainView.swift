@@ -4,23 +4,40 @@ import SwiftUI
 struct MainView: View {
     @Bindable var store: Store
     @State private var query = ""
+    @State private var activityRow: Int?
 
     var body: some View {
+        let activity = store.listSelection.activity
         NavigationSplitView {
             SidebarView(store: store)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 280)
         } content: {
-            PRListView(store: store, query: $query)
-                .navigationSplitViewColumnWidth(min: 300, ideal: 380, max: 560)
+            Group {
+                if activity {
+                    ActivityView(store: store, query: $query, selection: $activityRow)
+                } else {
+                    PRListView(store: store, query: $query)
+                }
+            }
+            .navigationSplitViewColumnWidth(min: 300, ideal: 380, max: 560)
         } detail: {
             if let pr = store.selectedPR {
                 PRDetailView(store: store, pr: pr)
+            } else if activity, let i = activityRow, store.activity.indices.contains(i) {
+                let entry = store.activity[i]
+                ContentUnavailableView {
+                    Label("Not Tracked", systemImage: "archivebox")
+                } description: {
+                    Text(verbatim: "PullPing no longer tracks \(entry.repo) #\(entry.number).")
+                } actions: {
+                    if let url = entry.url { Button("Open in Browser") { NSWorkspace.shared.open(url) } }
+                }
             } else {
                 ContentUnavailableView("No Selection", systemImage: "arrow.triangle.pull",
                                        description: Text("Select a pull request to see its reviewers, checks and activity."))
             }
         }
-        .navigationTitle("Pull Requests")
+        .navigationTitle(activity ? "Activity" : "Pull Requests")
         .navigationSubtitle(store.freshness)
         .frame(minWidth: 900, minHeight: 520)
         .task(id: store.selectedID) {  // selected for ≥ 1 s = read
@@ -53,12 +70,14 @@ struct SidebarView: View {
         }
     }
 
-    private func rows(_ scope: Scope) -> some View {
+    @ViewBuilder private func rows(_ scope: Scope) -> some View {
         ForEach(Filter.allCases, id: \.self) { filter in
             Label(filter.title, systemImage: filter.symbol)
                 .badge(store.count(scope, filter))
                 .tag(SidebarItem(scope: scope, filter: filter))
         }
+        Label("Activity", systemImage: "clock.arrow.circlepath")
+            .tag(SidebarItem(scope: scope, filter: .all, activity: true))
     }
 
     private func header(_ account: Account) -> some View {

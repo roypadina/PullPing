@@ -94,6 +94,20 @@ final class ScreenshotRenderTests: XCTestCase {
         try save("notification-agent", panels, NSSize(width: Theme.panelWidth + 40, height: Theme.panelHeight * 2 + 50))
     }
 
+    /// Main window › Activity, light only: the list column with its day sections and badges.
+    func test_renderActivityScreenshot() throws {
+        guard let dir = ProcessInfo.processInfo.environment["RENDER_SCREENSHOTS"] else {
+            throw XCTSkip("set RENDER_SCREENSHOTS=<dir> to render")
+        }
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let store = Fixtures.sampleStore()
+        store.activityLog.flush()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))  // the log hands its entries to the main queue
+        XCTAssertFalse(store.activity.isEmpty)
+        try render(ActivityView(store: store, query: .constant(""), selection: .constant(nil)), size: NSSize(width: 460, height: 620), dark: false,
+                   to: URL(fileURLWithPath: dir).appendingPathComponent("activity.png"))
+    }
+
     /// The panel on a plain backdrop with room for its edge.
     private func panel(_ model: PanelModel) -> some View {
         NotificationContent(model: model, onOpen: {}, onSnooze: {}, onMute: {}, onDismiss: {}, onHover: { _ in })

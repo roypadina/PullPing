@@ -214,6 +214,9 @@ public struct PREvent: Identifiable, Codable, Sendable, Equatable {
     public var url: URL?
     /// Silent: my own action, or seeded history of a newly tracked PR. Never notified, never unread.
     public var isOwn: Bool
+    /// true = part of a newly tracked pull request's silent seeded history (`isOwn` too), which the activity log skips.
+    /// nil otherwise, so state files only grow on those.
+    public var seeded: Bool?
 
     public init(id: String, prID: String, kind: EventKind, actor: String, at: Date, summary: String, url: URL?, isOwn: Bool) {
         self.id = id; self.prID = prID; self.kind = kind; self.actor = actor

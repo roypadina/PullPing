@@ -17,7 +17,9 @@ public enum EventEngine {
         func add(_ id: String, _ kind: EventKind, _ actor: String, _ at: Date, _ summary: String, _ url: URL?, silent: Bool) {
             guard seen.insert(id).inserted else { return }
             pr.seenEventIDs.append(id)
-            events.append(PREvent(id: id, prID: s.id, kind: kind, actor: actor, at: at, summary: String(summary.prefix(120)), url: url, isOwn: silent))
+            var event = PREvent(id: id, prID: s.id, kind: kind, actor: actor, at: at, summary: String(summary.prefix(120)), url: url, isOwn: silent)
+            if silent && isNew { event.seeded = true }
+            events.append(event)
             if kind == .mentioned && !mine(actor) { pr.roles.insert(.mentioned) }
         }
 

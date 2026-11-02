@@ -91,6 +91,7 @@ struct AppCommands: Commands {
         }
         CommandGroup(before: .windowArrangement) {
             Button("Open Window") { MainWindow.shared.show() }.keyboardShortcut("1")
+            Button("Activity") { MainWindow.shared.showActivity() }
         }
         CommandMenu("Pull Request") {
             let pr = store.selectedPR

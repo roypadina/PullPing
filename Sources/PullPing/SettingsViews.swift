@@ -441,13 +441,17 @@ struct GeneralTab: View {
                 Picker("Keep merged and closed pull requests for", selection: $store.settings.retentionDays) {
                     ForEach(AppSettings.retentionOptions, id: \.self) { Text($0 == 1 ? "1 day" : "\($0) days").tag($0) }
                 }
+                Picker("Keep activity for", selection: $store.settings.activityDays) {
+                    ForEach(AppSettings.activityOptions, id: \.self) { Text("\($0) days").tag($0) }
+                }
+                .onChange(of: store.settings.activityDays) { store.compactActivity() }
                 // Last row of the section (SET-9); Edit > Undo reverses it (UND-4).
                 Button("Reset Ignored Pull Requests (\(store.ignoredCount))", role: .destructive) { store.resetIgnored() }
                     .disabled(store.ignoredCount == 0)
             } header: {
                 Text("Tracking")
             } footer: {
-                Text("Track Issues adds open issues you opened, are assigned to, are mentioned in or comment on. Turning it off removes them from the lists.").formFooter()
+                Text("Track Issues adds open issues you opened, are assigned to, are mentioned in or comment on. Turning it off removes them from the lists. Activity, in the window's sidebar, lists every event and run, at most 5000.").formFooter()
             }
             Section("About") {
                 HStack {

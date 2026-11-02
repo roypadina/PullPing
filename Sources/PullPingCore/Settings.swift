@@ -13,6 +13,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public static let retentionOptions = [1, 3, 7, 14]
     public static let reminderOptions = [0, 15, 30, 60, 120, 240]
     public static let autoHideOptions = [5, 8, 12, 20]
+    public static let activityOptions = [7, 30, 90]
 
     public static let defaultStyles: [EventKind: NotificationStyle] = Dictionary(uniqueKeysWithValues: EventKind.allCases.map {
         ($0, [.reviewChangesRequested, .ciFailed, .merged].contains($0) ? .alert : .banner)
@@ -48,6 +49,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var phoneOthers: Set<EventKind> = []
     /// Open issues I'm involved in are tracked alongside pull requests (Settings > General > Tracking).
     public var trackIssues = true
+    /// Days the activity log keeps (`ActivityLog`, also capped at 5000 entries).
+    public var activityDays = 30
 
     public init() {}
 
@@ -74,6 +77,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         phoneMine = try value(.phoneMine, phoneMine)
         phoneOthers = try value(.phoneOthers, phoneOthers)
         trackIssues = try value(.trackIssues, trackIssues)
+        activityDays = try value(.activityDays, activityDays)
         // Saved before issue tracking (no trackIssues key): the newer `assigned` reason starts on, like the rest.
         if !c.contains(.trackIssues) { badgeReasons.insert(.assigned) }
     }

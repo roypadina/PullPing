@@ -59,6 +59,11 @@ enum Scope: Hashable {
         return true
     }
 
+    func matches(_ entry: ActivityEntry) -> Bool {
+        if case .account(let id) = self { return entry.accountID == id }
+        return true
+    }
+
     /// `DefaultsKey.panelAccount` value: empty for All Accounts.
     var key: String {
         if case .account(let id) = self { return id.uuidString }
@@ -66,10 +71,12 @@ enum Scope: Hashable {
     }
 }
 
-/// A main-window sidebar row: All Accounts or one account, plus a filter.
+/// A main-window sidebar row: All Accounts or one account, plus a filter or Activity.
 struct SidebarItem: Hashable {
     var scope: Scope
     var filter: Filter
+    /// The scope's activity log instead of a pull request list (`filter` unused).
+    var activity = false
 }
 
 enum Snooze: CaseIterable {
@@ -148,6 +155,11 @@ final class Store {
     /// Earlier-session searches run one at a time, after the previous one.
     @ObservationIgnored private var search: Task<Void, Never>?
     @ObservationIgnored private var finding: Set<String> = []
+    /// Everything PullPing saw and did (`activity.jsonl`); memory only when `!persist`.
+    @ObservationIgnored let activityLog: ActivityLog
+    @ObservationIgnored private var activityCompactedAt = Date.distantPast
+    /// The activity log, oldest first; the file's copy, updated after each write.
+    private(set) var activity: [ActivityEntry] = []
     /// Earlier sessions found per pull request (`SessionFinder`), misses too; kept 10 minutes.
     private(set) var found: [String: (candidate: SessionCandidate?, scanned: Int, at: Date)] = [:]
 
@@ -177,6 +189,7 @@ final class Store {
         tracked = state.state
         automationStore = AutomationStore(url: persist ? AutomationStore.defaultURL : nil)
         automationFile = automationStore.load()
+        activityLog = ActivityLog(url: persist ? ActivityLog.defaultURL() : nil)
         ntfyToken = persist ? Keychain.get(Keychain.ntfyTokenService) : ""
         ntfyFallbackURL = persist ? Keychain.get(Keychain.ntfyFallbackService) : ""
     }
@@ -206,6 +219,7 @@ final class Store {
         syncing = !accounts.filter(\.enabled).isEmpty
         Task { await poller.start(accounts: { await self.accounts }, onReport: { await self.handle($0) }) }
         startClock()
+        compactActivity()
     }
 
     private func startClock() {
@@ -317,9 +331,9 @@ final class Store {
                                           settingsEnabled: automationFile.enabled, paused: isPaused, accounts: accounts, now: now,
                                           sessions: automationFile.sessions)
         for match in plan.auto { run(match.automation, prID: match.pr.id, event: match.event) }
-        // Own events stay silent unless an automation offers to run on one ("when I merge it, …").
-        show(report.events.filter { event in !event.isOwn || plan.offers.contains { $0.event.id == event.id && $0.pr.id == event.prID } },
-             offers: plan.offers)
+        // A new pull request's seeded history stays out of panels and the activity log. Own events go on: `show` logs them
+        // and shows one only when an automation offers to run on it ("when I merge it, …").
+        show(report.events.filter { $0.seeded != true }, offers: plan.offers)
     }
 
     private func reload() {
@@ -364,24 +378,34 @@ final class Store {
 
     // MARK: Notifications and reminders
 
-    /// Groups by PR, drops off/muted/snoozed/paused, one panel per PR, one sound per batch. Phone pushes go out per event.
+    /// Groups by PR, drops own/off/muted/snoozed/paused (`ActivityEntry.Quiet`), one panel per PR, one sound per batch. Phone
+    /// pushes go out per event. Every event goes to the activity log with what happened to it.
     /// `offers` (ask-mode automations) add Run buttons and make the panel an alert, whatever the kind's style. Handle with
     /// Agent adds its buttons after them, without making the panel an alert.
     func show(_ events: [PREvent], offers: [AutomationMatcher.Match] = []) {
         let t = Date()
         push(events, now: t)
         var shown = false
+        var logged: [ActivityEntry] = []
+        defer { record(logged) }
         let byPR = Dictionary(grouping: events, by: \.prID).sorted { ($0.value.map(\.at).max() ?? t) < ($1.value.map(\.at).max() ?? t) }
         for (prID, group) in byPR {
-            guard let pr = tracked.prs[prID], enabledIDs.contains(pr.accountID), settings.allowsNotifications(for: pr, now: t) else { continue }
+            guard let pr = tracked.prs[prID], enabledIDs.contains(pr.accountID) else { continue }
             let prOffers = offers.filter { $0.pr.id == prID }
             let offered = Set(prOffers.map(\.event.id))
-            let styled = group.map { ($0, settings.style(for: $0.kind, mine: pr.roles.contains(.author))) }.filter { $0.1 != .off || offered.contains($0.0.id) }
+            let quiet = group.map { ActivityEntry.Quiet.reason($0, pr: pr, settings: settings, offered: offered.contains($0.id), now: t) }
+            let styled = zip(group, quiet).filter { $0.1 == nil }.map { ($0.0, settings.style(for: $0.0.kind, mine: pr.roles.contains(.author))) }
+            let alert = !prOffers.isEmpty || styled.contains { $0.1 == .alert }
+            let user = account(pr.accountID)?.login ?? ""
+            logged += zip(group, quiet).map { event, quiet in
+                ActivityEntry(event: event, pr: pr, account: user, panel: quiet != nil ? .notShown : alert ? .alert : .banner, quiet: quiet,
+                              phone: settings.pushesToPhone(event, pr: pr, now: t), at: t)
+            }
             guard !styled.isEmpty else { continue }
             let actions = prOffers.map { match in
                 PanelAction(id: match.automation.id, title: "Run \(match.automation.name)") { [weak self] in self?.run(match.automation, prID: match.pr.id, event: match.event) }
             } + (handler.handlerEvent(in: styled.map(\.0)).map { handlerActions(pr, event: $0) } ?? [])
-            NotificationPanels.shared.show(pr: pr, events: styled.map(\.0), alert: !prOffers.isEmpty || styled.contains { $0.1 == .alert },
+            NotificationPanels.shared.show(pr: pr, events: styled.map(\.0), alert: alert,
                                            account: login(for: pr), autoHide: settings.autoHideSeconds, actions: actions)
             shown = true
         }
@@ -415,8 +439,24 @@ final class Store {
     /// nil resumes. Covers panels, phone pushes and reminders.
     func pause(until: Date?) { settings.pausedUntil = until }
 
+    /// Adds to the activity log; `activity` follows once written.
+    func record(_ entries: [ActivityEntry]) { activityLog.append(entries, done: activitySetter) }
+
+    /// Re-reads the activity log (`pullping run` appends too) and drops what is past Keep activity for. Launch, daily, and when
+    /// the Activity list appears.
+    func compactActivity() {
+        activityCompactedAt = Date()
+        activityLog.compact(days: settings.activityDays, now: activityCompactedAt, done: activitySetter)
+    }
+
+    /// From the log's background queue to `activity`, in order.
+    private var activitySetter: @Sendable ([ActivityEntry]) -> Void {
+        { all in DispatchQueue.main.async { MainActor.assumeIsolated { self.activity = all } } }
+    }
+
     private func tick() {
         let pruneAt = Date()
+        if pruneAt.timeIntervalSince(activityCompactedAt) > 86_400 { compactActivity() }
         var byRef: [String: TrackedPR] = [:]
         for pr in tracked.prs.values { byRef["\(pr.repo.lowercased())#\(pr.number)"] = pr }
         automationStore.mutate { file in
@@ -483,7 +523,7 @@ final class Store {
     /// Main-window selection from outside (⌘↩, links): switches the sidebar when the pull request isn't in the current list.
     func reveal(_ id: String) {
         selectedID = id
-        guard let pr = tracked.prs[id], !(listSelection.scope.matches(pr) && listSelection.filter.matches(pr)) else { return }
+        guard let pr = tracked.prs[id], listSelection.activity || !(listSelection.scope.matches(pr) && listSelection.filter.matches(pr)) else { return }
         selection = SidebarItem(scope: settings.inboxLayout == .unified ? .all : .account(pr.accountID), filter: pr.hidden ? .hidden : .all)
     }
 
@@ -764,6 +804,7 @@ final class Store {
                                          label: "\(name) · \(pr.repo) #\(pr.number)"))
                 if error == nil, let link { $0.setLink(link) }
             }
+            self.record([ActivityEntry(run: a, pr: pr, account: login, event: event?.kind, error: error, at: t)])
             self.launching.remove(key)
             self.reload()
         }

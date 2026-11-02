@@ -41,6 +41,7 @@ public enum AutomationCLI {
           handler show|set|on|off                     The Handle with Agent button on notifications.
           run <id> [--pr <ref>] [--dry-run]           Run a rule or hook now, like the Run Automation menu.
           runs [--limit <n> | --all]                  Recent runs, newest first.
+          activity [--since <time>] [--pr <ref>]      What PullPing saw and did: every event, notification and run.
           automations status|on|off|folders|repos     The Run Automations switch, and where {repo_dir} looks.
           kinds                                       The event kinds --on accepts.
           launchers                                   The terminal apps --launcher accepts.
@@ -160,6 +161,19 @@ public enum AutomationCLI {
         Recent runs, newest first: the last 10 (as in Settings), the last <n>, or all of them (the ledger keeps 500).
         """
 
+    public static let activityHelp = """
+        Usage: pullping activity [--limit <n>] [--since <time>] [--pr <url | owner/repo#n>] [--json]
+
+        The activity log, newest first (the last 20, or --limit): every event PullPing saw on a tracked pull request or
+        issue and what it did with it (banner, alert, phone, or not shown and why: your own, notifications off,
+        paused, muted, snoozed, off in Settings), review reminders, and every run it started. A newly tracked pull
+        request's earlier history is not logged. --since: an ISO date (2026-11-01 or 2026-11-01T09:00:00Z) or a
+        number with m, h or d (30m, 2d). --json prints the entries as stored.
+
+        The log is ~/Library/Application Support/PullPing/activity.jsonl (PULLPING_ACTIVITY overrides it): one JSON
+        object per line, kept for 30 days (Settings → General) and at most 5000 entries.
+        """
+
     public static let automationsHelp = """
         Usage: pullping automations status | on | off [--json]
                pullping automations folders list [--json] | folders add <dir> | folders rm <dir>
@@ -253,7 +267,7 @@ public enum AutomationCLI {
         """
 
     private static let helps = ["rule": ruleHelp, "hook": hookHelp, "run": runHelp, "runs": runsHelp, "automations": automationsHelp,
-                                "session": sessionHelp, "handler": handlerHelp]
+                                "session": sessionHelp, "handler": handlerHelp, "activity": activityHelp]
 
     private struct Usage: Error { let message: String }
     private struct Failure: Error { let message: String }
@@ -292,6 +306,7 @@ public enum AutomationCLI {
             case "session": return try session(command, rest, store: store, env: env, now: now, state: state)
             case "handler": return (try handler(command, rest, store: store, env: env, now: now, installed: installed), "", 0)
             case "runs": return (try runs(Array(args.dropFirst()), store: store), "", 0)
+            case "activity": return (try activity(Array(args.dropFirst()), env: env, now: now), "", 0)
             case "automations": return (try master(command, rest, store: store, env: env), "", 0)
             case "kinds": return (try kindList(Array(args.dropFirst())), "", 0)
             case "launchers": return (try launcherList(Array(args.dropFirst()), installed: installed), "", 0)
@@ -797,6 +812,36 @@ public enum AutomationCLI {
             [stamp(run.at), run.ok ? "OK  " : "FAIL", run.label.isEmpty ? String(run.automationID.uuidString.lowercased().prefix(8)) : run.label, run.detail]
                 .joined(separator: "  ")
         }.joined(separator: "\n")
+    }
+
+    private static func activity(_ args: [String], env: [String: String], now: Date) throws -> String {
+        let (values, flags, positional) = try parse(args, options: ["limit", "since", "pr"], flags: ["json"])
+        try noArguments(positional)
+        let limit = try values["limit"].map { raw in
+            guard let n = Int(raw), n >= 1 else { throw Usage(message: "--limit must be a number from 1") }
+            return n
+        } ?? 20
+        let since = try values["since"].map { raw in
+            guard let date = sinceDate(raw, now: now) else { throw Usage(message: "--since: expected an ISO date or a number with m, h or d (30m, 2d), got \(raw)") }
+            return date
+        }
+        let pr = try ref(values["pr"])
+        let entries = Array(ActivityLog.read(ActivityLog.defaultURL(env)).reversed()
+            .filter { e in (since.map { e.at >= $0 } ?? true) && (pr.map { $0.matches(e.repo, e.number) } ?? true) }.prefix(limit))
+        if flags.contains("json") { return try encode(entries) }
+        guard !entries.isEmpty else { return "No activity." }
+        return entries.map { e in [stamp(e.at), "\(e.repo) #\(e.number)", e.what, "→ \(e.outcome)", e.title].joined(separator: "  ") }.joined(separator: "\n")
+    }
+
+    /// `30m`, `1h`, `2d`, `2026-11-01` (local midnight) or a full ISO-8601 date.
+    static func sinceDate(_ text: String, now: Date) -> Date? {
+        let units: [Character: Double] = ["m": 60, "h": 3600, "d": 86_400]
+        if let unit = text.last.flatMap({ units[$0] }), let n = Int(text.dropLast()), n >= 0 { return now.addingTimeInterval(-Double(n) * unit) }
+        if let date = try? Date(text, strategy: .iso8601) { return date }
+        let day = DateFormatter()
+        day.locale = Locale(identifier: "en_US_POSIX")
+        day.dateFormat = "yyyy-MM-dd"
+        return day.date(from: text)
     }
 
     /// Local time, minutes: "2026-11-01 14:02".

@@ -15,15 +15,22 @@ enum RunCLI {
             return AutomationCLI.outcome(error, group: handoff ? "session" : "run")
         }
         let runID = UUID().uuidString
+        // Recorded like the app's runs, then logged in the activity log (the app reads it back).
+        func finish(_ error: String?, cwd: String? = nil) -> (output: String, error: String, status: Int32) {
+            let result = AutomationCLI.finishRun(request, runID: runID, error: error, store: store, now: now, cwd: cwd)
+            ActivityLog.write([ActivityEntry(run: request.automation, pr: request.pr, account: login(request.pr.accountID), event: nil, error: error, at: now)],
+                              appendingTo: ActivityLog.defaultURL(env))
+            return result
+        }
         do {
             let plan = try LaunchPlanner.plan(request.automation, pr: request.pr, event: nil, account: login(request.pr.accountID), runID: runID,
                                               runsDir: AgentLauncher.runsDir, home: NSHomeDirectory(), newSessionID: request.newSessionID,
                                               folders: request.folders, hints: request.hints, installed: { $0.isInstalled })
             if request.dryRun { return (AutomationCLI.dryRun(plan, json: request.json), "", 0) }
-            return AutomationCLI.finishRun(request, runID: runID, error: await AgentLauncher.launch(plan), store: store, now: now, cwd: plan.cwd)
+            return finish(await AgentLauncher.launch(plan), cwd: plan.cwd)
         } catch {
             if request.dryRun { return ("", "pullping: \(error.localizedDescription)", 1) }
-            return AutomationCLI.finishRun(request, runID: runID, error: error.localizedDescription, store: store, now: now)
+            return finish(error.localizedDescription)
         }
     }
 

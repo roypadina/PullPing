@@ -49,6 +49,7 @@ pullping rule add --name "Answer comments" --on comment --scope mine --session l
 - `pullping rule enable|disable|rm <id>`, the same for `hook`. `<id>` is a prefix of at least 4 characters.
 - Check a prompt without starting anything: `pullping run <id> --pr owner/repo#12 --dry-run`. Without `--dry-run` it opens a terminal now.
 - What ran: `pullping runs` (`--json`). Everything off or on: `pullping automations off|on|status`.
+- What happened on a pull request and whether the user was notified: `pullping activity --pr <url> [--since 2d] [--json]`.
 - Exit status 1 = not found, ambiguous, blocked, or `automations.json` unreadable or not saved (the reason is on stderr; an unreadable file is left as it is); 2 = usage error, nothing written.
 
 Rules of conduct:
