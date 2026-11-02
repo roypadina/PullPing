@@ -2,6 +2,13 @@ import AppKit
 import PullPingCore
 import SwiftUI
 
+/// A Run button on a panel: an automation in ask mode, or Handle with Agent.
+struct PanelAction {
+    let id: UUID  // the automation (Handle with Agent: `Automation.handlerID` / `handlerResumeActionID`)
+    let title: String
+    let run: @MainActor () -> Void
+}
+
 /// What one panel shows; coalescing updates it in place.
 @MainActor @Observable final class PanelModel {
     var pr: TrackedPR
@@ -10,9 +17,12 @@ import SwiftUI
     var account: String?
     /// "+N more" summary panel when set.
     var moreCount: Int?
+    var actions: [PanelAction]
+    /// A note panel instead of a pull request's (`pr` is then a placeholder): its title, text and `actions`.
+    var note: (title: String, text: String)?
 
-    init(pr: TrackedPR, events: [PREvent], alert: Bool, account: String?, moreCount: Int? = nil) {
-        self.pr = pr; self.events = events; self.alert = alert; self.account = account; self.moreCount = moreCount
+    init(pr: TrackedPR, events: [PREvent], alert: Bool, account: String?, moreCount: Int? = nil, actions: [PanelAction] = []) {
+        self.pr = pr; self.events = events; self.alert = alert; self.account = account; self.moreCount = moreCount; self.actions = actions
     }
 }
 
@@ -47,11 +57,19 @@ final class NotificationPanels {
     private static let gap: CGFloat = 8
     private static let margin: CGFloat = 12
 
-    func show(pr: TrackedPR, events: [PREvent], alert: Bool, account: String?, autoHide: Int) {
+    /// `actions`: Run and Handle with Agent buttons, offers first.
+    func show(pr: TrackedPR, events: [PREvent], alert: Bool, account: String?, autoHide: Int, actions: [PanelAction] = []) {
         if let index = active.firstIndex(where: { $0.prID == pr.id }) {
             let model = active[index].model
             model.pr = pr
             model.events += events.filter { new in !model.events.contains { $0.id == new.id } }
+            // Handle with Agent's buttons are replaced as a set (a link may have appeared) and stay after the offers.
+            let handlerIDs: Set<UUID> = [Automation.handlerID, Automation.handlerResumeActionID]
+            if actions.contains(where: { handlerIDs.contains($0.id) }) { model.actions.removeAll { handlerIDs.contains($0.id) } }
+            for new in actions {  // a newer offer of the same automation replaces the older one (its event)
+                if let i = model.actions.firstIndex(where: { $0.id == new.id }) { model.actions[i] = new } else { model.actions.append(new) }
+            }
+            model.actions = model.actions.filter { !handlerIDs.contains($0.id) } + model.actions.filter { handlerIDs.contains($0.id) }
             model.alert = model.alert || alert
             scheduleHide(index, seconds: autoHide)
             announce(model)
@@ -69,7 +87,26 @@ final class NotificationPanels {
             }
             return
         }
-        add(prID: pr.id, PanelModel(pr: pr, events: events, alert: alert, account: account), autoHide: autoHide)
+        add(prID: pr.id, PanelModel(pr: pr, events: events, alert: alert, account: account, actions: actions), autoHide: autoHide)
+    }
+
+    /// An alert that is not about a pull request, with its buttons (e.g. "a CLI change made this automation automatic"); a
+    /// newer note with the same `id` replaces it.
+    // shortcut: notes skip the 4-slot limit; fold them into the "+N more" summary if they ever pile up.
+    func show(note: String, title: String, id key: UUID, actions: [PanelAction]) {
+        let id = "note:\(key)"
+        dismiss(prID: id)
+        let model = PanelModel(pr: TrackedPR(id: id, accountID: key, firstTrackedAt: Date()), events: [], alert: true, account: nil, actions: actions)
+        model.note = (title, note)
+        add(prID: id, model, autoHide: 0)
+    }
+
+    /// Handle with Agent's buttons on an open panel, swapped in place (a found session arrived); no panel, nothing.
+    func replaceHandlerActions(prID: String, _ actions: [PanelAction]) {
+        // Only on a panel whose events show the handler (its kinds), as `Store.show` decides.
+        guard let model = active.first(where: { $0.prID == prID })?.model, store?.handler.handlerEvent(in: model.events) != nil else { return }
+        let handlerIDs: Set<UUID> = [Automation.handlerID, Automation.handlerResumeActionID]
+        model.actions = model.actions.filter { !handlerIDs.contains($0.id) } + actions
     }
 
     func dismiss(prID: String) {
@@ -168,7 +205,7 @@ final class NotificationPanels {
 
     /// The panel is never key and the app never active, so VoiceOver gets an announcement (A11Y-6), ≤ 1 per 0.5 s.
     private func announce(_ model: PanelModel) {
-        let text = model.moreCount.map { "\($0) more need attention" }
+        let text = model.note.map { "\($0.title). \($0.text)" } ?? model.moreCount.map { "\($0) more need attention" }
             ?? "\(model.events.last?.kind.label ?? "Update"): \(model.pr.repo) number \(model.pr.number), \(model.pr.title)"
         let at = max(Date(), nextAnnouncement)
         nextAnnouncement = at.addingTimeInterval(0.5)
@@ -227,9 +264,41 @@ struct NotificationContent: View {
     @Environment(\.colorSchemeContrast) private var contrast
 
     private var latest: PREvent? { model.events.last }
-    private var hue: Color { model.moreCount != nil ? Theme.needsYou : latest?.kind.hue ?? Theme.neutral }
+    private var hue: Color { model.moreCount != nil || model.note != nil ? Theme.needsYou : latest?.kind.hue ?? Theme.neutral }
 
     var body: some View {
+        if let note = model.note { noteBody(note) } else { prBody }
+    }
+
+    /// A note: title, text, its button.
+    private func noteBody(_ note: (title: String, text: String)) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Label(note.title, systemImage: "bolt.fill").font(.callout.weight(.semibold)).foregroundStyle(hue).lineLimit(1)
+                Spacer(minLength: 4)
+                Button("Dismiss", systemImage: "xmark", action: onDismiss)
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
+                    .help("Dismiss this notification")
+            }
+            Text(verbatim: note.text).font(.caption).foregroundStyle(.secondary).lineLimit(3).help(note.text)
+            Spacer(minLength: 0)
+            HStack(spacing: 6) {
+                ForEach(Array(model.actions.enumerated()), id: \.offset) { _, action in
+                    Button { action.run(); onDismiss() } label: { Label(action.title, systemImage: "gearshape") }
+                        .buttonStyle(SignalButtonStyle(signal: hue, prominent: true))
+                }
+            }
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .padding(.leading, Theme.rimWidth)
+        .frame(width: Theme.panelWidth, height: Theme.panelHeight, alignment: .topLeading)
+        .background(background)
+        .onHover(perform: onHover)
+    }
+
+    private var prBody: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
                 if let more = model.moreCount {
@@ -258,21 +327,38 @@ struct NotificationContent: View {
             }
             Spacer(minLength: 0)
             HStack(spacing: 6) {
+                // Run buttons need the room: the other buttons go icon-only (help and VoiceOver keep their words), the chip goes.
+                let compact = !model.actions.isEmpty && model.moreCount == nil
                 Button(action: onOpen) {
                     Label(model.moreCount == nil ? "Open" : "Open Window", systemImage: "arrow.up.right.square")
                 }
-                .buttonStyle(SignalButtonStyle(signal: hue, prominent: true))
+                .labelStyle(CompactLabelStyle(compact: compact))
+                .buttonStyle(SignalButtonStyle(signal: hue, prominent: !compact))
                 .help(model.moreCount == nil ? "Open the \(noun) in the browser" : "Open the PullPing window")
                 if model.moreCount == nil {
-                    Button("Snooze…", action: onSnooze)
+                    ForEach(Array(model.actions.prefix(2).enumerated()), id: \.offset) { index, action in
+                        Button { action.run(); onDismiss() } label: {
+                            Label(action.title, systemImage: "play.fill").lineLimit(1)
+                        }
+                        .buttonStyle(SignalButtonStyle(signal: hue, prominent: index == 0))
+                        .help("\(action.title): start the agent in a terminal")
+                    }
+                    if model.actions.count > 2 {
+                        Text(verbatim: "+\(model.actions.count - 2)").font(.callout).foregroundStyle(.secondary)
+                            .help("More in the pull request's menu")
+                            .accessibilityLabel("\(model.actions.count - 2) more in the pull request's menu")
+                    }
+                    Button(action: onSnooze) { Label("Snooze…", systemImage: "moon.zzz") }
+                        .labelStyle(CompactLabelStyle(compact: compact, icon: false))
                         .buttonStyle(SignalButtonStyle(signal: hue))
                         .help("Snooze this \(noun)")
-                    Button(model.pr.isIssue ? "Mute Issue" : "Mute PR", action: onMute)
+                    Button(action: onMute) { Label(model.pr.isIssue ? "Mute Issue" : "Mute PR", systemImage: "bell.slash") }
+                        .labelStyle(CompactLabelStyle(compact: compact, icon: false))
                         .buttonStyle(SignalButtonStyle(signal: hue))
                         .help("Stop notifications and reminders for this \(noun)")
                 }
                 Spacer(minLength: 4)
-                if let account = model.account { Chip(text: account, symbol: "person.crop.circle").fixedSize() }
+                if let account = model.account, !compact { Chip(text: account, symbol: "person.crop.circle").fixedSize() }
             }
         }
         .padding(.vertical, 10)
@@ -305,6 +391,22 @@ struct NotificationContent: View {
         .clipShape(shape)
         .overlay(shape.strokeBorder(contrast == .increased ? AnyShapeStyle(.primary) : AnyShapeStyle(Color.primary.opacity(0.15)),
                                     lineWidth: contrast == .increased ? 2 : 1))
+    }
+}
+
+/// Icon only when `compact`; otherwise the title, with the icon when `icon`.
+private struct CompactLabelStyle: LabelStyle {
+    var compact: Bool
+    var icon = true
+
+    @ViewBuilder func makeBody(configuration: Configuration) -> some View {
+        if compact {
+            Label(configuration).labelStyle(.iconOnly)
+        } else if icon {
+            Label(configuration)
+        } else {
+            Label(configuration).labelStyle(.titleOnly)
+        }
     }
 }
 

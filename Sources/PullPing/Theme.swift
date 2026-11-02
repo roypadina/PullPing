@@ -32,32 +32,31 @@ enum Theme {
 }
 
 extension EventKind {
-    /// (Settings label and panel kind word, row verb, symbol, hue).
-    private var look: (label: String, verb: String, symbol: String, hue: Color) {
+    /// (Row verb, symbol, hue). The Settings label and panel kind word, `label`, is in Core.
+    private var look: (verb: String, symbol: String, hue: Color) {
         switch self {
-        case .comment: ("Comment added", "commented", "bubble.left", Theme.neutral)
-        case .mentioned: ("Mentioned", "mentioned you", "at", Theme.needsYou)
-        case .reviewApproved: ("Review approved", "approved", "checkmark.circle", Theme.good)
-        case .reviewChangesRequested: ("Changes requested", "requested changes", "exclamationmark.bubble", Theme.bad)
-        case .reviewCommented: ("Review comments", "reviewed", "text.bubble", Theme.neutral)
-        case .reviewRequested: ("Review requested", "requested your review", "person.crop.circle.badge.exclamationmark", Theme.needsYou)
-        case .assigned: ("Assigned to me", "assigned you", "person.crop.circle.badge.checkmark", Theme.needsYou)
-        case .newCommits: ("New commits", "pushed commits", "arrow.triangle.branch", Theme.neutral)
-        case .ciPassed: ("CI passed", "CI passed", "checkmark.seal", Theme.good)
-        case .ciFailed: ("CI failed", "CI failed", "xmark.octagon", Theme.bad)
-        case .readyForReview: ("Ready for review", "marked ready", "eye", Theme.neutral)
-        case .convertedToDraft: ("Converted to draft", "converted to draft", "pencil.circle", Theme.neutral)
-        case .merged: ("Merged", "merged", "arrow.triangle.merge", Theme.merged)
-        case .closed: ("Closed", "closed", "xmark.circle", Theme.neutral)
-        case .reopened: ("Reopened", "reopened", "arrow.uturn.left.circle", Theme.neutral)
-        case .reviewDismissed: ("Review dismissed", "dismissed a review", "hand.raised.slash", Theme.neutral)
-        case .retitled: ("Title changed", "renamed", "pencil", Theme.neutral)
-        case .labeled: ("Labels changed", "changed labels", "tag", Theme.neutral)
-        case .reviewReminder: ("Reminder: review requested", "reminder", "bell.badge", Theme.needsYou)
+        case .comment: ("commented", "bubble.left", Theme.neutral)
+        case .mentioned: ("mentioned you", "at", Theme.needsYou)
+        case .reviewApproved: ("approved", "checkmark.circle", Theme.good)
+        case .reviewChangesRequested: ("requested changes", "exclamationmark.bubble", Theme.bad)
+        case .reviewCommented: ("reviewed", "text.bubble", Theme.neutral)
+        case .reviewRequested: ("requested your review", "person.crop.circle.badge.exclamationmark", Theme.needsYou)
+        case .assigned: ("assigned you", "person.crop.circle.badge.checkmark", Theme.needsYou)
+        case .newCommits: ("pushed commits", "arrow.triangle.branch", Theme.neutral)
+        case .ciPassed: ("CI passed", "checkmark.seal", Theme.good)
+        case .ciFailed: ("CI failed", "xmark.octagon", Theme.bad)
+        case .readyForReview: ("marked ready", "eye", Theme.neutral)
+        case .convertedToDraft: ("converted to draft", "pencil.circle", Theme.neutral)
+        case .merged: ("merged", "arrow.triangle.merge", Theme.merged)
+        case .closed: ("closed", "xmark.circle", Theme.neutral)
+        case .reopened: ("reopened", "arrow.uturn.left.circle", Theme.neutral)
+        case .reviewDismissed: ("dismissed a review", "hand.raised.slash", Theme.neutral)
+        case .retitled: ("renamed", "pencil", Theme.neutral)
+        case .labeled: ("changed labels", "tag", Theme.neutral)
+        case .reviewReminder: ("reminder", "bell.badge", Theme.needsYou)
         }
     }
 
-    var label: String { look.label }
     var verb: String { look.verb }
     var symbol: String { look.symbol }
     var hue: Color { look.hue }

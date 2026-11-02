@@ -30,7 +30,7 @@ enum GraphQL {
       nodes(ids: $ids) {
         __typename
         ... on PullRequest {
-          id number title url isDraft state merged mergedAt closedAt updatedAt headRefOid body
+          id number title url isDraft state merged mergedAt closedAt updatedAt headRefOid headRefName body
           reviewDecision mergeStateStatus
           author { login avatarUrl }
           repository { nameWithOwner url isPrivate }
@@ -208,6 +208,7 @@ struct RawPR: Decodable {
     var closedAt: Date?
     var updatedAt: Date
     var headRefOid: String?
+    var headRefName: String?
     var body: String
     var reviewDecision: String?
     var mergeStateStatus: String?

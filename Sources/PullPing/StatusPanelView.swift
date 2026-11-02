@@ -102,6 +102,7 @@ struct StatusPanelView: View {
             .help("Refresh now (⌘R)")
         Menu {
             Button("Open Window") { MainWindow.shared.show() }.keyboardShortcut("1")
+            Button("Activity") { MainWindow.shared.showActivity() }
             Button("Mark All as Read") { store.markAllRead() }
             Button("Dismiss All Notifications") { NotificationPanels.shared.dismissAll() }
             Divider()

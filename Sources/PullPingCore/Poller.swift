@@ -38,6 +38,8 @@ public actor Poller {
 
     private let transport: GraphQLTransport
     private let tokenProvider: @Sendable (Account) -> String?
+    private let refreshToken: @Sendable (Account) -> String?
+    private let saveTokens: @Sendable (Account, OAuthTokens) async -> Bool
     private let store: StateStore
     private let settings: @Sendable () -> AppSettings
     private let now: @Sendable () -> Date
@@ -50,10 +52,16 @@ public actor Poller {
     private let monitor = NWPathMonitor()
     public private(set) var isOffline = false
 
-    public init(transport: GraphQLTransport, tokenProvider: @escaping @Sendable (Account) -> String?, state: StateStore,
+    /// `refreshToken` / `saveTokens`: the Sign in with GitHub refresh token and where a refreshed pair goes (the keychain in the app);
+    /// `saveTokens` returns false when the pair was not saved (keychain write failed, account removed meanwhile).
+    public init(transport: GraphQLTransport, tokenProvider: @escaping @Sendable (Account) -> String?,
+                refreshToken: @escaping @Sendable (Account) -> String? = { _ in nil },
+                saveTokens: @escaping @Sendable (Account, OAuthTokens) async -> Bool = { _, _ in true }, state: StateStore,
                 settings: @escaping @Sendable () -> AppSettings, now: @escaping @Sendable () -> Date = { Date() }) {
         self.transport = transport
         self.tokenProvider = tokenProvider
+        self.refreshToken = refreshToken
+        self.saveTokens = saveTokens
         self.store = state
         self.settings = settings
         self.now = now
@@ -146,9 +154,33 @@ public actor Poller {
         }
     }
 
+    /// An expired Sign in with GitHub token (401) is refreshed once and the poll retried once. Runs inside `poll(account:)`,
+    /// whose busy set keeps one poll per account, so a refresh token (single use) is never sent twice at the same time.
     private func pollOnce(_ account: Account) async -> AccountResult {
+        guard let token = tokenProvider(account), !token.isEmpty else { return AccountResult(status: .badToken, events: [], stats: PollStats()) }
+        let result = await pollOnce(account, token: token)
+        guard result.status == .badToken, let refresh = refreshToken(account), !refresh.isEmpty else { return result }
+        let tokens: OAuthTokens
+        do {
+            tokens = try await DeviceFlow.refresh(refresh, transport: transport)
+        } catch DeviceFlowError.badRefreshToken {
+            // GitHub rejected it for good: forget it so it is not re-sent every poll. The account stays "Token rejected".
+            _ = await saveTokens(account, OAuthTokens(access: token, refresh: ""))
+            return result
+        } catch is DeviceFlowError {
+            return result
+        } catch {
+            // Network trouble, not a rejection: keep the refresh token and report offline/failed like any poll.
+            return AccountResult(status: GitHubClient.status(for: error), events: [], stats: result.stats)
+        }
+        guard await saveTokens(account, tokens) else {
+            return AccountResult(status: .failed("Could not save the renewed GitHub sign-in to the keychain."), events: [], stats: result.stats)
+        }
+        return await pollOnce(account, token: tokens.access)
+    }
+
+    private func pollOnce(_ account: Account, token: String) async -> AccountResult {
         var stats = PollStats()
-        guard let token = tokenProvider(account), !token.isEmpty else { return AccountResult(status: .badToken, events: [], stats: stats) }
         let client = GitHubClient(transport: transport, token: token)
         do {
             // 1. Discover open PRs (and open issues unless tracking them is off).

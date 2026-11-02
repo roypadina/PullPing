@@ -91,6 +91,7 @@ final class StatusItem: NSObject, NSPopoverDelegate {
         closePopover()
         let menu = NSMenu()
         menu.addItem(ClosureMenuItem(title: "Open PullPing", key: "1") { MainWindow.shared.show() })
+        menu.addItem(ClosureMenuItem(title: "Activity") { MainWindow.shared.showActivity() })
         menu.addItem(ClosureMenuItem(title: "Refresh Now") { store.refresh() })
         menu.addItem(ClosureMenuItem(title: "Mark All as Read") { store.markAllRead() })
         menu.addItem(ClosureMenuItem(title: "Dismiss All Notifications") { NotificationPanels.shared.dismissAll() })

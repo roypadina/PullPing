@@ -15,7 +15,37 @@ enum Fixtures {
             state.baselinedAccounts = [personal.id, work.id]
         }
         store.statuses = [personal.id: .ok, work.id: .ok]
+        store.record(sampleActivity(store, now: now))
         return store
+    }
+
+    /// Main window › Activity: banners, alerts, phone, events not shown and why, a run, a launch, one pull request no longer tracked.
+    private static func sampleActivity(_ store: Store, now: Date) -> [ActivityEntry] {
+        func ago(_ minutes: Double) -> Date { now.addingTimeInterval(-minutes * 60) }
+        func login(_ pr: TrackedPR) -> String { store.account(pr.accountID)?.login ?? "" }
+        func shown(_ minutes: Double, _ prID: String, _ eventID: String, _ panel: ActivityEntry.Panel, quiet: ActivityEntry.Quiet? = nil,
+                   phone: Bool = false) -> ActivityEntry? {
+            guard let pr = store.tracked.prs[prID], let event = pr.events.first(where: { $0.id == eventID }) else { return nil }
+            return ActivityEntry(event: event, pr: pr, account: login(pr), panel: panel, quiet: quiet, phone: phone, at: ago(minutes))
+        }
+        func ran(_ minutes: Double, _ prID: String, _ automation: Automation, event: EventKind) -> ActivityEntry? {
+            store.tracked.prs[prID].map { ActivityEntry(run: automation, pr: $0, account: login($0), event: event, error: nil, at: ago(minutes)) }
+        }
+        var gone = TrackedPR(id: "PR_GONE", accountID: personal.id, firstTrackedAt: now)
+        gone.repo = "octo-org/widgets"
+        gone.number = 101
+        gone.title = "Drop the old config format"
+        gone.url = URL(string: "https://github.com/octo-org/widgets/pull/101")!
+        let merged = PREvent(id: "E0", prID: gone.id, kind: .merged, actor: "alice", at: ago(1560), summary: "", url: nil, isOwn: false)
+        let fixCI = Automation(name: "Fix failing CI", kinds: [.ciFailed], workingDirectory: "{worktree_dir}")
+        let entries = [ActivityEntry(event: merged, pr: gone, account: personal.login, panel: .alert, quiet: nil, phone: true, at: ago(1560)),
+                       shown(1500, "PR_7", "E10", .notShown, quiet: .own), shown(240, "PR_1", "E1", .notShown, quiet: .own),
+                       shown(180, "PR_5", "E8", .banner), ran(170, "PR_5", Automation.defaultHandler(), event: .comment),
+                       shown(90, "PR_1", "E2", .banner), shown(40, "PR_2", "E4", .alert, phone: true),
+                       shown(30, "I_1", "E12", .notShown, quiet: .styleOff), shown(12, "PR_6", "E9", .notShown, quiet: .muted),
+                       shown(5, "PR_1", "E3", .banner), shown(3, "I_1", "E13", .banner), shown(2, "PR_2", "E5", .alert, phone: true),
+                       ran(1.5, "PR_2", fixCI, event: .ciFailed), shown(1, "PR_3", "E6", .alert, phone: true)]
+        return entries.compactMap { $0 }
     }
 
     /// One banner (approved, mine), one alert (CI failed, mine), one review request (someone else's).

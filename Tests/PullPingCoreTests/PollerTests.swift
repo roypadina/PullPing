@@ -172,6 +172,108 @@ final class PollerTests: XCTestCase {
         XCTAssertEqual(result?.status, .badToken)
     }
 
+    /// `ok` = what `saveTokens` answers (false: keychain write failed or account removed).
+    final class Saved: @unchecked Sendable { var tokens: [OAuthTokens] = []; var ok = true }
+
+    /// GitHub rejects the `rejected` tokens (expired); the refresh endpoint answers `refreshReply`, or throws `refreshError`.
+    func expiringTransport(_ refreshReply: String, rejected: Set<String> = ["bearer gho_old"], refreshError: URLError? = nil) -> FakeTransport {
+        let github = github
+        return FakeTransport { request in
+            if request.url?.host == "github.com" {
+                if let refreshError { throw refreshError }
+                return (200, [:], Data(refreshReply.utf8))
+            }
+            if rejected.contains(request.value(forHTTPHeaderField: "Authorization") ?? "") { return (401, [:], Data(#"{"message":"Bad credentials"}"#.utf8)) }
+            return github.reply(request)
+        }
+    }
+
+    func expiringPoller(_ transport: FakeTransport, saved: Saved) -> Poller {
+        Poller(transport: transport, tokenProvider: { _ in "gho_old" }, refreshToken: { _ in "ghr_old" },
+               saveTokens: { saved.tokens.append($1); return saved.ok }, state: store, settings: { AppSettings() })
+    }
+
+    func testExpiredSignInTokenIsRefreshedOnceAndThePollRetried() async throws {
+        seed()
+        let saved = Saved()
+        let fake = expiringTransport(#"{"access_token":"gho_new","refresh_token":"ghr_new","expires_in":28800}"#)
+        let result = try await polled(expiringPoller(fake, saved: saved))
+        XCTAssertEqual(result.status, .ok)
+        XCTAssertEqual(result.stats.refreshed, 2)
+        XCTAssertEqual(saved.tokens, [OAuthTokens(access: "gho_new", refresh: "ghr_new")])
+        let refreshes = fake.requests.filter { $0.url?.host == "github.com" }
+        XCTAssertEqual(refreshes.count, 1)
+        XCTAssertTrue(String(decoding: refreshes[0].httpBody!, as: UTF8.self).contains("refresh_token=ghr_old"))
+        XCTAssertEqual(fake.requests.last?.value(forHTTPHeaderField: "Authorization"), "bearer gho_new")
+    }
+
+    /// Any other GitHub error: keep the refresh token, stay "Token rejected".
+    func testFailedRefreshKeepsBadToken() async throws {
+        seed()
+        let saved = Saved()
+        let fake = expiringTransport(#"{"error":"unsupported_grant_type"}"#)
+        let result = try await polled(expiringPoller(fake, saved: saved))
+        XCTAssertEqual(result.status, .badToken)
+        XCTAssertTrue(saved.tokens.isEmpty)
+        XCTAssertEqual(fake.requests.filter { $0.url?.host == "github.com" }.count, 1)
+        XCTAssertEqual(fake.requests.count, 2)  // one rejected poll, one refresh, no retry
+    }
+
+    /// A refresh token GitHub rejected is deleted (access token kept as is), so it is not re-sent every poll.
+    func testRejectedRefreshTokenIsForgotten() async throws {
+        seed()
+        let saved = Saved()
+        let fake = expiringTransport(#"{"error":"bad_refresh_token","error_description":"The refresh token passed is incorrect or expired."}"#)
+        let result = try await polled(expiringPoller(fake, saved: saved))
+        XCTAssertEqual(result.status, .badToken)
+        XCTAssertEqual(saved.tokens, [OAuthTokens(access: "gho_old", refresh: "")])
+        XCTAssertEqual(fake.requests.count, 2)  // no retry
+    }
+
+    /// The refresh request never got an answer: offline (not "Token rejected"), refresh token kept for the next poll.
+    func testRefreshTransportErrorKeepsRefreshTokenAndReportsOffline() async throws {
+        seed()
+        let saved = Saved()
+        let fake = expiringTransport("", refreshError: URLError(.timedOut))
+        let result = try await polled(expiringPoller(fake, saved: saved))
+        XCTAssertEqual(result.status, .offline)
+        XCTAssertTrue(saved.tokens.isEmpty)
+        XCTAssertEqual(fake.requests.filter { $0.url?.host == "github.com" }.count, 1)
+        XCTAssertEqual(fake.requests.count, 2)
+    }
+
+    /// The refreshed token is rejected too: one refresh, one retry, then "Token rejected" — no loop.
+    func testRetryAlsoRejectedRefreshesOnlyOnce() async throws {
+        seed()
+        let saved = Saved()
+        let fake = expiringTransport(#"{"access_token":"gho_new","refresh_token":"ghr_new"}"#, rejected: ["bearer gho_old", "bearer gho_new"])
+        let result = try await polled(expiringPoller(fake, saved: saved))
+        XCTAssertEqual(result.status, .badToken)
+        XCTAssertEqual(saved.tokens, [OAuthTokens(access: "gho_new", refresh: "ghr_new")])
+        XCTAssertEqual(fake.requests.filter { $0.url?.host == "github.com" }.count, 1)
+        XCTAssertEqual(fake.requests.count, 3)  // rejected poll, refresh, rejected retry
+    }
+
+    /// Tokens not saved (keychain write failed, or the account was removed meanwhile): reported, no retry poll.
+    func testUnsavedRefreshSkipsTheRetry() async throws {
+        seed()
+        let saved = Saved()
+        saved.ok = false
+        let fake = expiringTransport(#"{"access_token":"gho_new","refresh_token":"ghr_new"}"#)
+        let result = try await polled(expiringPoller(fake, saved: saved))
+        XCTAssertEqual(result.status, .failed("Could not save the renewed GitHub sign-in to the keychain."))
+        XCTAssertEqual(fake.requests.count, 2)
+        XCTAssertFalse(fake.requests.contains { $0.value(forHTTPHeaderField: "Authorization") == "bearer gho_new" })
+    }
+
+    /// Personal access tokens (no refresh token): a 401 is final, nothing goes to github.com.
+    func testBadTokenWithoutRefreshTokenIsNotRefreshed() async throws {
+        let fake = expiringTransport("")
+        let result = try await polled(Poller(transport: fake, tokenProvider: { _ in "gho_old" }, state: store, settings: { AppSettings() }))
+        XCTAssertEqual(result.status, .badToken)
+        XCTAssertEqual(fake.requests.count, 1)
+    }
+
     /// I_1: carol's issue, assigned to me and mentioning me in its body (loud if it weren't a baseline).
     func seedIssue(updatedAt: Date = t0, timeline: String = "") {
         github.prs["I_1"] = .init(updatedAt: updatedAt, node: issueNode("I_1", number: 9, author: "carol", updatedAt: updatedAt, assignees: [me],

@@ -43,6 +43,7 @@ extension GitHubClient {
         s.updatedAt = raw.updatedAt
         s.closedAt = raw.closedAt ?? raw.mergedAt
         s.headOID = raw.headRefOid ?? ""
+        s.headRef = raw.headRefName
         let commit = raw.commits?.items.first?.commit
         s.headAuthorLogin = commit?.author?.user?.login ?? commit?.author?.name
         s.ci = CIState(rollup: commit?.statusCheckRollup?.state)

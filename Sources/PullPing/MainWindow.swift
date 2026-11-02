@@ -53,4 +53,10 @@ final class MainWindow {
         }
         if let window { AccessoryWindows.shared.show(window) }
     }
+
+    /// The activity log (All Accounts, or the first account with the per-account layout).
+    func showActivity() {
+        store?.selection = SidebarItem(scope: .all, filter: .all, activity: true)
+        show()
+    }
 }

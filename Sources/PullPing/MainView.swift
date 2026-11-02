@@ -4,23 +4,40 @@ import SwiftUI
 struct MainView: View {
     @Bindable var store: Store
     @State private var query = ""
+    @State private var activityRow: Int?
 
     var body: some View {
+        let activity = store.listSelection.activity
         NavigationSplitView {
             SidebarView(store: store)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 280)
         } content: {
-            PRListView(store: store, query: $query)
-                .navigationSplitViewColumnWidth(min: 300, ideal: 380, max: 560)
+            Group {
+                if activity {
+                    ActivityView(store: store, query: $query, selection: $activityRow)
+                } else {
+                    PRListView(store: store, query: $query)
+                }
+            }
+            .navigationSplitViewColumnWidth(min: 300, ideal: 380, max: 560)
         } detail: {
             if let pr = store.selectedPR {
                 PRDetailView(store: store, pr: pr)
+            } else if activity, let i = activityRow, store.activity.indices.contains(i) {
+                let entry = store.activity[i]
+                ContentUnavailableView {
+                    Label("Not Tracked", systemImage: "archivebox")
+                } description: {
+                    Text(verbatim: "PullPing no longer tracks \(entry.repo) #\(entry.number).")
+                } actions: {
+                    if let url = entry.url { Button("Open in Browser") { NSWorkspace.shared.open(url) } }
+                }
             } else {
                 ContentUnavailableView("No Selection", systemImage: "arrow.triangle.pull",
                                        description: Text("Select a pull request to see its reviewers, checks and activity."))
             }
         }
-        .navigationTitle("Pull Requests")
+        .navigationTitle(activity ? "Activity" : "Pull Requests")
         .navigationSubtitle(store.freshness)
         .frame(minWidth: 900, minHeight: 520)
         .task(id: store.selectedID) {  // selected for ≥ 1 s = read
@@ -53,12 +70,14 @@ struct SidebarView: View {
         }
     }
 
-    private func rows(_ scope: Scope) -> some View {
+    @ViewBuilder private func rows(_ scope: Scope) -> some View {
         ForEach(Filter.allCases, id: \.self) { filter in
             Label(filter.title, systemImage: filter.symbol)
                 .badge(store.count(scope, filter))
                 .tag(SidebarItem(scope: scope, filter: filter))
         }
+        Label("Activity", systemImage: "clock.arrow.circlepath")
+            .tag(SidebarItem(scope: scope, filter: .all, activity: true))
     }
 
     private func header(_ account: Account) -> some View {
@@ -296,9 +315,54 @@ struct PRMenuItems: View {
                     Button(option.title) { store.snooze(ids, option) }
                 }
             }
+            if ids.count == 1, let pr = ids.first.flatMap({ store.tracked.prs[$0] }) {
+                RunAutomationMenu(store: store, pr: pr)
+            }
             Divider()
             Button("Stop Tracking") { store.stopTracking(ids) }
         }
+    }
+}
+
+/// Handle with Agent, then the rules that fit the pull request plus its hooks, run now (a manual run). Dimmed when there is
+/// nothing to run or Automations are off.
+struct RunAutomationMenu: View {
+    let store: Store
+    let pr: TrackedPR
+    /// Icon only: the detail toolbar.
+    var compact = false
+
+    var body: some View {
+        let automations = store.automations(for: pr)
+        Menu {
+            if store.handlerShown {
+                if let link = store.link(for: pr) {
+                    Button("Resume Session (\(link.sessionID.prefix(4))…)") { store.runHandler(prID: pr.id, mode: .resume, event: nil) }
+                    Button("New Session") { store.runHandler(prID: pr.id, mode: .new, event: nil) }
+                } else {
+                    if let found = store.foundSession(for: pr) {
+                        Button("Resume Earlier Session (\(found.sessionID.prefix(4))…, \(relativeAge(found.modifiedAt, now: store.now)))") {
+                            store.resumeFound(found, prID: pr.id, event: nil)
+                        }
+                        .help(PRDetailView.help(found))
+                        Button("New Session") { store.runHandler(prID: pr.id, mode: .new, event: nil) }
+                    } else {
+                        Button("Handle with Agent") { store.runHandler(prID: pr.id, mode: .handle, event: nil) }
+                    }
+                    Button("Find Earlier Session…") { store.findEarlierSession(prID: pr.id) }
+                }
+                if !automations.isEmpty { Divider() }
+            }
+            ForEach(automations) { automation in
+                let blocked = store.runBlocked(automation, pr)
+                Button(blocked.map { "\(automation.name) (\($0))" } ?? automation.name) { store.run(automation, prID: pr.id, event: nil) }
+                    .disabled(blocked != nil)
+            }
+        } label: {
+            if compact { Label("Run Automation", systemImage: "play.circle").labelStyle(.iconOnly) } else { Text("Run Automation") }
+        }
+        .help("Run Automation")
+        .disabled((automations.isEmpty && !store.handlerShown) || !store.automationsEnabled)
     }
 }
 
@@ -338,6 +402,36 @@ struct PRDetailView: View {
                     }
                 }
             }
+            let hooks = store.automations(for: pr).filter(\.isHook)
+            if !hooks.isEmpty {
+                Section("Agent Hooks") {
+                    ForEach(hooks) { hook in
+                        HStack {
+                            Text(verbatim: AutomationsTab.line(hook)).lineLimit(2)
+                            Spacer(minLength: 8)
+                            Button("Remove") { store.removeAutomation(hook.id) }
+                        }
+                    }
+                }
+            }
+            if let link = store.link(for: pr) {
+                Section("Agent Session") {
+                    HStack {
+                        Text(verbatim: AutomationsTab.line(link, now: store.now, pr: false)).lineLimit(2)
+                        Spacer(minLength: 8)
+                        Button("Remove") { store.removeLink(link) }
+                    }
+                }
+            } else if store.handlerShown, store.automationFile.findSessions, let found = store.foundSession(for: pr) {
+                Section("Agent Session") {
+                    HStack {
+                        Text(verbatim: "Earlier session: \(found.agent.rawValue) \(found.sessionID.prefix(8))…, \(relativeAge(found.modifiedAt, now: store.now))")
+                            .lineLimit(2).help(Self.help(found))
+                        Spacer(minLength: 8)
+                        Button("Resume") { store.resumeFound(found, prID: pr.id, event: nil) }
+                    }
+                }
+            }
             Section("Activity") {
                 if pr.events.isEmpty { Text("No activity yet").foregroundStyle(.secondary) }
                 ForEach(pr.events.reversed(), id: \.id) { event in
@@ -351,8 +445,16 @@ struct PRDetailView: View {
                     .help("Open in browser (⇧⌘O)")
                 Button("Mark as Read", systemImage: "envelope.open") { store.markRead([pr.id]) }
                     .help("Mark as read (⇧⌘U)")
+                RunAutomationMenu(store: store, pr: pr, compact: true)
             }
         }
+        .task(id: pr.id) { if store.handlerShown { store.findSession(prID: pr.id) } }  // no link + Look for earlier sessions: the toolbar menu may offer it
+    }
+
+    /// A found session's tooltip: its title, where it started, whether it may be open.
+    static func help(_ found: SessionCandidate) -> String {
+        ([found.title.isEmpty ? nil : "\u{201C}\(found.title)\u{201D}", "Launched in \((found.launchDir as NSString).abbreviatingWithTildeInPath)",
+          "Found by \(found.tier)", found.mayBeOpen ? "May be open in another terminal" : nil] as [String?]).compactMap { $0 }.joined(separator: " · ")
     }
 
     private var header: some View {

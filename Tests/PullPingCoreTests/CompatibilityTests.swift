@@ -16,6 +16,7 @@ final class CompatibilityTests: XCTestCase {
         XCTAssertFalse(pr.hidden)
         XCTAssertFalse(pr.isIssue)
         XCTAssertNil(pr.stateReason)
+        XCTAssertNil(pr.headRef)  // until the next refresh
         XCTAssertNil(state.baselinedIssueAccounts)  // issue baseline still to come
         XCTAssertTrue(pr.muted)
         XCTAssertEqual(pr.events.count, 1)
