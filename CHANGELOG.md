@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Check for Updates…** button in Settings → General → About, next to the About and Welcome Guide buttons.
+
 ## [0.6.0] - 2026-11-04
 
 ### Added

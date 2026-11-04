@@ -456,6 +456,7 @@ struct GeneralTab: View {
             Section("About") {
                 HStack {
                     Button("About PullPing…") { AboutWindow.show() }
+                    Button("Check for Updates…") { Updates.check() }
                     Button("Welcome Guide…") { WelcomeWindow.show() }
                     Button("Support on Ko-fi ☕") { NSWorkspace.shared.open(AboutInfo.kofi) }
                 }
