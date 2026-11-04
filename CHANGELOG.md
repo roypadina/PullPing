@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-04
+
+### Added
+- Updates from inside the app. PullPing checks for a new version once a day and asks before installing it; tick "Automatically download and install updates" in that prompt to skip the question next time. The check downloads the release feed from GitHub and sends nothing about you. Check by hand with **Check for Updates…** in the About window. Updates are signed, and installing one this way needs no `xattr` step.
+
 ## [0.5.0] - 2026-11-02
 
 ### Added

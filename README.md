@@ -83,6 +83,11 @@ xattr -dr com.apple.quarantine /Applications/PullPing.app
 A **Welcome** window then explains where PullPing lives and offers to open it at login (you can change it later in
 Settings → General); PullPing never adds itself silently. **Settings → General → About → Welcome Guide…** opens it again.
 
+### Updating
+
+PullPing checks for a new version once a day and asks before installing it (**Check for Updates…** in the About
+window checks now). An in-app update needs no `xattr` step. Homebrew users can also run `brew upgrade --cask pullping`.
+
 ### Build from source
 
 ```bash
@@ -394,7 +399,7 @@ only through the toggle you turn on yourself.
 
 - **Tokens** live in your login keychain, one item per account (`com.padina.pullping.token.<id>`), plus `com.padina.pullping.token.<id>.refresh` for a Sign in with GitHub refresh token. They are sent only to GitHub and never written to a file or a log. The optional ntfy access token and fallback topic URL live there too (`com.padina.pullping.ntfy-token`, `com.padina.pullping.ntfy-fallback`).
 - **Your data stays on your Mac** in `~/Library/Application Support/PullPing` (pull request titles, activity and your mute and snooze choices) and in the app's preferences.
-- **Only `api.github.com`, `github.com` and `avatars.githubusercontent.com` are contacted** (`github.com` only for Sign in with GitHub; the avatars host for account pictures), plus your ntfy server once you set up phone notifications: it receives the title, repository and latest activity of the pull requests you chose to send, and a footer line naming the sender as `pullping@<your Mac's short hostname>`.
+- **Only `api.github.com`, `github.com` and `avatars.githubusercontent.com` are contacted** (`github.com` for Sign in with GitHub and the daily update check, whose download comes from `release-assets.githubusercontent.com`; the avatars host for account pictures), plus your ntfy server once you set up phone notifications: it receives the title, repository and latest activity of the pull requests you chose to send, and a footer line naming the sender as `pullping@<your Mac's short hostname>`.
 - **No analytics, no telemetry, no crash reporting, no accounts on any other service.**
 
 ## Uninstall

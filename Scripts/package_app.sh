@@ -26,6 +26,9 @@ rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
 cp "$BIN_DIR/$APP_NAME" "$MACOS_DIR/$APP_NAME"
+# Sparkle (in-app updates): the framework SwiftPM puts next to the binary; ditto keeps its symlinks.
+mkdir -p "$CONTENTS_DIR/Frameworks"
+ditto "$BIN_DIR/Sparkle.framework" "$CONTENTS_DIR/Frameworks/Sparkle.framework"
 cp Info.plist "$CONTENTS_DIR/Info.plist"
 cp Assets/icons/menubar.png Assets/icons/menubar@2x.png "$RESOURCES_DIR/"
 
@@ -55,9 +58,10 @@ if [[ -z "$SIGN_IDENTITY" ]]; then
 fi
 SIGN_WITH="${SIGN_IDENTITY:--}"
 
-# Inside-out: nested code first (none today), then the app. No hardened runtime: it was never enabled.
-for nested in "$CONTENTS_DIR"/Frameworks/* "$CONTENTS_DIR"/XPCServices/*; do
-    [[ -e "$nested" ]] && codesign --force --sign "$SIGN_WITH" "$nested"
+# Inside-out: Sparkle's helpers and framework, then the app. No hardened runtime: it was never enabled.
+find "$CONTENTS_DIR" -depth \( -name '*.framework' -o -name '*.xpc' -o -name '*.app' -o -name '*.dylib' \
+    -o \( -name Autoupdate -type f \) \) | while read -r nested; do
+    codesign --force --preserve-metadata=identifier,entitlements,flags --sign "$SIGN_WITH" "$nested"
 done
 codesign --force --sign "$SIGN_WITH" --identifier "$BUNDLE_ID" "$APP_DIR"
 codesign --verify --deep --strict "$APP_DIR"
@@ -73,6 +77,26 @@ if [[ -n "$RELEASE" ]]; then
     ditto -c -k --norsrc --noextattr --keepParent "$APP_DIR" "$ZIP"
     echo "SHA-256: $(shasum -a 256 "$ZIP" | awk '{print $1}')"
     echo "$ZIP"
+
+    # Sparkle feed for this release only (uploaded next to the zip; the app reads the latest release's
+    # appcast.xml). Only with the key whose public half the app ships; any other key makes a feed every
+    # copy refuses.
+    SPARKLE=.build/artifacts/sparkle/Sparkle/bin
+    if [[ "$("$SPARKLE/generate_keys" -p 2>/dev/null || true)" == "$(/usr/libexec/PlistBuddy -c 'Print SUPublicEDKey' Info.plist)" ]]; then
+        VER=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' Info.plist)
+        FEED_DIR=$(mktemp -d)
+        cp "$ZIP" "$FEED_DIR/"
+        # This version's CHANGELOG section becomes the update prompt's release notes.
+        awk -v v="## [$VER]" 'index($0, v) == 1 {f=1; next} /^## \[/ {f=0} f' CHANGELOG.md > "$FEED_DIR/$APP_NAME.md"
+        rm -f "$DIST_DIR/appcast.xml"  # generate_appcast merges into an existing file
+        "$SPARKLE/generate_appcast" --embed-release-notes \
+            --download-url-prefix "https://github.com/roypadina/PullPing/releases/download/v$VER/" \
+            -o "$DIST_DIR/appcast.xml" "$FEED_DIR"
+        rm -rf "$FEED_DIR"
+        echo "$DIST_DIR/appcast.xml"
+    else
+        echo "Sparkle signing key (matching SUPublicEDKey) not in the keychain: no appcast.xml"
+    fi
 fi
 
 echo "$APP_DIR"

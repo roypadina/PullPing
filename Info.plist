@@ -17,7 +17,7 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.5.0</string>
+    <string>0.6.0</string>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>
@@ -30,7 +30,7 @@
         </dict>
     </array>
     <key>CFBundleVersion</key>
-    <string>7</string>
+    <string>8</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>LSUIElement</key>
@@ -39,5 +39,12 @@
     <string>PullPing asks Ghostty to open a new window when an agent automation runs in Ghostty.</string>
     <key>NSHumanReadableCopyright</key>
     <string>© Roy Padina. MIT License.</string>
+    <!-- Sparkle updates: the feed is the appcast.xml asset of the latest GitHub release. -->
+    <key>SUFeedURL</key>
+    <string>https://github.com/roypadina/PullPing/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>qq4oZAVmJanKJ1bTAzGSO94WWX6cx+/5kCjBZxJXEm0=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
 </dict>
 </plist>
