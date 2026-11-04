@@ -17,13 +17,19 @@ let package = Package(
             targets: ["PullPing"]
         )
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.10.0")
+    ],
     targets: [
         .target(
             name: "PullPingCore"
         ),
         .executableTarget(
             name: "PullPing",
-            dependencies: ["PullPingCore"]
+            dependencies: ["PullPingCore", .product(name: "Sparkle", package: "Sparkle")],
+            // Sparkle.framework is embedded in Contents/Frameworks (Scripts/package_app.sh). dyld resolves
+            // @executable_path through the cask's `pullping` symlink, so the CLI finds it too.
+            linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
         ),
         .testTarget(
             name: "PullPingCoreTests",
