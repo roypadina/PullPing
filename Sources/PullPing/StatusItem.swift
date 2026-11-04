@@ -113,6 +113,8 @@ final class StatusItem: NSObject, NSPopoverDelegate {
             menu.addItem(NSMenuItem(title: "Paused until \(until.formatted(date: .omitted, time: .shortened))", action: nil, keyEquivalent: ""))
         }
         menu.addItem(.separator())
+        menu.addItem(ClosureMenuItem(title: Updates.menuTitle) { Updates.check() })
+        menu.addItem(.separator())
         menu.addItem(ClosureMenuItem(title: "Settings…", key: ",") { SettingsWindow.shared.show() })
         menu.addItem(ClosureMenuItem(title: "About PullPing") { AboutWindow.show() })
         menu.addItem(ClosureMenuItem(title: "Support on Ko-fi ☕") { NSWorkspace.shared.open(AboutInfo.kofi) })
