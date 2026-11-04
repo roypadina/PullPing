@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-04
+
 ### Added
 - **Check for Updates…** button in Settings → General → About, next to the About and Welcome Guide buttons.
 - The menu-bar icon's right-click menu has **Check for Updates…**, which becomes **Install Update X.Y.Z…** once PullPing has found a newer version.
