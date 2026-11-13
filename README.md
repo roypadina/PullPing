@@ -52,6 +52,7 @@ brew install --cask roypadina/tap/pullping
 - **Main window.** Mail-style sidebar: the same rows for All Accounts and for each account, with counts of what is your turn, search across every row, and a detail view with whose turn it is, reviewers (and the commit each reviewed), checks and the recent activity of the selected pull request. Prefer one inbox per account? Settings → General → Inbox → Per account.
 - **Phone notifications** through [ntfy](https://ntfy.sh), chosen per kind of event, separately from the desktop panels.
 - **Agent automations.** Start Claude Code or Codex in a terminal when a pull request event arrives: rules you write in Settings, or hooks an agent attaches from the command line ("resume this session when the pull request is approved"). Asks first by default.
+- **Background reviews, posted only by you.** Optionally, your agent reviews or summarizes a pull request without a terminal, with read-only tools, and hands you a draft: you edit it and click Post (comment, request changes or approve). Nothing reaches GitHub without that click.
 - **Notifications only when something needs you.** A small panel appears at the top right when a review is asked of you, your pull request needs a fix or is ready to merge, or you are mentioned or assigned. It never takes keyboard focus and is grouped per pull request. Merges, passing CI, new commits and the rest go to Activity without a notification. Pick Off, Banner (hides itself) or Alert (stays) for each reason.
 - **Activity.** Everything PullPing saw and did, in one list: every event, whether it notified you or went to your phone, plus every automation run. Filter it, and see what is new since your last look.
 - **Review reminders.** While a review or re-review waits on you, PullPing nudges you again every so often until you review, the request is removed, or the pull request is merged or closed.
@@ -184,7 +185,8 @@ Link**. A newly tracked pull request's earlier history is not listed. Entries ar
 PullPing can start a local coding agent ([Claude Code](https://docs.anthropic.com/en/docs/claude-code) or
 [Codex](https://github.com/openai/codex)) in a terminal when a pull request event arrives. It writes the prompt to a
 file and a small script, opens a terminal that runs it, and stops there: it never talks to the agent, never reads its
-output and never adds a permission flag.
+output and never adds a permission flag. [Background runs](#background-runs-and-drafts), off by default, are the one
+exception: there the agent only reads, and its answer is a draft you post yourself.
 
 ### Set it up with your agent
 
@@ -331,6 +333,34 @@ it refuses a session whose transcript changed in the last 2 minutes (probably op
 starts it anyway; with Ghostex as the app, one open there is focused instead, with the prompt line typed in), the calling session itself (even with `--force`) and a second hand-off on the same pull request
 within a minute. Recent Runs shows who handed off (`--by`, default the calling session).
 
+### Background runs and drafts
+
+Off by default: **Settings → Automations → Background Runs**. Then each pull request's **Handle with Agent ▸** menu
+(the row's context menu, the detail toolbar, Pull Request in the menu bar, and the notification's ⌄ with Handle with Agent on) ends with **In
+Background**: **Review in Background** (others' open pull requests) and **Summarize**. PullPing starts your agent
+without a terminal, and the run ends in a **draft**: a notification **Review draft ready** with the agent's summary
+and the verdict it suggests, and **Review Draft…**, **Open Session** and **Discard**.
+
+<p align="center"><img src="docs/screenshots/notification-draft-ready.png" width="440" alt="A Review draft ready notification with Review Draft, Open Session and Discard"></p>
+
+**Review Draft…** opens the draft in a window: you edit the text, pick **Comment**, **Request changes** or
+**Approve** (the agent's suggestion is preselected), and click Post. PullPing posts it as one review with the account
+that tracks the pull request, pinned to the commit the agent reviewed. Return only ever posts a comment; Approve and
+Request changes are refused once the pull request moved past that commit (**Run Again** drafts a new review). The
+first post per account asks once, since until then PullPing only read from GitHub. **Open Session** resumes the
+agent's session in a terminal, without a prompt, where you can ask it more.
+
+<p align="center"><img src="docs/screenshots/draft-window.png" width="560" alt="The draft window with the review text, Comment, Request changes and Approve, and Post"></p>
+
+A summary shows as a notification with **Copy** instead. The pull request's details show its latest draft (**Agent
+Draft**), and so does its Activity line (right-click → Review Draft…), for 7 days. A rule can run in the background
+too (**Run: Review in the background** in the rule editor, `--background review`), for example to draft a review
+whenever yours is requested; it then drafts one review per head commit.
+
+Limits: at most 2 runs at once and 10 waiting, 20 runs a day (Settings; automatic and manual together), 10 minutes
+per run (then it stops: "timed out"). Cancel Background Review in the same menu stops one; quitting PullPing
+interrupts running runs, and they are not restarted. A run uses Handle with Agent's agent and command, or the rule's.
+
 ### From the command line
 
 The `pullping` command is the app itself. Homebrew puts it on your PATH; from source, link it (Settings → Automations
@@ -366,8 +396,10 @@ Everything the Automations tab does has a command: `pullping rule|hook add|edit|
 With), `pullping prompts list|show|set|reset` (Prompts), `pullping setup guide|prompt|status` (the agent setup),
 `pullping run <id> --pr <ref>` (Run Automation; `--dry-run` only prints what it would start), `pullping runs` (Recent
 Runs), `pullping automations on|off|status`, `pullping automations folders|fallback|repos` (Repository Folders),
-`pullping kinds` (the event names), `pullping launchers` (where it can open) and `pullping activity` (the
-[Activity](#activity) list). Every reader takes `--json` and
+`pullping kinds` (the event names), `pullping launchers` (where it can open), `pullping background
+on|off|status|set|run|list|cancel` and `pullping drafts list|show|discard` ([background runs](#background-runs-and-drafts);
+`background run review --pr <ref> --dry-run` prints the agent's command line and prompt; no command posts a draft) and
+`pullping activity` (the [Activity](#activity) list). Every reader takes `--json` and
 prints what `automations.json` stores, so an agent can read an automation and write it back with flags.
 `pullping --help`, `pullping rule --help` and `pullping hook --help` list every option (Codex: `--agent codex --session
 <thread id>`; `--auto` starts without asking). It works while PullPing is not running: the app picks changes up within
@@ -431,13 +463,37 @@ An automation lets an event on GitHub start a process on your Mac, so PullPing k
 - **The usual switches apply.** Pause, mute, snooze, hide and turning an account off stop automations too. An automatic
   rule with no logins in "Only from" runs for anyone who can comment on the repository; add logins to narrow it.
 
+#### What a background agent can and cannot do
+
+- **It can read** the pull request's diff and discussion, which PullPing fetches first into the run's folder
+  (`runs/<id>/`, readable only by you; the diff is cut at 400 KB, the discussion at 200 KB), and the files of your
+  clone of the repository. Nothing else: Claude Code runs with `-p --restricted --tools Read,Grep,Glob`, no MCP server
+  (`--strict-mcp-config` with an empty list, `--disallowedTools 'mcp__*'`) and `--add-dir` for the run's folder.
+  `--restricted` also ignores your settings files, so an allow rule such as `Bash(*)` there adds nothing, keeps file
+  reads inside those two folders and refuses a permission bypass. It needs Claude Code 2.1.248 or later; an older one
+  fails the run.
+- **It cannot** run commands, reach the network, write files or talk to GitHub. Codex has no switch that removes its
+  shell, so a Codex run gets `codex exec --sandbox read-only --ignore-user-config --ignore-rules` with web search off:
+  its commands can read files but cannot write or reach the network.
+- **Its answer is untrusted input.** PullPing checks it before showing it: a summary of at most 600 characters, one of
+  four verdicts, a body of at most 60,000 characters with control and text-direction characters removed, and at most 50
+  inline comments, each checked against the diff's changed lines (one that isn't on one is marked) and listed under the
+  body. Anything else fails the run; its files stay in the run's folder.
+- **Nothing is posted without your click** in the draft window. There is no setting, no rule and no command that posts
+  a draft, approves or requests changes; the prompt tells the agent that text asking it to approve is a finding to
+  report. The pull request's own content (description, comments, code) is written by its author, who is the one who
+  gains from an approval: that is why the person reading the draft is the control.
+- **The session stays.** A background run is a normal agent session (Claude Code: an id PullPing picks). Open Session
+  resumes it in a terminal, where your usual permissions apply again.
+
 Rules, hooks, Handle with Agent and linked sessions (session ids and their folders) live in
 `~/Library/Application Support/PullPing/automations.json`; each run's prompt and script go in
-`runs/` beside it, readable only by you, and are deleted after 7 days.
+`runs/` beside it, readable only by you, and are deleted after 7 days, like background runs' folders and drafts.
 
 ## Permissions
 
-None. PullPing asks macOS for no permission: no Accessibility, no notification
+None. (On GitHub, PullPing only reads, except one review per click on Post in a background run's draft window, with
+the account's own token.) PullPing asks macOS for no permission: no Accessibility, no notification
 authorization (the panels are PullPing's own), no Full Disk Access. Tokens are stored in your login keychain
 through macOS's `security` tool, which does not prompt either. Launch at login is optional, and
 only through the toggle you turn on yourself.
@@ -457,6 +513,8 @@ only through the toggle you turn on yourself.
 - **Tokens** live in your login keychain, one item per account (`com.padina.pullping.token.<id>`), plus `com.padina.pullping.token.<id>.refresh` for a Sign in with GitHub refresh token. They are sent only to GitHub and never written to a file or a log. The optional ntfy access token and fallback topic URL live there too (`com.padina.pullping.ntfy-token`, `com.padina.pullping.ntfy-fallback`).
 - **Your data stays on your Mac** in `~/Library/Application Support/PullPing` (pull request titles, activity and your mute and snooze choices) and in the app's preferences.
 - **Only `api.github.com`, `github.com` and `avatars.githubusercontent.com` are contacted** (`github.com` for Sign in with GitHub and the daily update check, whose download comes from `release-assets.githubusercontent.com`; the avatars host for account pictures), plus your ntfy server once you set up phone notifications: it receives the title, repository and latest activity of the pull requests you chose to send, and a footer line naming the sender as `pullping@<your Mac's short hostname>`.
+- **Background runs** (off by default) give your agent, on your Mac, the pull request's diff and discussion and your
+  clone's files; the agent's own provider (Anthropic, OpenAI) receives what it reads, as in any session you start.
 - **No analytics, no telemetry, no crash reporting, no accounts on any other service.**
 
 ## Uninstall
