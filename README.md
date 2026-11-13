@@ -186,17 +186,35 @@ PullPing can start a local coding agent ([Claude Code](https://docs.anthropic.co
 file and a small script, opens a terminal that runs it, and stops there: it never talks to the agent, never reads its
 output and never adds a permission flag.
 
+### Set it up with your agent
+
+**The easiest way to configure all of this is to let your agent do it with you.** Paste this into Claude Code or
+Codex: it reads PullPing's own setup guide and asks you one question at a time.
+
+```
+Set up PullPing agent automations with me. Run `pullping setup guide` (the app itself:
+/Applications/PullPing.app/Contents/MacOS/PullPing setup guide), read all of it, then follow it step by step:
+ask me each question, apply my answers with the pullping commands it lists, and verify at the end. Do not turn on
+anything that runs automatically, reads my agent history or posts to GitHub unless I say yes to that exact question.
+```
+
+The guide is also on GitHub: [`docs/agent-setup.md`](docs/agent-setup.md). **Settings → Automations → Copy Setup
+Prompt** copies the same text. The guide the agent reads is the one inside your copy of PullPing, so it always matches
+your version; it never turns on automatic runs or the search through your agent history without your yes.
+
+### Rules, hooks and Handle with Agent
+
 - **Rules**, in **Settings → Automations → Add Rule…**: the kinds of event (comment, CI failed, review approved, …),
   which pull requests (Any, Mine, Others, optionally only some repositories `owner/name` or `owner/*` and only events
-  by some logins), a prompt, a working directory (default `{repo_dir}`, below), the agent and where it opens (Terminal,
-  iTerm2, Ghostty or Ghostex, whichever are installed, or your own command line). A rule runs at most 3 times per pull
-  request unless you change it (1 to 10).
+  by some logins), a prompt, a working directory (default `{repo_dir}`, below), the agent and where it opens (the
+  default under Open With, below, or another one). A rule runs at most 3 times per pull request unless you change it
+  (1 to 10).
   **Try with Latest Pull Request** runs it right away so you can check the prompt.
 - **Agent hooks**, added from the command line for one pull request or issue, usually by the agent that opened it:
   "resume this session when the pull request is approved or commented on". A hook runs once and is then removed;
   an unused one expires after 14 days.
 
-<img src="docs/screenshots/settings-automations.png" alt="Settings, Automations tab: Run Automations on, Handle with Agent on, three rules (one written from the command line, marked CLI) and the repository folders" width="340">
+<img src="docs/screenshots/settings-automations.png" alt="Settings, Automations tab: the Copy Setup Prompt note, Run Automations on, Handle with Agent on, Open With with Terminal (the default) and Ghostex, and the first scenario prompts" width="340">
 &nbsp;
 <img src="docs/screenshots/rule-editor.png" alt="The rule editor: agent, command, where it opens, working directory {worktree_dir}, the pull request's linked session as the session, and the prompt" width="420">
 
@@ -207,14 +225,17 @@ starts it at once. **Settings → Automations → Run Automations** (or `pullpin
 
 **Handle with Agent.** Turn it on in **Settings → Automations → Handle with Agent** (or `pullping handler on`) and the
 notifications you pick get a **Handle with Agent** button, and the pull request's menu the same item: one click starts
-your agent on that pull request or issue with a prompt you can edit (by default: read it with `gh`, work out what it
-needs, do it, ask when unsure). **Edit…** picks those notifications (`pullping handler set --on <kind,…|all>`; by
-default all but CI passed, new commits, merged, closed, draft, title and label changes), the agent, an optional wrapper
-command, where it opens and the working directory (`{repo_dir}`). When the pull request has a linked session (below),
-the button becomes **Resume Session** and **New Session**. It never runs on its own and has no run limit; a second click
-while the terminal opens does nothing.
+your agent on that pull request or issue with a prompt you can edit (by default: read it with `gh`, then the task of
+its scenario, [below](#prompts): explain and propose, then wait for your OK). **Edit…** picks those notifications
+(`pullping handler set --on <kind,…|all>`; by default all but CI passed, new commits, merged, closed, draft, title and
+label changes), the agent, an optional wrapper command and the working directory (`{repo_dir}`). When the pull request
+has a linked session (below), the button becomes **Resume Session** and **New Session**. The buttons open with the
+default under Open With; the chevron next to them, the pull request's **Handle with Agent ▸** menu (right-click a row,
+the detail toolbar, or the **Pull Request** menu) list every place and **Resume Without Prompt**, which continues the
+linked session without sending it anything. It never runs on its own and has no run limit; a second click while the
+terminal opens does nothing.
 
-<img src="docs/screenshots/notification-agent.png" alt="Two notifications: Changes requested with Resume Session and New Session buttons (the pull request has a linked session), and Re-review needed with a Handle with Agent button" width="460">
+<img src="docs/screenshots/notification-agent.png" alt="Two notifications: Changes requested with Resume Session and New Session buttons and a chevron with more agent options (the pull request has a linked session), and Re-review needed with a Handle with Agent button" width="460">
 
 **Repositories.** `{repo_dir}`, the default working directory, is where the repository is checked out. PullPing looks in
 **Settings → Automations → Repository Folders** (default `~/Code`; add `~/Code/Work`, `~/src`, …), up to 3 levels deep
@@ -229,15 +250,35 @@ repository folder that holds the clone. PullPing reads git's own files to find t
 `pullping automations folders list` shows how many clones it found; `folders add|rm <dir>` and `fallback <dir>` change
 the list.
 
+**Open With.** **Settings → Automations → Open With** (`pullping targets`) lists up to 5 places where a session opens;
+the first is the default, used by the notification buttons, `pullping session resume` and every rule that doesn't
+pick another one (`--target`). Drag a row (or right-click it: Move Up, Move Down, Make Default) to change the order.
+A Ghostex entry has **Focus the session if it is already running** (on by default); add a second Ghostex entry with it
+off if you sometimes want a fresh copy.
+
 **Where it opens.** Terminal and iTerm2 open the run's script file; Ghostty gets a new window through its AppleScript
 dictionary (macOS asks once to let PullPing control Ghostty); Ghostex through `ghostex create-session --start` in the Ghostex project that holds the folder, and the new session comes to the front.
 Resuming a session that is already open in Ghostex focuses it instead of starting a second copy and types one line into
 its input, `Read <prompt file> and act on it.`, without pressing Return; an automatic run never does that, it asks with
 **Go to Session**. Terminal, iTerm2, Ghostty and custom commands can't find the window that holds a session, so a resume
 there always opens a new one. Only installed apps are
-offered; a rule whose app is gone shows "(not installed)" and its runs fail with that message. For any other terminal
-(WezTerm, kitty, Alacritty, cmux, …) choose **Custom command** and write the launch line with `{script}`, `{cwd}` and
-`{title}`; `pullping launchers` lists the built-in ones.
+offered; an entry whose app is gone shows "(not installed)" and its runs fail with that message. For any other terminal
+(WezTerm, kitty, Alacritty, cmux, …) add an entry with **Custom command** and write the launch line with `{script}`,
+`{cwd}` and `{title}`; `pullping launchers` lists the built-in ones. A rule whose entry was removed opens with the
+default, and Recent Runs says so.
+
+### Prompts
+
+What the agent is asked to do depends on what the pull request needs from you, its **scenario**: Review requested,
+Re-review, Changes requested, New comments or a mention, CI failed, Conflicts or behind base, Ready to merge, Assigned to
+me, or Anything else. It comes from the notification's reason (the most important one when a panel holds several), else
+from the pull request's place in Needs Me. A prompt is a frame (the Handle with Agent prompt, or a rule's) whose `{task}`
+line becomes the scenario's task text. The built-in texts ask the agent to explain and propose, then wait for your OK:
+for a review, draft it and don't post it; for changes requested, explain each request, say whether it agrees and propose
+the fix, then ask which to make. **Settings → Automations → Prompts** (`pullping prompts list|show|set|reset`) shows each
+text and lets you write your own (a review checklist, a language, how far the agent may go); the editor previews the
+whole prompt. A prompt without `{task}` is used exactly as written; a rule's editor has **Use the scenario's prompt** to
+add or remove the line. A prompt you edited before this version is kept as it was: add `{task}` where the task belongs.
 
 ### Linked sessions
 
@@ -320,7 +361,9 @@ pullping hook add --pr "$(gh pr view --json url -q .url)" --on reviewApproved,re
 ```
 
 Everything the Automations tab does has a command: `pullping rule|hook add|edit|show|list|enable|disable|rm`,
-`pullping session set|show|list|rm|find|resume` (linked and earlier sessions), `pullping handler show|set|on|off` (Handle with Agent),
+`pullping session set|show|list|rm|find|resume` (linked and earlier sessions; `resume --no-prompt`, `--target <id>`), `pullping handler show|set|on|off` (Handle with Agent;
+`handler run --pr <ref> --dry-run` prints what a click would start), `pullping targets list|add|edit|default|rm` (Open
+With), `pullping prompts list|show|set|reset` (Prompts), `pullping setup guide|prompt|status` (the agent setup),
 `pullping run <id> --pr <ref>` (Run Automation; `--dry-run` only prints what it would start), `pullping runs` (Recent
 Runs), `pullping automations on|off|status`, `pullping automations folders|fallback|repos` (Repository Folders),
 `pullping kinds` (the event names), `pullping launchers` (where it can open) and `pullping activity` (the
@@ -350,9 +393,14 @@ link that folder into `~/.claude/skills/`.
 | `{session_id}` | The session being resumed, or empty |
 | `{cwd}` | The working directory |
 | `{automation}` | The rule or hook name |
+| `{task}` | The scenario's task text ([Prompts](#prompts)); filled in first, prompts only |
+| `{scenario}`, `{scenario_label}` | `changesRequested`, `Changes requested` |
+| `{resume_note}` | On a resume: "You are resumed in the session that worked on this pull request before; start from what changed since your last turn."; empty for a new session |
+| `{event_url}` | The comment or review that triggered it (only an `https` link on the pull request's own host), else `{pr_url}` |
+| `{reviewed_sha}` | The commit of your last review, or empty |
 | `{title}`, `{author}`, `{actor}`, `{summary}`, `{branch}` | Written by others on GitHub: control characters removed and shortened (`{summary}` is the first line of a comment, at most 120 characters; `{branch}` is the pull request's head branch, empty for an issue) |
 
-The working directory takes the same placeholders, except the five written by others, and `~`. Unknown `{…}` stays as
+The working directory takes the same placeholders, except the five written by others and the six prompt-only ones, and `~`. Unknown `{…}` stays as
 typed. A prompt that starts with a placeholder or a `-` gets a blank first line, so the agent never reads it as an option.
 
 ### Safety
