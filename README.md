@@ -225,7 +225,7 @@ repository folder that holds the clone. PullPing reads git's own files to find t
 the list.
 
 **Where it opens.** Terminal and iTerm2 open the run's script file; Ghostty gets a new window through its AppleScript
-dictionary (macOS asks once to let PullPing control Ghostty); Ghostex through `ghostex terminal`. Only installed apps are
+dictionary (macOS asks once to let PullPing control Ghostty); Ghostex through `ghostex create-session --start` in the Ghostex project that holds the folder. Only installed apps are
 offered; a rule whose app is gone shows "(not installed)" and its runs fail with that message. For any other terminal
 (WezTerm, kitty, Alacritty, cmux, …) choose **Custom command** and write the launch line with `{script}`, `{cwd}` and
 `{title}`; `pullping launchers` lists the built-in ones.

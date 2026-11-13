@@ -26,6 +26,23 @@ public struct LaunchPlan: Sendable, Equatable {
     public var launchLine: String
     /// Where `{repo_dir}` and the other folder placeholders point, and why (`source`); nil when no template uses one.
     public var repo: RepoLocation? = nil
+    /// Ghostex: the line reads `$PULLPING_GHOSTEX_PROJECT`, which the launcher sets from `ghostex projects` (`GhostexProjects.pick`).
+    public var needsGhostexProject = false
+}
+
+/// `ghostex create-session` needs a project id; `--cwd` still opens the folder, so any project works, the closest one reads best.
+public enum GhostexProjects {
+    /// The project whose path is `cwd` or its nearest parent, else the first one; nil when Ghostex lists none.
+    public static func pick(_ json: Data, cwd: String) -> String? {
+        let raw = try? JSONSerialization.jsonObject(with: json)
+        let rows = (raw as? [[String: Any]]) ?? ((raw as? [String: Any])?["projects"] as? [[String: Any]]) ?? []
+        let projects: [(id: String, path: String)] = rows.compactMap { row in
+            guard let id = (row["projectId"] ?? row["id"]) as? String, !id.isEmpty else { return nil }
+            return (id, ((row["path"] ?? row["projectPath"]) as? String ?? "").replacingOccurrences(of: "/+$", with: "", options: .regularExpression))
+        }
+        let containing = projects.filter { !$0.path.isEmpty && (cwd == $0.path || cwd.hasPrefix($0.path + "/")) }
+        return (containing.max { $0.path.count < $1.path.count } ?? projects.first)?.id
+    }
 }
 
 public enum LaunchError: Error, Equatable, LocalizedError {
@@ -128,7 +145,9 @@ public enum LaunchPlanner {
             line = "osascript -e 'on run argv' -e 'tell application id \"com.mitchellh.ghostty\"' -e 'set cfg to new surface configuration' "
                 + "-e 'set initial working directory of cfg to item 1 of argv' -e 'set command of cfg to item 2 of argv' "
                 + "-e 'new window with configuration cfg' -e 'activate' -e 'end tell' -e 'end run' \(q(cwd)) \(q("/bin/zsh -il " + q(scriptPath)))"
-        case .ghostex: line = "ghostex terminal --cwd \(q(cwd)) --title \(q(title)) -- \(q(scriptPath))"
+        // Ghostex 11.5: `ghostex terminal` only records a session that never starts; create-session --start runs it and types
+        // --input (the quoted script path, submitted). The project id comes from the launcher at run time.
+        case .ghostex: line = "ghostex create-session \(q(title)) --start --project-id \"$PULLPING_GHOSTEX_PROJECT\" --cwd \(q(cwd)) --input \(q(q(scriptPath)))"
         case .custom:
             let template = a.customCommand.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !template.isEmpty else { throw LaunchError.emptyCustomCommand }
@@ -140,7 +159,7 @@ public enum LaunchPlanner {
         // and a bare placeholder could be a subcommand (`logout`). A leading newline makes it plain text for claude and codex alike.
         if promptText.first == "-" || a.prompt.first == "{" { promptText = "\n" + promptText }
         return LaunchPlan(cwd: cwd, title: title, promptText: promptText, promptPath: promptPath,
-                          scriptPath: scriptPath, script: script, launchLine: line, repo: location)
+                          scriptPath: scriptPath, script: script, launchLine: line, repo: location, needsGhostexProject: a.launcher == .ghostex)
     }
 
     /// Interactive sessions: the user watches and steers. The command override replaces the leading word; no permission flags ever.

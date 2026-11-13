@@ -166,10 +166,36 @@ final class LaunchPlannerTests: XCTestCase {
         XCTAssertTrue(try plan(a).script.contains("# PullPing automation \"evil rm -rf ~\""))
     }
 
+    func testGhostexInputIsTheQuotedScriptPath() throws {
+        // What Ghostex types: zsh hands --input over as one argument, the script path quoted for the session's shell.
+        let line = try plan(automation(launcher: .ghostex)).launchLine.replacingOccurrences(of: "ghostex create-session", with: "printf '%s\\n'")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = ["-fc", line]
+        process.environment = ["PULLPING_GHOSTEX_PROJECT": "P1"]
+        let out = Pipe()
+        process.standardOutput = out
+        try process.run()
+        process.waitUntilExit()
+        let args = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).split(separator: "\n").map(String.init)
+        XCTAssertEqual(args, ["PullPing: octo-org/widgets #12", "--start", "--project-id", "P1", "--cwd", cwd, "--input", "'/tmp/pp runs/RUN.command'"])
+    }
+
+    func testGhostexProjectPick() {
+        let json = Data(#"[{"projectId":"P1","path":"/Users/me/Code"},{"projectId":"P2","path":"/Users/me/Code/Work/"},{"projectId":"P3","path":"/tmp"}]"#.utf8)
+        XCTAssertEqual(GhostexProjects.pick(json, cwd: "/Users/me/Code/Work/widgets"), "P2")  // nearest parent
+        XCTAssertEqual(GhostexProjects.pick(json, cwd: "/Users/me/Code"), "P1")
+        XCTAssertEqual(GhostexProjects.pick(json, cwd: "/Users/me/Codex"), "P1")  // not a parent: the first project
+        XCTAssertEqual(GhostexProjects.pick(Data(#"{"projects":[{"id":"Q"}]}"#.utf8), cwd: "/x"), "Q")
+        XCTAssertNil(GhostexProjects.pick(Data("[]".utf8), cwd: "/x"))
+        XCTAssertNil(GhostexProjects.pick(Data("not json".utf8), cwd: "/x"))
+    }
+
     func testLaunchLines() throws {
         XCTAssertEqual(try plan(automation(launcher: .terminal)).launchLine, "open -a Terminal '/tmp/pp runs/RUN.command'")
-        XCTAssertEqual(try plan(automation(launcher: .ghostex)).launchLine,
-                       "ghostex terminal --cwd '\(cwd)' --title 'PullPing: octo-org/widgets #12' -- '/tmp/pp runs/RUN.command'")
+        let ghostex = try plan(automation(launcher: .ghostex))
+        XCTAssertTrue(ghostex.needsGhostexProject)
+        XCTAssertEqual(ghostex.launchLine, #"ghostex create-session 'PullPing: octo-org/widgets #12' --start --project-id "$PULLPING_GHOSTEX_PROJECT" --cwd '\#(cwd)' --input ''\''/tmp/pp runs/RUN.command'\'''"#)
         XCTAssertEqual(try plan(automation(launcher: .iterm2)).launchLine, "open -b com.googlecode.iterm2 '/tmp/pp runs/RUN.command'")
         XCTAssertEqual(try plan(automation(launcher: .ghostty)).launchLine,
                        "osascript -e 'on run argv' -e 'tell application id \"com.mitchellh.ghostty\"' -e 'set cfg to new surface configuration' "

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Ghostex shows up under **Open in** again: Ghostex 11.5 changed its app id, so PullPing thought it was not installed and every Ghostex run failed.
+- Runs in Ghostex start for real: since Ghostex 11.5 `ghostex terminal` only added a session that never started, so Resume Session and Handle with Agent looked successful and nothing ran. PullPing now uses `ghostex create-session --start` in the Ghostex project that holds the folder.
 - A run that doesn't start (app not installed, folder missing, Handle with Agent off, no linked session, limits reached) now says why in a notification panel instead of only beeping; Recent Runs and Activity keep the detail.
 
 ## [0.6.1] - 2026-11-04

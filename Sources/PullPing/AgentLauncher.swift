@@ -44,11 +44,19 @@ enum AgentLauncher {
             return "Couldn't write the run files"
         }
         defer { try? stderr.close(); try? fm.removeItem(atPath: stderrPath) }
+        var environment = LaunchPlanner.launchEnvironment(ProcessInfo.processInfo.environment)
+        if plan.needsGhostexProject {
+            guard let projects = output(of: "ghostex projects --json", environment: environment),
+                  let project = GhostexProjects.pick(projects, cwd: plan.cwd) else {
+                return "Ghostex listed no project; open a folder in Ghostex once, then try again"
+            }
+            environment["PULLPING_GHOSTEX_PROJECT"] = project
+        }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = ["-lc", plan.launchLine]  // login shell: Homebrew and ~/.local/bin on PATH
         process.currentDirectoryURL = URL(fileURLWithPath: plan.cwd)
-        process.environment = LaunchPlanner.launchEnvironment(ProcessInfo.processInfo.environment)
+        process.environment = environment
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
         process.standardError = stderr
@@ -62,6 +70,25 @@ enum AgentLauncher {
         guard process.terminationStatus != 0 else { return nil }
         let tail = ((try? String(contentsOfFile: stderrPath, encoding: .utf8)) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).suffix(300)
         return "The launcher exited with status \(process.terminationStatus)" + (tail.isEmpty ? "" : ": \(tail)")
+    }
+
+    /// stdout of a short `zsh -lc` line (same timeout as a launch), via a file like stderr above; nil on failure.
+    private static func output(of line: String, environment: [String: String]) -> Data? {
+        let path = runsDir.appendingPathComponent(UUID().uuidString + ".out").path
+        guard FileManager.default.createFile(atPath: path, contents: nil), let out = FileHandle(forWritingAtPath: path) else { return nil }
+        defer { try? out.close(); try? FileManager.default.removeItem(atPath: path) }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = ["-lc", line]
+        process.environment = environment
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = out
+        process.standardError = FileHandle.nullDevice
+        let done = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in done.signal() }
+        guard (try? process.run()) != nil else { return nil }
+        if done.wait(timeout: .now() + timeout) == .timedOut { process.terminate(); return nil }
+        return process.terminationStatus == 0 ? FileManager.default.contents(atPath: path) : nil
     }
 
     private static func write(_ text: String, to path: String, mode: Int) throws {
