@@ -238,8 +238,13 @@ public struct Automation: Identifiable, Codable, Sendable, Equatable {
     public var by = ""
     /// When the app told the user that a CLI-written automation runs automatically; nil = not yet (or due again).
     public var autoNoticeAt: Date?
+    /// Rules only (`--background`): a headless run that ends in a draft instead of a session in a terminal; target, session and
+    /// prompt are not used. nil = an interactive run.
+    public var background: BackgroundAction?
 
     public var isHook: Bool { pr != nil }
+    /// A rule's background action; hooks are never background runs.
+    public var backgroundAction: BackgroundAction? { isHook ? nil : background }
 
     public init(id: UUID = UUID(), name: String, kinds: Set<EventKind>, prompt: String = Automation.defaultPrompt,
                 workingDirectory: String, createdAt: Date = Date()) {
@@ -274,6 +279,7 @@ public struct Automation: Identifiable, Codable, Sendable, Equatable {
         source = value(.source, source)
         by = value(.by, by)
         autoNoticeAt = value(.autoNoticeAt, autoNoticeAt)
+        background = value(.background, background)
     }
 }
 
@@ -289,6 +295,8 @@ extension Automation {
     public static let handlerResumeActionID = UUID(uuidString: "00000000-0000-4000-8000-00000000AC72")!
     /// The panel's chevron (Handle with Agent's other choices).
     public static let handlerMenuActionID = UUID(uuidString: "00000000-0000-4000-8000-00000000AC73")!
+    /// Background runs started from a menu or `pullping background run` (a rule's carry the rule's id).
+    public static let backgroundID = UUID(uuidString: "00000000-0000-4000-8000-00000000AC74")!
     /// The frame: `{task}` is the scenario's task text (`Scenario`, Settings → Prompts), filled before the values.
     public static let defaultHandlerPrompt = """
         PullPing ({scenario_label}): {event_label} by @{actor} on {pr_url} ({repo} #{pr_number}, issue: {is_issue}).
@@ -339,6 +347,14 @@ public struct RunRecord: Codable, Sendable, Hashable {
     public var detail: String  // "Terminal", or the error text
     /// "<automation name> · owner/name #12" at run time: a one-shot hook is pruned right after its run.
     public var label = ""
+    // Background runs only (nil otherwise): the run's id (its folder under runs/), what it does, its state, the headless
+    // session, its draft's path, and the head commit it was started for (one review per commit for rules).
+    public var runID: String?
+    public var background: BackgroundAction?
+    public var status: BackgroundStatus?
+    public var sessionID: String?
+    public var draft: String?
+    public var head: String?
 
     public init(automationID: UUID, prID: String, eventID: String, at: Date, ok: Bool, detail: String, label: String = "") {
         self.automationID = automationID; self.prID = prID; self.eventID = eventID; self.at = at; self.ok = ok
@@ -354,6 +370,12 @@ public struct RunRecord: Codable, Sendable, Hashable {
         ok = try c.decode(Bool.self, forKey: .ok)
         detail = try c.decodeIfPresent(String.self, forKey: .detail) ?? ""
         label = try c.decodeIfPresent(String.self, forKey: .label) ?? ""
+        runID = try? c.decodeIfPresent(String.self, forKey: .runID)
+        background = try? c.decodeIfPresent(BackgroundAction.self, forKey: .background)
+        status = try? c.decodeIfPresent(BackgroundStatus.self, forKey: .status)
+        sessionID = try? c.decodeIfPresent(String.self, forKey: .sessionID)
+        draft = try? c.decodeIfPresent(String.self, forKey: .draft)
+        head = try? c.decodeIfPresent(String.self, forKey: .head)
     }
 }
 
@@ -375,6 +397,8 @@ public struct AutomationFile: Codable, Sendable, Equatable {
     /// Settings → Automations → Prompts (`pullping prompts`): `Scenario` raw value → the user's task text. Only overrides;
     /// the built-in texts live in code (`Scenario.builtIn`).
     public var scenarioPrompts: [String: String] = [:]
+    /// Settings → Automations → Background Runs (`pullping background`): off by default.
+    public var background = BackgroundSettings()
 
     public init() {}
 
@@ -391,6 +415,7 @@ public struct AutomationFile: Codable, Sendable, Equatable {
         repoFolders = value(.repoFolders, repoFolders)
         findSessions = value(.findSessions, findSessions)
         scenarioPrompts = value(.scenarioPrompts, scenarioPrompts)
+        background = value(.background, background)
         // Valid, unique ids, at most 5; none (a 0.7 file, or nothing usable) = derived from the apps in use, same on every load.
         var ids = Set<String>()
         let decoded = value(.targets, [LaunchTarget]()).filter { LaunchTarget.isValidID($0.id) && ids.insert($0.id).inserted }
@@ -543,6 +568,9 @@ public final class AutomationStore: @unchecked Sendable {
 
     public init(url: URL?, repair: Bool = true) { self.url = url; self.repair = repair }
 
+    /// `runs/` beside the file: prompts, scripts and background run folders (kept 7 days); nil for a memory store.
+    public var runsDirectory: URL? { url?.deletingLastPathComponent().appendingPathComponent("runs") }
+
     public func load() -> AutomationFile {
         guard let url else { return memoryLock.withLock { memory } }
         return locked(url) { read(url) }
@@ -610,7 +638,7 @@ public final class AutomationStore: @unchecked Sendable {
         }
     }
 
-    static let encoder: JSONEncoder = {
+    public static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]  // hand-readable: agents and users may inspect it

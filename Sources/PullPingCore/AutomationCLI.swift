@@ -51,6 +51,8 @@ public enum AutomationCLI {
           handler show|set|on|off|run                 The Handle with Agent button on notifications.
           targets list|add|edit|default|rm            Open With: where agent sessions open; the first is the default.
           prompts list|show|set|reset                 The task text of each scenario (review, CI failed, …).
+          background status|on|off|set|run|list|cancel  Headless reviews and summaries that end in a draft.
+          drafts list|show|discard                    Background run results; you post them in the app, never from here.
           run <id> [--pr <ref>] [--dry-run]           Run a rule or hook now, like the Run Automation menu.
           runs [--limit <n> | --all]                  Recent runs, newest first.
           activity [--since <time>] [--pr <ref>]      What PullPing saw and did: every event, notification and run.
@@ -100,6 +102,8 @@ public enum AutomationCLI {
           --expires <days>                    hooks only, 1 to 365; default 14
           --enable | --disable                default enabled
           --by <text>                         who wrote it, shown in Settings; default $CLAUDE_CODE_SESSION_ID
+          --background review|summarize|off   rules only: run headless and end in a draft (pullping background), instead
+                                              of a session in a terminal; --target, --session and --prompt are not used
           --json                              print the saved automation as JSON
 
         Prompt placeholders: {pr_url} {pr_number} {repo} {repo_owner} {repo_name} {repo_dir} {repo_root} {main_dir}
@@ -349,9 +353,46 @@ public enum AutomationCLI {
         status: what is set today, in one snapshot.
         """
 
+    public static let backgroundHelp = """
+        Usage: pullping background status | on | off [--json]
+               pullping background set --daily-cap <n>
+               pullping background run review|summarize --pr <url | owner/repo#n> [--dry-run] [--json]
+               pullping background list [--json]
+               pullping background cancel <run id>
+
+        Background runs (Settings → Automations → Background Runs; off by default): PullPing starts your agent without a
+        terminal on one pull request, and the run ends in a draft. The agent can only read: PullPing fetches the diff and
+        the discussion into the run's folder first, and the agent gets read-only file tools on that folder and the
+        repository's folder: no shell, no network, no MCP servers, no write tools (Codex: its read-only sandbox, with no
+        network). Nothing is posted to GitHub until you click Post in PullPing's draft window: no command posts, and an
+        approval or a change request is never automatic.
+
+        review: others' open pull requests that are not drafts, with the Review requested task (Re-review when you
+        reviewed an older commit; pullping prompts). summarize: any pull request. At most 2 runs at once and 10 waiting,
+        at most --daily-cap runs (default 20) in 24 hours, automatic and manual together; a run stops after 10 minutes.
+        Runs use Handle with Agent's agent and command (pullping handler set); a rule with --background uses its own.
+
+        on, off, status: the switch. set --daily-cap: 1 to 100.
+        run: queues the run; PullPing (it must be running) starts it within 30 seconds. --dry-run prints the working
+        directory, the run folder, the agent's command line and the whole prompt, and writes and starts nothing.
+        list: background runs, newest first. cancel: a queued run at once, a running one within 30 seconds.
+        The drafts: pullping drafts.
+        """
+
+    public static let draftsHelp = """
+        Usage: pullping drafts list [--json]
+               pullping drafts show <run id> [--json]
+               pullping drafts discard <run id>
+
+        What background runs drafted, kept 7 days: a review (summary, suggested verdict, body) or a summary. Read them
+        here; post a review only in PullPing's draft window (the notification's Review Draft…, or the pull request's
+        Agent Draft section), where you choose Comment, Request changes or Approve. No command posts. discard deletes one.
+        <run id>: a unique prefix of at least 4 characters (pullping drafts list).
+        """
+
     private static let helps = ["rule": ruleHelp, "hook": hookHelp, "run": runHelp, "runs": runsHelp, "automations": automationsHelp,
                                 "session": sessionHelp, "handler": handlerHelp, "activity": activityHelp, "targets": targetsHelp,
-                                "prompts": promptsHelp, "setup": setupHelp]
+                                "prompts": promptsHelp, "setup": setupHelp, "background": backgroundHelp, "drafts": draftsHelp]
 
     private struct Usage: Error { let message: String }
     private struct Failure: Error { let message: String }
@@ -365,7 +406,7 @@ public enum AutomationCLI {
     }
 
     private static let writeOptions: Set<String> = ["name", "on", "prompt", "prompt-file", "cwd", "scope", "repos", "actors", "agent", "command",
-                                                    "launcher", "custom-command", "repeat", "pr", "session", "expires", "by", "target"]
+                                                    "launcher", "custom-command", "repeat", "pr", "session", "expires", "by", "target", "background"]
     private static let writeFlags: Set<String> = ["ask", "auto", "enable", "disable", "json"]
 
     /// `args` without the program name: `["rule", "add", …]`, `["runs"]` or `["--help"]`. `run` is `prepareRun` (the app launches).
@@ -398,6 +439,8 @@ public enum AutomationCLI {
             case "targets": return (try targets(command, rest, store: store, env: env, installed: installed), "", 0)
             case "prompts": return (try prompts(command, rest, store: store, env: env), "", 0)
             case "setup": return (try setup(command, rest, store: store, env: env, installed: installed, version: version), "", 0)
+            case "background": return (try background(command, rest, store: store, env: env, now: now, state: state), "", 0)
+            case "drafts": return (try drafts(command, rest, store: store, env: env, now: now), "", 0)
             case "--version", "version": return (version.isEmpty ? "unknown (a development build)" : version, "", 0)
             case "--help", "help", "-h": return (help, "", 0)
             default: throw Usage(message: "unknown command '\(group)'")
@@ -629,6 +672,7 @@ public enum AutomationCLI {
             throw Usage(message: hook ? "--\(other) is for rules only: a hook matches its one pull request"
                                       : other == "expires" ? "--expires is for hooks only: rules don't expire" : "--\(other) is for hooks only")
         }
+        if hook && values["background"] != nil { throw Usage(message: "--background is for rules only: a hook always opens a session") }
         if !hook, let session = values["session"], !["", Automation.linkedSession].contains(session) {
             throw Usage(message: "--session on a rule can only be linked (the pull request's linked session): a rule covers many pull requests")
         }
@@ -675,6 +719,10 @@ public enum AutomationCLI {
         if let raw = values["expires"] {
             guard let days = Int(raw), (1...365).contains(days) else { throw Usage(message: "--expires must be 1 to 365 days") }
             a.expiresAt = now.addingTimeInterval(Double(days) * 86_400)
+        }
+        if let raw = values["background"] {
+            guard raw == "off" || BackgroundAction(rawValue: raw) != nil else { throw Usage(message: "--background must be review, summarize or off") }
+            a.background = BackgroundAction(rawValue: raw)
         }
         if flags.contains("enable") { a.enabled = true }
         if flags.contains("disable") { a.enabled = false }
@@ -767,7 +815,7 @@ public enum AutomationCLI {
                      a.expiresAt.map { "expires \($0.formatted(.iso8601.year().month().day()))" } ?? ""] + tail).joined(separator: "  ")
         }
         return ([shortID(a), a.name, kindNames(a).joined(separator: ","), a.scope.rawValue, a.repos.isEmpty ? "all" : a.repos.joined(separator: ","),
-                 a.mode.rawValue, agentWord(a), sessionWord(a), a.launcher.title, "\(a.maxRunsPerPR)/pr"] + tail).joined(separator: "  ")
+                 a.mode.rawValue, agentWord(a), sessionWord(a), a.background.map { "background \($0.rawValue)" } ?? a.launcher.title, "\(a.maxRunsPerPR)/pr"] + tail).joined(separator: "  ")
     }
 
     /// `key  value` lines in field order (then `extra`), then the prompt indented.
@@ -779,7 +827,7 @@ public enum AutomationCLI {
             ("launcher", a.launcher.rawValue), ("custom command", a.customCommand), ("cwd", a.workingDirectory), ("runs per PR", "\(a.maxRunsPerPR)"),
             ("pr", a.pr.map { "\($0.repo)#\($0.number)" } ?? ""), ("session", a.sessionID ?? ""), ("expires", a.expiresAt?.ISO8601Format() ?? ""),
             ("source", a.source), ("by", a.by), ("created", a.createdAt.ISO8601Format()),
-        ] + extra
+        ] + (a.background.map { [("background", $0.rawValue)] } ?? []) + extra
         return (table(rows) + ["prompt:"] + a.prompt.split(separator: "\n", omittingEmptySubsequences: false).map { "  " + $0 }).joined(separator: "\n")
     }
 
@@ -798,8 +846,9 @@ public enum AutomationCLI {
                 + "\(agentWord(a)) (\(sessionWord(a))) in \(a.launcher.title), \(a.mode.rawValue)" + end
         }
         let repos = a.repos.isEmpty ? "" : " (\(a.repos.joined(separator: ", ")))"
-        return "\(verb) rule \(shortID(a)): \(a.name) — \(names.joined(separator: ", ")) on \(a.scope.rawValue)\(repos) → \(agentWord(a))"
-            + "\(a.usesLinkedSession ? " (linked session)" : "") in \(a.launcher.title), \(a.mode.rawValue), \(a.maxRunsPerPR) \(a.maxRunsPerPR == 1 ? "run" : "runs") per pull request" + end
+        let runs = a.background.map { "\(agentWord(a)) \($0 == .review ? "reviews" : "summarizes") in the background (a draft)" }
+            ?? "\(agentWord(a))\(a.usesLinkedSession ? " (linked session)" : "") in \(a.launcher.title)"
+        return "\(verb) rule \(shortID(a)): \(a.name) — \(names.joined(separator: ", ")) on \(a.scope.rawValue)\(repos) → \(runs), \(a.mode.rawValue), \(a.maxRunsPerPR) \(a.maxRunsPerPR == 1 ? "run" : "runs") per pull request" + end
     }
 
     private static func kindList(_ args: [String]) throws -> String {
@@ -1450,6 +1499,8 @@ public enum AutomationCLI {
                     "folders": ["roots": file.repoFolders.roots, "fallback": file.repoFolders.fallback, "clones": clones] as [String: Any],
                     "customPrompts": custom, "rules": rules.count, "hooks": file.automations.count - rules.count,
                     "automaticRules": automatic.map { ["id": shortID($0), "name": $0.name] }, "linkedSessions": file.sessions.count,
+                    "background": ["enabled": file.background.enabled, "dailyCap": file.background.dailyCap,
+                                   "rules": rules.compactMap { $0.background?.rawValue }] as [String: Any],
                 ])
             }
             return [
@@ -1459,6 +1510,7 @@ public enum AutomationCLI {
                 "Repository folders: \(file.repoFolders.roots.joined(separator: ", ")) (\(clones) clones) · fallback \(file.repoFolders.fallback)",
                 "Look for earlier sessions: \(file.findSessions ? "on" : "off") · custom prompts: \(custom.isEmpty ? "none" : custom.joined(separator: ", "))",
                 "Rules: \(rules.count) (\(automatic.count) automatic) · hooks: \(file.automations.count - rules.count) · linked sessions: \(file.sessions.count)",
+                "Background runs: \(file.background.enabled ? "on" : "off") · at most \(file.background.dailyCap) a day · \(rules.filter { $0.background != nil }.count) background rules",
             ].joined(separator: "\n")
         case "--help", "help": throw HelpRequested()
         default: throw Usage(message: "unknown setup command \(command)")
@@ -1520,5 +1572,154 @@ public enum AutomationCLI {
     public static func runName(_ a: Automation, scenario: Scenario?, prompt: Bool = true) -> String {
         guard a.id == Automation.handlerID else { return a.name }
         return "\(a.name) (\(sessionWord(a))" + (!prompt ? ", no prompt" : scenario.map { " · \($0.label)" } ?? "") + ")"
+    }
+}
+
+// MARK: background / drafts
+
+extension AutomationCLI {
+    /// `background status|on|off|set|run|list|cancel`. `run` only queues (the app starts it); nothing here posts.
+    private static func background(_ command: String, _ args: [String], store: AutomationStore, env: [String: String], now: Date,
+                                   state: () -> TrackedState) throws -> String {
+        let (values, flags, positional) = try parse(args, options: command == "set" ? ["daily-cap"] : command == "run" ? ["pr"] : [],
+                                                    flags: command == "run" ? ["dry-run", "json"] : ["json"])
+        func status(_ file: AutomationFile) -> String {
+            let runs = file.runs.filter { $0.background != nil }
+            let day = runs.filter { now.timeIntervalSince($0.at) < 86_400 }.count
+            let running = runs.filter { $0.status == .running }.count, queued = runs.filter { $0.status == .queued }.count
+            if flags.contains("json") {
+                return json(["enabled": file.background.enabled, "dailyCap": file.background.dailyCap, "last24Hours": day, "running": running, "queued": queued])
+            }
+            return "Background runs: \(file.background.enabled ? "on" : "off") · \(day) of \(file.background.dailyCap) in the last 24 hours · \(running) running, \(queued) waiting"
+        }
+        switch command {
+        case "status", "on", "off":
+            try noArguments(positional)
+            return status(command == "status" ? store.load() : store.mutate { $0.background.enabled = command == "on"; return $0 })
+        case "set":
+            try noArguments(positional)
+            guard let raw = values["daily-cap"] else { throw Usage(message: "set needs --daily-cap <n>") }
+            guard let cap = Int(raw), BackgroundSettings.dailyCapRange.contains(cap) else { throw Usage(message: "--daily-cap must be 1 to 100") }
+            return status(store.mutate { $0.background.dailyCap = cap; return $0 })
+        case "run":
+            guard positional.count == 1, let action = BackgroundAction(rawValue: positional[0]) else { throw Usage(message: "run takes review or summarize") }
+            guard let ref = try ref(values["pr"]) else { throw Usage(message: "--pr is required") }
+            let file = store.load()
+            if let failure = store.failure { throw Failure(message: failure) }
+            guard let pr = tracked(ref, in: state()) else { throw Failure(message: "PullPing is not tracking \(ref.repo) #\(ref.number) yet") }
+            guard file.enabled else { throw Failure(message: "Automations are off (pullping automations on)") }
+            if let reason = BackgroundQueue.eligible(action, pr: pr) { throw Failure(message: reason) }
+            let runID = UUID().uuidString.lowercased()
+            if flags.contains("dry-run") {
+                let runDir = (store.runsDirectory ?? URL(fileURLWithPath: NSTemporaryDirectory())).appendingPathComponent(runID)
+                let plan = try BackgroundPlanner.plan(action, pr: pr, file: file, rule: nil, runDir: runDir, sessionID: UUID().uuidString.lowercased(),
+                                                      home: env["HOME"] ?? NSHomeDirectory(), index: nil)
+                let command = plan.script.split(separator: "\n").last.map(String.init) ?? ""
+                if flags.contains("json") {
+                    return json(["cwd": plan.cwd, "notCloned": plan.notCloned, "runDir": plan.runDir, "command": command, "prompt": plan.prompt,
+                                 "agent": file.handler.agent.rawValue, "sessionID": plan.sessionID ?? ""])
+                }
+                return (["cwd          \(plan.cwd)" + (plan.notCloned ? " (not cloned here: the diff and discussion only)" : ""),
+                         "run folder   \(plan.runDir) (not created)", "agent        \(agentWord(file.handler))", "command      \(command)", "prompt:"]
+                        + plan.prompt.split(separator: "\n", omittingEmptySubsequences: false).map { "  " + $0 }).joined(separator: "\n")
+            }
+            let record = try store.mutate { file in
+                Result {
+                    if let reason = BackgroundQueue.admit(action, pr: pr, settings: file.background, runs: file.runs, now: now, auto: false) {
+                        throw Failure(message: reason)
+                    }
+                    let record = RunRecord.background(action, pr: pr, rule: nil, eventID: "manual:\(now.ISO8601Format())", runID: runID, at: now)
+                    file.runs.append(record)
+                    return record
+                }
+            }.get()
+            if flags.contains("json") { return json(["runID": runID, "status": "queued", "action": action.rawValue, "pr": "\(pr.repo)#\(pr.number)"]) }
+            return "Queued \(record.label) (run \(runID.prefix(8))). PullPing starts it within 30 seconds; pullping background list shows it, pullping drafts shows the result."
+        case "list":
+            try noArguments(positional)
+            let runs = store.load().runs.filter { $0.background != nil }.reversed()
+            if flags.contains("json") { return try encode(Array(runs)) }
+            guard !runs.isEmpty else { return "No background runs." }
+            return runs.map { r in
+                [stamp(r.at), (r.status?.word ?? "").padding(toLength: 11, withPad: " ", startingAt: 0), String((r.runID ?? "").prefix(8)), r.label,
+                 r.ok ? (r.draft != nil ? "draft" : "") : r.detail].joined(separator: "  ").trimmingCharacters(in: .whitespaces)
+            }.joined(separator: "\n")
+        case "cancel":
+            guard positional.count == 1 else { throw Usage(message: "cancel takes one run id") }
+            return try store.mutate { file in
+                Result {
+                    let i = try runIndex(positional[0], in: file.runs) { _ in true }
+                    switch file.runs[i].status {
+                    case .queued:
+                        (file.runs[i].status, file.runs[i].ok, file.runs[i].detail) = (.cancelled, false, "Cancelled")
+                        return "Cancelled \(file.runs[i].label)."
+                    case .running:
+                        // The app stops the process when it sees this (within 30 seconds).
+                        (file.runs[i].status, file.runs[i].ok, file.runs[i].detail) = (.cancelled, false, "Cancelled")
+                        return "Cancelling \(file.runs[i].label): PullPing stops it within 30 seconds."
+                    default: throw Failure(message: "\(file.runs[i].label) is \(file.runs[i].status?.word ?? "finished") already")
+                    }
+                }
+            }.get()
+        case "--help", "help": throw HelpRequested()
+        default: throw Usage(message: "unknown background command \(command)")
+        }
+    }
+
+    /// The background run whose id starts with `prefix` (at least 4 characters) among those `where` accepts.
+    private static func runIndex(_ prefix: String, in runs: [RunRecord], where accept: (RunRecord) -> Bool) throws -> Int {
+        guard prefix.count >= 4 else { throw Usage(message: "the run id prefix needs at least 4 characters") }
+        let found = runs.indices.filter { runs[$0].background != nil && accept(runs[$0]) && (runs[$0].runID ?? "").hasPrefix(prefix.lowercased()) }
+        guard !found.isEmpty else { throw Failure(message: "no background run matches \(prefix)") }
+        guard found.count == 1 else { throw Failure(message: "\(prefix) matches \(found.count) runs; use more characters") }
+        return found[0]
+    }
+
+    /// `drafts list|show|discard`. There is deliberately no `post`: only a click in the app's draft window posts.
+    private static func drafts(_ command: String, _ args: [String], store: AutomationStore, env: [String: String], now: Date) throws -> String {
+        let (_, flags, positional) = try parse(args, options: [], flags: ["json"])
+        let runsDir = store.runsDirectory
+        func draft(_ r: RunRecord) -> BackgroundDraft? { runsDir.flatMap { dir in r.runID.flatMap { BackgroundDraft.load(runID: $0, runsDir: dir) } } }
+        switch command {
+        case "list":
+            try noArguments(positional)
+            let drafts = store.load().runs.filter { $0.draft != nil }.reversed().compactMap(draft)
+            if flags.contains("json") { return try encode(drafts) }
+            guard !drafts.isEmpty else { return "No drafts." }
+            return drafts.map { d in
+                [stamp(d.createdAt), String(d.runID.prefix(8)), "\(d.repo) #\(d.number)", d.action.result,
+                 d.action == .review ? "suggests \(d.verdict.phrase)" : "", d.summary.count > 60 ? d.summary.prefix(59) + "…" : d.summary]
+                    .filter { !$0.isEmpty }.joined(separator: "  ")
+            }.joined(separator: "\n")
+        case "show":
+            guard positional.count == 1 else { throw Usage(message: "show takes one run id") }
+            let file = store.load()
+            guard let d = draft(file.runs[try runIndex(positional[0], in: file.runs) { $0.draft != nil }]) else { throw Failure(message: "the draft is gone") }
+            if flags.contains("json") { return try encode(d) }
+            let rows = [("run", d.runID), ("pull request", "\(d.repo) #\(d.number) — \(d.title)"), ("action", d.action.rawValue),
+                        ("verdict", d.verdict.phrase), ("commit", d.head), ("account", "@\(d.login)"),
+                        ("agent", "\(d.agent.rawValue) · session \(d.sessionID) · \(d.cwd)" + (d.notCloned ? " (not cloned)" : "")),
+                        ("drafted", d.createdAt.ISO8601Format()), ("summary", d.summary)]
+            return (table(rows) + ["body:"] + d.body.split(separator: "\n", omittingEmptySubsequences: false).map { "  " + $0 }).joined(separator: "\n")
+        case "discard":
+            guard positional.count == 1 else { throw Usage(message: "discard takes one run id") }
+            let (record, gone) = try store.mutate { file in
+                Result {
+                    let i = try runIndex(positional[0], in: file.runs) { $0.draft != nil }
+                    let gone = draft(file.runs[i])
+                    file.runs[i].draft = nil
+                    return (file.runs[i], gone)
+                }
+            }.get()
+            if let dir = runsDir, let id = record.runID, let url = BackgroundDraft.url(runID: id, runsDir: dir) { try? FileManager.default.removeItem(at: url) }
+            // The app's log; a memory store (tests) has none.
+            if store.url != nil, let gone {
+                ActivityLog.write([ActivityEntry(background: gone.action.title, stage: .discarded, pr: gone.pr, account: gone.login, runID: gone.runID, at: now)],
+                                  appendingTo: ActivityLog.defaultURL(env))
+            }
+            return "Discarded the \(record.background?.result ?? "draft") of \(record.label)."
+        case "--help", "help": throw HelpRequested()
+        default: throw Usage(message: "unknown drafts command \(command)")
+        }
     }
 }

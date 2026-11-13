@@ -3,6 +3,8 @@ import Foundation
 /// One of Handle with Agent's choices on a pull request; `target` is an Open With id.
 public enum HandlerChoice: Equatable, Sendable {
     case handle(target: String), resume(target: String, prompt: Bool), new(target: String), resumeEarlier(target: String), findEarlier
+    /// In Background: start a headless run, or cancel the pull request's running one.
+    case background(BackgroundAction), cancelBackground
 }
 
 public struct HandlerMenuItem: Equatable, Sendable {
@@ -42,5 +44,13 @@ public enum HandlerMenuModel {
         }
         let items = targets.map { HandlerMenuItem(title: several ? "Handle in \($0.name)" : "Handle with Agent", choice: .handle(target: $0.id)) }
         return [HandlerMenuSection(title: nil, items: items), find]
+    }
+
+    /// The last section, "In Background" (Background Runs on): the actions this pull request allows, or Cancel Background
+    /// Review while one runs on it. Empty when there is neither.
+    public static func background(actions: [BackgroundAction], running: BackgroundAction?) -> [HandlerMenuSection] {
+        let items = running.map { [HandlerMenuItem(title: $0 == .review ? "Cancel Background Review" : "Cancel Summary", choice: .cancelBackground)] }
+            ?? actions.map { HandlerMenuItem(title: $0.title, choice: .background($0)) }
+        return items.isEmpty ? [] : [HandlerMenuSection(title: "In Background", items: items)]
     }
 }

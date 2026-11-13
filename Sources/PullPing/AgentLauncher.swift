@@ -148,8 +148,8 @@ enum AgentLauncher {
         }
     }
 
-    /// Prompts and scripts older than 7 days.
-    private static func removeOldRuns() {
+    /// Prompts, scripts and background run folders older than 7 days.
+    static func removeOldRuns() {
         let fm = FileManager.default
         let cutoff = Date().addingTimeInterval(-keep)
         for url in (try? fm.contentsOfDirectory(at: runsDir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [] {

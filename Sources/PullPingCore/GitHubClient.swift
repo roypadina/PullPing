@@ -35,7 +35,7 @@ public final class GitHubClient {
     }()
 
     let transport: GraphQLTransport
-    private let token: String
+    let token: String
     public private(set) var cost = 0
     public private(set) var rateLimit: RateLimit?
     /// GitHub returned data plus errors (SAML, missing access): the data is used, this status is shown.
@@ -52,12 +52,18 @@ public final class GitHubClient {
         return Viewer(login: data.viewer.login, avatarURL: data.viewer.avatarUrl, scopes: scopes, status: Self.scopeStatus(scopes) ?? .ok)
     }
 
-    func run<T: Decodable>(_ query: String, _ variables: [String: Any] = [:]) async throws -> T {
+    /// A GraphQL POST with this client's token.
+    func request(_ query: String, _ variables: [String: Any]) throws -> URLRequest {
         var request = URLRequest(url: Self.endpoint)
         request.httpMethod = "POST"
         request.setValue("bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["query": query, "variables": variables])
+        return request
+    }
+
+    func run<T: Decodable>(_ query: String, _ variables: [String: Any] = [:]) async throws -> T {
+        let request = try request(query, variables)
         let data: Data, http: HTTPURLResponse
         do { (data, http) = try await transport.send(request) } catch { throw Self.status(for: error) }
         scopes = Self.scopes(http)

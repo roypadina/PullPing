@@ -9,6 +9,8 @@ struct PanelAction {
     let run: @MainActor () -> Void
     /// Set: an icon-only chevron that pops this menu up (Handle with Agent's other choices); `title` is its label.
     var menu: (@MainActor () -> NSMenu)? = nil
+    /// A note's button symbol; nil = a gear (Open Settings).
+    var symbol: String? = nil
 }
 
 /// What one panel shows; coalescing updates it in place.
@@ -293,9 +295,9 @@ struct NotificationContent: View {
             Text(verbatim: note.text).font(.caption).foregroundStyle(.secondary).lineLimit(3).help(note.text)
             Spacer(minLength: 0)
             HStack(spacing: 6) {
-                ForEach(Array(model.actions.enumerated()), id: \.offset) { _, action in
-                    Button { action.run(); onDismiss() } label: { Label(action.title, systemImage: "gearshape") }
-                        .buttonStyle(SignalButtonStyle(signal: hue, prominent: true))
+                ForEach(Array(model.actions.enumerated()), id: \.offset) { i, action in
+                    Button { action.run(); onDismiss() } label: { Label(action.title, systemImage: action.symbol ?? "gearshape") }
+                        .buttonStyle(SignalButtonStyle(signal: hue, prominent: i == 0))  // one main action
                 }
             }
         }

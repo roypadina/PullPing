@@ -66,6 +66,26 @@ public struct ActivityEntry: Codable, Sendable, Equatable {
     public var automation: String?
     public var ok: Bool?
     public var error: String?
+    /// Background runs: the run's id (its draft) and what happened to it.
+    public var runID: String?
+    public var stage: Stage?
+
+    /// A background run's step in the log: started, its draft ready, failed (also cancelled, timed out, interrupted), not
+    /// started (a cap or a gate), its draft discarded or posted.
+    public enum Stage: String, Codable, Sendable {
+        case started, ready, failed, refused, discarded, posted
+
+        public var label: String {
+            switch self {
+            case .started: "Started"
+            case .ready: "Ready"
+            case .failed: "Failed"
+            case .refused: "Not started"
+            case .discarded: "Discarded"
+            case .posted: "Posted"
+            }
+        }
+    }
 
     public init(at: Date, kind: Kind, pr: TrackedPR, account: String) {
         self.at = at
@@ -105,6 +125,16 @@ public struct ActivityEntry: Codable, Sendable, Equatable {
         self.error = error
     }
 
+    /// A background run's step; `what` the action ("Review in Background") or, posted, "Review: Request changes as @login".
+    public init(background what: String, stage: Stage, pr: TrackedPR, account: String, runID: String?, error: String? = nil, at: Date) {
+        self.init(at: at, kind: .run, pr: pr, account: account)
+        automation = what
+        self.stage = stage
+        self.runID = runID
+        ok = stage == .failed ? false : stage == .refused ? nil : true
+        self.error = error
+    }
+
     /// Lenient: a missing or unreadable field takes its default; only `at` and `kind` are required.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -129,10 +159,13 @@ public struct ActivityEntry: Codable, Sendable, Equatable {
         automation = value(.automation)
         ok = value(.ok)
         error = value(.error)
+        runID = value(.runID)
+        stage = value(.stage)
     }
 
     /// "Review approved · alice", "Ran Fix CI", "Failed: Fix CI", "Asked: Fix CI": the app row and `pullping activity`.
     public var what: String {
+        if let stage { return "\(stage.label): \(automation ?? "")" }
         guard kind == .event else { return (ok == false ? "Failed: " : ok == nil ? "Asked: " : "Ran ") + (automation ?? "") }
         let label = event?.label ?? ""
         return actor.map { $0.isEmpty || $0 == "CI" ? label : "\(label) · \($0)" } ?? label

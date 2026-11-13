@@ -41,6 +41,11 @@ final class FakeTransport: GraphQLTransport, @unchecked Sendable {
     }
 
     func operations() -> [String] { requests.map { Self.operation($0).name } }
+
+    /// A GET, or a GraphQL query (not a mutation).
+    static func isRead(_ request: URLRequest) -> Bool {
+        request.httpMethod == "GET" || !String(decoding: request.httpBody ?? Data(), as: UTF8.self).contains("mutation")
+    }
 }
 
 /// A tiny GitHub: open PRs found by the involved/requested searches, open issues by the issues search, node JSON per id, a rate limit.

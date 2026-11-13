@@ -561,6 +561,7 @@ struct AutomationsTab: View {
             .disabled(!store.automationsEnabled)
             openWith
             prompts
+            backgroundRuns
             Section {
                 if store.rules.isEmpty { Text("No rules yet.").foregroundStyle(.secondary) }
                 ForEach(store.rules) { rule in
@@ -756,6 +757,24 @@ struct AutomationsTab: View {
         .disabled(!store.automationsEnabled)
     }
 
+    /// Settings → Automations → Background Runs: off by default; the daily cap.
+    private var backgroundRuns: some View {
+        Section {
+            Toggle("Background Runs", isOn: Binding(get: { store.automationFile.background.enabled },
+                                                    set: { on in store.mutateAutomationFile { $0.background.enabled = on } }))
+            Stepper(value: Binding(get: { store.automationFile.background.dailyCap }, set: { cap in store.mutateAutomationFile { $0.background.dailyCap = cap } }),
+                    in: BackgroundSettings.dailyCapRange) {
+                Text("At most \(store.automationFile.background.dailyCap) runs a day")
+            }
+            .disabled(!store.automationFile.background.enabled)
+        } header: {
+            Text("Background Runs")
+        } footer: {
+            Text("Agents run without a terminal and can only read: the repository folder and the pull request's diff and discussion. PullPing posts nothing until you click Post in a draft. Review in Background and Summarize are in each pull request's Handle with Agent menu; a rule can run in the background too. At most 2 at once, 10 minutes each.").formFooter()
+        }
+        .disabled(!store.automationsEnabled)
+    }
+
     /// Rules and hooks that open with `t` (they fall back to the default when it goes).
     static func users(_ t: LaunchTarget, in store: Store) -> Int { store.automationFile.automations.filter { $0.target == t.id }.count }
 
@@ -811,7 +830,8 @@ private struct RuleRow: View {
     private var summary: String {
         let scope = switch rule.scope { case .any: "Any"; case .mine: "Mine"; case .others: "Others" }
         return "\(rule.kinds.count) \(rule.kinds.count == 1 ? "event" : "events") · \(scope) · \(rule.mode == .auto ? "Automatic" : "Ask") · "
-            + "\(rule.agent.title) in \(store.automationFile.target(for: rule).target.name)" + (rule.source == "cli" ? " · CLI" : "")
+            + "\(rule.agent.title) " + (rule.background.map { $0 == .review ? "· background review" : "· background summary" } ?? "in \(store.automationFile.target(for: rule).target.name)")
+            + (rule.source == "cli" ? " · CLI" : "")
     }
 }
 
@@ -940,6 +960,13 @@ struct RuleEditorSheet: View {
                         ForEach(AgentKind.allCases, id: \.self) { Text($0.title).tag($0) }
                     }
                     TextField("Command", text: $rule.agentCommand, prompt: Text(verbatim: rule.agent.rawValue))
+                    if !handler && (store.automationFile.background.enabled || rule.background != nil) {
+                        Picker("Run", selection: $rule.background) {
+                            Text("In a terminal").tag(BackgroundAction?.none)
+                            Text("Review in the background (a draft)").tag(BackgroundAction?.some(.review))
+                            Text("Summarize in the background").tag(BackgroundAction?.some(.summarize))
+                        }
+                    }
                     if !handler {  // the handler opens with the default
                         let targets = store.automationFile.targets
                         Picker("Open in", selection: $rule.target) {
@@ -958,6 +985,9 @@ struct RuleEditorSheet: View {
                         }
                     }
                 } footer: {
+                    if rule.background != nil {
+                        Text("In the background the agent only reads (no shell, network or write tools) and the run ends in a draft you post yourself; Open in, Session, Working directory and Prompt are not used.").formFooter()
+                    }
                     if rule.usesLinkedSession {
                         Text("Runs only on pull requests with a linked session, in that session's agent and folder; Command still applies. Pull requests without a link are skipped.").formFooter()
                     }

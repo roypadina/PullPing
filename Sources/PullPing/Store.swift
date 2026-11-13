@@ -198,6 +198,8 @@ final class Store {
     /// Earlier-session searches run one at a time, after the previous one.
     @ObservationIgnored private var search: Task<Void, Never>?
     @ObservationIgnored private var finding: Set<String> = []
+    /// Background runs whose process runs now, by run id (at most `BackgroundSettings.maxRunning`).
+    @ObservationIgnored private var backgroundJobs: [String: BackgroundJob] = [:]
     /// Everything PullPing saw and did (`activity.jsonl`); memory only when `!persist`.
     @ObservationIgnored let activityLog: ActivityLog
     @ObservationIgnored private var activityCompactedAt = Date.distantPast
@@ -266,6 +268,10 @@ final class Store {
         Task { await poller.start(accounts: { await self.accounts }, onReport: { await self.handle($0) }) }
         startClock()
         compactActivity()
+        // Runs that were running when PullPing quit stay interrupted; the queue goes on.
+        automationStore.mutate { BackgroundQueue.recover(&$0.runs, now: Date()) }
+        reload()
+        pumpBackground()
     }
 
     private func startClock() {
@@ -382,7 +388,7 @@ final class Store {
         reload()
         let plan = AutomationMatcher.plan(events: report.events, prs: tracked.prs, automations: automationFile.automations, runs: automationFile.runs,
                                           settingsEnabled: automationFile.enabled, paused: isPaused, accounts: accounts, now: now,
-                                          sessions: automationFile.sessions)
+                                          sessions: automationFile.sessions, background: automationFile.background.enabled)
         // An automatic run never types into or focuses a session the user may be typing in: one open in Ghostex becomes an
         // offer with Go to Session.
         var live: [AutomationMatcher.Match] = []
@@ -406,7 +412,7 @@ final class Store {
     /// The agent session an automatic run would resume in Ghostex (its pull request's link, or a hook's own session), else nil.
     private func ghostexSession(_ match: AutomationMatcher.Match) -> String? {
         let a = match.automation
-        guard a.launcher == .ghostex else { return nil }
+        guard a.launcher == .ghostex, a.backgroundAction == nil else { return nil }
         let id = a.usesLinkedSession ? link(for: match.pr)?.sessionID : a.sessionID
         return id.flatMap { $0.isEmpty ? nil : $0 }
     }
@@ -438,7 +444,8 @@ final class Store {
             let scope = switch a.scope { case .any: "pull requests"; case .mine: "your pull requests"; case .others: "others' pull requests" }
             let place = a.pr.map { "\($0.repo) #\($0.number)" } ?? scope + (a.repos.isEmpty ? "" : " in \(a.repos.joined(separator: ", "))")
             let by = a.by.isEmpty ? "" : " (by \(a.by.count > 12 ? a.by.prefix(12) + "…" : a.by))"
-            let does = a.usesLinkedSession ? "resumes the pull request's linked session" : "starts \(AutomationCLI.agentWord(a)) in \(a.launcher.title)"
+            let does = a.backgroundAction.map { "drafts a \($0 == .review ? "review" : "summary") in the background (it posts nothing)" }
+                ?? (a.usesLinkedSession ? "resumes the pull request's linked session" : "starts \(AutomationCLI.agentWord(a)) in \(a.launcher.title)")
             NotificationPanels.shared.show(
                 note: "Added from the command line\(by). PullPing \(does) without asking when \(kinds) arrives on \(place).",
                 title: "\(a.name) runs automatically", id: a.id,
@@ -480,7 +487,7 @@ final class Store {
             }
             guard !styled.isEmpty else { continue }
             let actions = prOffers.map { match in
-                PanelAction(id: match.automation.id, title: live.contains(match) ? "Go to Session" : "Run \(match.automation.name)") { [weak self] in
+                PanelAction(id: match.automation.id, title: live.contains(match) ? "Go to Session" : match.automation.backgroundAction?.title ?? "Run \(match.automation.name)") { [weak self] in
                     self?.run(match.automation, prID: match.pr.id, event: match.event)
                 }
             } + (handler.handlerEvent(in: styled.map(\.0)).map { handlerActions(pr, event: $0, scenario: Scenario.derive(events: styled.map(\.0), pr: pr)) } ?? [])
@@ -549,6 +556,7 @@ final class Store {
             }
         }
         reload()
+        pumpBackground()  // runs queued from the command line, and its cancels
         var due: [PREvent] = []
         for pr in tracked.prs.values where enabledIDs.contains(pr.accountID) {
             if let next = Reminders.nextReminder(pr: pr, settings: settings, now: now), next <= now {
@@ -817,7 +825,7 @@ final class Store {
         guard handlerShown else { return [] }
         let id = pr.id
         let linked = link(for: pr) != nil
-        let more = linked || automationFile.targets.count > 1
+        let more = linked || automationFile.targets.count > 1 || backgroundOn
             ? [PanelAction(id: Automation.handlerMenuActionID, title: "More agent options", run: {}) { [weak self] in
                 self.map { HandlerMenu.nsMenu(store: $0, pr: pr, event: event, scenario: scenario) } ?? NSMenu()
             }] : []
@@ -834,10 +842,16 @@ final class Store {
     }
 
     /// Handle with Agent's choices for a pull request, by target (`HandlerMenuModel`).
+    /// Then In Background, with Background Runs on.
     func handlerSections(_ pr: TrackedPR) -> [HandlerMenuSection] {
-        HandlerMenuModel.sections(targets: automationFile.targets, linked: link(for: pr)?.sessionID,
-                                  earlier: foundSession(for: pr).map { "\($0.sessionID.prefix(4))…, \(relativeAge($0.modifiedAt, now: now))" })
+        (handlerShown ? HandlerMenuModel.sections(targets: automationFile.targets, linked: link(for: pr)?.sessionID,
+                                                  earlier: foundSession(for: pr).map { "\($0.sessionID.prefix(4))…, \(relativeAge($0.modifiedAt, now: now))" }) : [])
+            + (backgroundOn ? HandlerMenuModel.background(actions: BackgroundAction.allCases.filter { BackgroundQueue.eligible($0, pr: pr) == nil },
+                                                          running: backgroundRun(for: pr).flatMap { $0.status?.isActive == true ? $0.background : nil }) : [])
     }
+
+    /// The Handle with Agent menus show: the handler on, or Background Runs (their In Background section).
+    var agentMenuShown: Bool { handlerShown || backgroundOn }
 
     /// A menu choice (`HandlerChoice`) on a pull request.
     func perform(_ choice: HandlerChoice, prID: String, event: PREvent?, scenario: Scenario? = nil) {
@@ -848,6 +862,8 @@ final class Store {
         case .resumeEarlier(let target):
             if let pr = tracked.prs[prID], let found = foundSession(for: pr) { resumeFound(found, prID: prID, event: event, target: target, scenario: scenario) }
         case .findEarlier: findEarlierSession(prID: prID)
+        case .background(let action): startBackground(action, prID: prID, event: event)
+        case .cancelBackground: if let pr = tracked.prs[prID], let id = backgroundRun(for: pr)?.runID { cancelBackground(id) }
         }
     }
 
@@ -906,6 +922,8 @@ final class Store {
             runFailed("\(automation.name) didn't run", reason, id: automation.id)
             return
         }
+        // A background rule ends in a draft: no terminal, no target, session or prompt of its own.
+        if let action = automation.backgroundAction { return startBackground(action, prID: prID, event: event, rule: automation, auto: auto) }
         launch(automation, pr: pr, login: account.login, event: event, eventID: eventID, key: key, file: file, at: t, auto: auto)
     }
 
@@ -977,6 +995,220 @@ final class Store {
     func removeAutomation(_ id: UUID) {
         automationStore.mutate { $0.automations.removeAll { $0.id == id } }
         reload()
+    }
+
+    // MARK: Background runs
+
+    /// Background Runs in Settings → Automations, under Run Automations.
+    var backgroundOn: Bool { automationFile.enabled && automationFile.background.enabled }
+
+    /// The pull request's latest background run (the detail pane's Agent Draft section, Cancel in the menus).
+    func backgroundRun(for pr: TrackedPR) -> RunRecord? { automationFile.runs.last { $0.prID == pr.id && $0.background != nil } }
+
+    /// A run's draft while it exists (7 days, until discarded or posted).
+    func draft(_ runID: String) -> BackgroundDraft? { persist ? BackgroundDraft.load(runID: runID, runsDir: AgentLauncher.runsDir) : nil }
+
+    /// Review in Background or Summarize (a menu, `rule`'s background action, `auto`: a rule on its own): checks the gates and caps
+    /// (`BackgroundQueue`), queues the run, starts it when a slot is free. A refusal is logged; a click also gets a note.
+    func startBackground(_ action: BackgroundAction, prID: String, event: PREvent?, rule: Automation? = nil, auto: Bool = false) {
+        guard let pr = tracked.prs[prID], let account = account(pr.accountID) else { return }
+        let t = Date(), runID = UUID().uuidString.lowercased(), title = rule?.name ?? action.title
+        let refusal = automationStore.mutate { file -> String? in
+            guard file.enabled else { return "Run Automations is off" }
+            if let reason = BackgroundQueue.eligible(action, pr: pr)
+                ?? BackgroundQueue.admit(action, pr: pr, settings: file.background, runs: file.runs, now: t, auto: auto) { return reason }
+            file.runs.append(.background(action, pr: pr, rule: rule, eventID: event?.id ?? "manual:\(t.ISO8601Format())", runID: runID, at: t))
+            return nil
+        }
+        reload()
+        if let refusal {
+            BackgroundRunner.log.info("background run not started: \(refusal, privacy: .public)")
+            record([ActivityEntry(background: title, stage: .refused, pr: pr, account: account.login, runID: nil, error: refusal, at: t)])
+            if !auto { runFailed("\(title) didn't start", "\(pr.repo) #\(pr.number): \(refusal)", id: Automation.backgroundID) }
+            return
+        }
+        pumpBackground()
+    }
+
+    /// Starts queued runs into free slots, and stops a running one the command line cancelled. After every queue change and
+    /// on the clock (runs queued from the command line).
+    func pumpBackground() {
+        guard persist else { return }
+        for (id, job) in backgroundJobs where automationFile.runs.last(where: { $0.runID == id })?.status == .cancelled { job.stop(.cancelled) }
+        for runID in BackgroundQueue.next(automationFile.runs, running: backgroundJobs.count) { begin(runID) }
+    }
+
+    private func begin(_ runID: String) {
+        guard backgroundJobs[runID] == nil, backgroundJobs.count < BackgroundSettings.maxRunning,
+              let run = automationFile.runs.last(where: { $0.runID == runID }), run.status == .queued, let action = run.background else { return }
+        let job = BackgroundJob(runID: runID)
+        backgroundJobs[runID] = job
+        let file = automationStore.load()
+        let rule = run.automationID == Automation.backgroundID ? nil : file.automations.first { $0.id == run.automationID }
+        guard let pr = tracked.prs[run.prID], let account = account(pr.accountID) else {
+            return finishBackground(runID, outcome: .init(status: .failed, error: "The pull request is no longer tracked"))
+        }
+        automationStore.mutate { file in
+            guard let i = file.runs.lastIndex(where: { $0.runID == runID }) else { return }
+            (file.runs[i].status, file.runs[i].detail) = (.running, "Running")
+        }
+        reload()
+        record([ActivityEntry(background: rule?.name ?? action.title, stage: .started, pr: pr, account: account.login, runID: runID, at: Date())])
+        let input = BackgroundRunner.Input(runID: runID, action: action, pr: pr, login: account.login, token: Keychain.get(account.tokenService),
+                                           file: file, rule: rule, index: index(file.repoFolders), runsDir: AgentLauncher.runsDir)
+        Task {
+            let outcome = await BackgroundRunner.run(input, job: job)
+            finishBackground(runID, outcome: outcome)
+        }
+    }
+
+    /// Records the result (a command-line cancel stays cancelled), logs it, shows the panel, starts the next.
+    private func finishBackground(_ runID: String, outcome: BackgroundRunner.Outcome) {
+        backgroundJobs[runID] = nil
+        let saved = automationStore.mutate { file -> RunRecord? in
+            guard let i = file.runs.lastIndex(where: { $0.runID == runID }) else { return nil }
+            let status = file.runs[i].status == .cancelled ? .cancelled : outcome.status
+            file.runs[i].status = status
+            file.runs[i].ok = status == .done
+            file.runs[i].detail = status == .done ? "\(outcome.draft?.action.result.capitalized ?? "Draft") ready" : outcome.error ?? status.word.capitalized
+            file.runs[i].sessionID = outcome.sessionID
+            file.runs[i].head = outcome.head ?? file.runs[i].head
+            file.runs[i].draft = outcome.draft.flatMap { BackgroundDraft.url(runID: $0.runID, runsDir: AgentLauncher.runsDir)?.path }
+            return file.runs[i]
+        }
+        reload()
+        guard let saved, let action = saved.background, let pr = tracked.prs[saved.prID] else { return pumpBackground() }
+        let login = account(pr.accountID)?.login ?? ""
+        let title = String(saved.label.split(separator: " · ").first ?? Substring(action.title))
+        record([ActivityEntry(background: title, stage: saved.ok ? .ready : .failed, pr: pr, account: login, runID: runID,
+                              error: saved.ok ? nil : saved.detail, at: Date())])
+        if settings.notificationsEnabled && !isPaused && saved.status != .cancelled { showBackground(saved, draft: outcome.draft, pr: pr, title: title) }
+        pumpBackground()
+    }
+
+    /// The result's panel (an alert: it stays): a review draft (Review Draft…, Open Session, Discard), a summary (Open
+    /// Session, Copy), or a failure. The agent's summary is shown as cleaned plain text.
+    private func showBackground(_ run: RunRecord, draft: BackgroundDraft?, pr: TrackedPR, title: String) {
+        guard let runID = run.runID else { return }
+        let id = UUID(uuidString: runID) ?? Automation.backgroundID
+        let place = "\(pr.repo) #\(pr.number) · \(PromptTemplate.clean(pr.title, max: 120))"
+        let open = run.sessionID == nil ? [] : [PanelAction(id: id, title: "Open Session", run: { [weak self] in self?.openBackgroundSession(runID: runID) }, symbol: "terminal")]
+        guard let draft else {
+            return NotificationPanels.shared.show(note: "\(place)\n\(run.detail)", title: "\(title) failed", id: id, actions: open)
+        }
+        if draft.action == .summarize {
+            let copy = PanelAction(id: id, title: "Copy", run: {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(draft.body.isEmpty ? draft.summary : draft.body, forType: .string)
+            }, symbol: "doc.on.doc")
+            return NotificationPanels.shared.show(note: "\(place)\n\(draft.summary)", title: "Summary ready", id: id, actions: open + [copy])
+        }
+        NotificationPanels.shared.show(
+            note: "\(place)\nSuggests: \(draft.verdict.phrase). \(draft.summary)", title: "Review draft ready", id: id,
+            actions: [PanelAction(id: id, title: "Review Draft…", run: { [weak self] in self.map { DraftWindows.shared.show(store: $0, runID: runID) } }, symbol: "doc.text.magnifyingglass")]
+                + open + [PanelAction(id: id, title: "Discard", run: { [weak self] in self?.discardDraft(runID) }, symbol: "trash")])
+    }
+
+    /// Cancel Background Review: a running run's process is stopped (its result records "cancelled"); a queued one never starts.
+    func cancelBackground(_ runID: String) {
+        if let job = backgroundJobs[runID] { return job.stop(.cancelled) }
+        let cancelled = automationStore.mutate { file -> RunRecord? in
+            guard let i = file.runs.lastIndex(where: { $0.runID == runID }), file.runs[i].status == .queued else { return nil }
+            (file.runs[i].status, file.runs[i].ok, file.runs[i].detail) = (.cancelled, false, "Cancelled")
+            return file.runs[i]
+        }
+        reload()
+        if let cancelled, let pr = tracked.prs[cancelled.prID] {
+            record([ActivityEntry(background: cancelled.background?.title ?? "", stage: .failed, pr: pr, account: account(pr.accountID)?.login ?? "",
+                                  runID: runID, error: "Cancelled", at: Date())])
+        }
+    }
+
+    /// At quit: running runs stop and stay interrupted (never restarted).
+    func interruptBackground() {
+        for job in backgroundJobs.values { job.stop(.interrupted) }
+        guard !backgroundJobs.isEmpty else { return }
+        let ids = Set(backgroundJobs.keys)
+        automationStore.mutate { file in
+            for i in file.runs.indices where ids.contains(file.runs[i].runID ?? "") && file.runs[i].status == .running {
+                (file.runs[i].status, file.runs[i].ok, file.runs[i].detail) = (.interrupted, false, "Interrupted: PullPing quit")
+            }
+        }
+    }
+
+    /// Deletes a draft (the panel's Discard, the draft window's); its run stays in Recent Runs.
+    func discardDraft(_ runID: String) {
+        let gone = draft(runID)
+        automationStore.mutate { file in if let i = file.runs.lastIndex(where: { $0.runID == runID }) { file.runs[i].draft = nil } }
+        if let url = BackgroundDraft.url(runID: runID, runsDir: AgentLauncher.runsDir) { try? FileManager.default.removeItem(at: url) }
+        reload()
+        if let gone {
+            record([ActivityEntry(background: gone.action.title, stage: .discarded, pr: tracked.prs[gone.prID] ?? gone.pr, account: gone.login, runID: runID, at: Date())])
+        }
+        UUID(uuidString: runID).map { NotificationPanels.shared.dismiss(prID: "note:\($0)") }
+        DraftWindows.shared.close(runID)
+    }
+
+    /// Open Session: the run's headless session, resumed in a terminal with the default Open With target and no prompt (an
+    /// interactive session: the user's own permissions apply there). Recorded as a Handle with Agent run.
+    func openBackgroundSession(runID: String) {
+        let file = automationStore.load()
+        guard let run = file.runs.last(where: { $0.runID == runID }), let session = run.sessionID, let pr = tracked.prs[run.prID],
+              let account = account(pr.accountID) else {
+            return runFailed("Open Session didn't run", "The session or its pull request is gone.", id: Automation.backgroundID)
+        }
+        guard file.enabled else { return runFailed("Open Session didn't run", "Turn on Run Automations in Settings → Automations.", id: Automation.backgroundID) }
+        let draft = draft(runID)
+        let rule = file.automations.first { $0.id == run.automationID }
+        var a = file.handler
+        a.agent = draft?.agent ?? (rule ?? file.handler).agent
+        if a.agent != file.handler.agent { a.agentCommand = rule?.agent == a.agent ? rule?.agentCommand ?? "" : "" }
+        a.sessionID = session
+        a.workingDirectory = draft?.cwd ?? AgentLauncher.runsDir.appendingPathComponent(runID).path
+        let t = Date()
+        launch(a, pr: pr, login: account.login, event: nil, eventID: "manual:\(t.ISO8601Format())", key: "background|\(runID)", file: file, at: t, prompt: false)
+    }
+
+    /// Has PullPing posted as `login` before (the one-time question was answered)?
+    func postConfirmed(_ login: String) -> Bool {
+        (UserDefaults.standard.stringArray(forKey: DefaultsKey.postConfirmedLogins) ?? []).contains(login.lowercased())
+    }
+
+    func confirmPosting(_ login: String) {
+        guard persist else { return }
+        UserDefaults.standard.set((UserDefaults.standard.stringArray(forKey: DefaultsKey.postConfirmedLogins) ?? []) + [login.lowercased()],
+                                  forKey: DefaultsKey.postConfirmedLogins)
+    }
+
+    /// The draft window's Post, the only path that writes to GitHub: one review with the account that tracks the pull request,
+    /// the edited body and the chosen event, pinned to the draft's commit (`DraftPost.refusal`, checked again against a fresh
+    /// head right before). nil = posted (the draft is used up); else why not, and the draft stays.
+    func postDraft(_ draft: BackgroundDraft, body: String, event: DraftPost.Event) async -> String? {
+        guard persist else { return "Not in the demo." }
+        guard let account = account(draft.accountID) else { return "@\(draft.login) is no longer an account in PullPing." }
+        let pr = tracked.prs[draft.prID]
+        if let reason = DraftPost.refusal(event, body: body, draftHead: draft.head, head: pr?.headOID ?? draft.head, open: (pr?.state ?? .open) == .open) {
+            return reason
+        }
+        let client = GitHubClient(transport: URLSessionTransport(), token: Keychain.get(account.tokenService))
+        do {
+            let now = try await client.pullRequestHead(prID: draft.prID)
+            if let reason = DraftPost.refusal(event, body: body, draftHead: draft.head, head: now.head, open: now.open) { return reason }
+            _ = try await client.postReview(prID: draft.prID, commitOID: draft.head, event: event, body: body)
+        } catch {
+            return "GitHub didn't take it: \((error as? AccountStatus)?.word ?? error.localizedDescription)"
+        }
+        automationStore.mutate { file in
+            guard let i = file.runs.lastIndex(where: { $0.runID == draft.runID }) else { return }
+            (file.runs[i].draft, file.runs[i].detail) = (nil, "Posted: \(event.title) as @\(account.login)")
+        }
+        if let file = BackgroundDraft.url(runID: draft.runID, runsDir: AgentLauncher.runsDir) { try? FileManager.default.removeItem(at: file) }
+        reload()
+        record([ActivityEntry(background: "Review: \(event.title) as @\(account.login)", stage: .posted, pr: pr ?? draft.pr, account: account.login,
+                              runID: draft.runID, at: Date())])
+        BackgroundRunner.log.info("posted a review (\(event.rawValue, privacy: .public)) on \(draft.repo, privacy: .public) #\(draft.number)")
+        UUID(uuidString: draft.runID).map { NotificationPanels.shared.dismiss(prID: "note:\($0)") }
+        return nil
     }
 
     // MARK: Accounts

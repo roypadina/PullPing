@@ -162,6 +162,8 @@ public enum DefaultsKey {
     public static let activitySeenAt = "activitySeenAt"
     /// The one-time "what changed in 0.7" note was shown (or the welcome window was).
     public static let didShowWhatsNew070 = "didShowWhatsNew070"
+    /// Logins PullPing has posted a review as, after the one-time "PullPing will post this as @login" question.
+    public static let postConfirmedLogins = "postConfirmedLogins"
 }
 
 extension Account {

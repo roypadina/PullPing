@@ -317,7 +317,7 @@ struct PRMenuItems: View {
                 }
             }
             if ids.count == 1, let pr = ids.first.flatMap({ store.tracked.prs[$0] }) {
-                if store.handlerShown { Menu("Handle with Agent") { HandlerMenu(store: store, pr: pr) } }
+                if store.agentMenuShown { Menu("Handle with Agent") { HandlerMenu(store: store, pr: pr) } }
                 RunAutomationMenu(store: store, pr: pr)
             }
             Divider()
@@ -336,7 +336,7 @@ struct RunAutomationMenu: View {
 
     var body: some View {
         let automations = store.automations(for: pr)
-        let handler = compact && store.handlerShown
+        let handler = compact && store.agentMenuShown
         Menu {
             if handler {
                 Menu("Handle with Agent") { HandlerMenu(store: store, pr: pr) }
@@ -465,6 +465,10 @@ struct PRDetailView: View {
                         Button("Resume") { store.resumeFound(found, prID: pr.id, event: nil) }
                     }
                 }
+            }
+            // A panel can be dismissed: the latest background run and its draft stay reachable here (7 days).
+            if let run = store.backgroundRun(for: pr), store.now.timeIntervalSince(run.at) < 7 * 86_400 {
+                Section("Agent Draft") { AgentDraftRow(store: store, run: run) }
             }
             Section("Activity") {
                 if pr.events.isEmpty { Text("No activity yet").foregroundStyle(.secondary) }

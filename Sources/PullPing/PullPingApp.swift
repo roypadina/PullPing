@@ -70,6 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @MainActor func applicationWillTerminate(_ notification: Notification) {
+        Self.store?.interruptBackground()
         Self.store?.state.save()
     }
 }
@@ -106,7 +107,7 @@ struct AppCommands: Commands {
                 .keyboardShortcut("u", modifiers: [.command, .shift, .option])
             Divider()
             Menu("Handle with Agent") { if let pr { HandlerMenu(store: store, pr: pr) } }
-                .disabled(pr == nil || !store.handlerShown)
+                .disabled(pr == nil || !store.agentMenuShown)
             Divider()
             Button(pr?.muted == true ? "Unmute" : "Mute") { store.setMuted(ids, !(pr?.muted ?? false)) }.disabled(pr == nil)
             Button(pr?.hidden == true ? "Unhide" : "Hide") { store.setHidden(ids, !(pr?.hidden ?? false)) }.disabled(pr == nil)

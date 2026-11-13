@@ -69,6 +69,9 @@ struct ActivityView: View {
         .contextMenu(forSelectionType: Int.self) { rows in
             if !rows.isEmpty {
                 Button("Open in Browser") { rows.forEach(open) }
+                if rows.count == 1, let i = rows.first, store.activity.indices.contains(i), let id = store.activity[i].runID, store.draft(id) != nil {
+                    Button("Review Draft…") { DraftWindows.shared.show(store: store, runID: id) }
+                }
                 Button("Copy Link") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(rows.sorted().compactMap { store.activity.indices.contains($0) ? store.activity[$0].url?.absoluteString : nil }

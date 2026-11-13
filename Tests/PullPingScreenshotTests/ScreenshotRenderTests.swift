@@ -215,6 +215,84 @@ final class ScreenshotRenderTests: XCTestCase {
         try save("handler-menus", menus, NSSize(width: 360, height: 640))
     }
 
+    /// Background runs: the draft window and the "Review draft ready" panel (README), light and dark.
+    /// RENDER_SCREENSHOTS=$PWD/docs/screenshots swift test --filter ScreenshotRenderTests/test_renderBackgroundScreenshots
+    func test_renderBackgroundScreenshots() throws {
+        guard let dir = ProcessInfo.processInfo.environment["RENDER_SCREENSHOTS"] else { throw XCTSkip("set RENDER_SCREENSHOTS=<dir> to render") }
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        for dark in [false, true] {
+            let store = Fixtures.sampleStore()
+            let draft = Self.sampleDraft(store)
+            func save(_ name: String, _ view: some View, _ size: NSSize) throws {
+                try render(view, size: size, dark: dark, to: URL(fileURLWithPath: dir).appendingPathComponent("\(name)\(dark ? "-dark" : "").png"))
+            }
+            try save("draft-window", DraftView(store: store, draft: draft) {}, NSSize(width: 620, height: 560))
+            let note = PanelModel(pr: TrackedPR(id: "note:x", accountID: UUID(), firstTrackedAt: Date()), events: [], alert: true, account: nil,
+                                  actions: [PanelAction(id: UUID(), title: "Review Draft…", run: {}, symbol: "doc.text.magnifyingglass"),
+                                            PanelAction(id: UUID(), title: "Open Session", run: {}, symbol: "terminal"),
+                                            PanelAction(id: UUID(), title: "Discard", run: {}, symbol: "trash")])
+            note.note = ("Review draft ready", "octo-org/gadgets #57 · Bump build tools to 2.4\nSuggests: request changes. \(draft.summary)")
+            try save("notification-draft-ready", panel(note), NSSize(width: Theme.panelWidth + 40, height: Theme.panelHeight + 40))
+        }
+    }
+
+    /// Dev-only: a draft whose pull request moved, a summary, Settings with Background Runs and a background rule.
+    /// RENDER_REVIEW=<dir> swift test --filter ScreenshotRenderTests/test_renderBackgroundReview
+    func test_renderBackgroundReview() throws {
+        guard let dir = ProcessInfo.processInfo.environment["RENDER_REVIEW"] else { throw XCTSkip("set RENDER_REVIEW=<dir> to render") }
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        func save(_ name: String, _ view: some View, _ size: NSSize, scrollToEnd: Bool = false) throws {
+            try render(view, size: size, dark: false, scrollToEnd: scrollToEnd, to: URL(fileURLWithPath: dir).appendingPathComponent("\(name).png"))
+        }
+        let store = Fixtures.sampleStore()
+        store.setTracked { $0.prs["PR_3"]?.headOID = "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d" }
+        var moved = Self.sampleDraft(store)
+        moved.verdict = .approve
+        moved.notCloned = true
+        try save("draft-moved", DraftView(store: store, draft: moved) {}, NSSize(width: 620, height: 560))
+        var summary = Self.sampleDraft(store)
+        (summary.action, summary.verdict, summary.body) = (.summarize, .none, "Bumps the build tools to 2.4.\nStill open: the lockfile.\nNeeds you: a review.")
+        try save("draft-summary", DraftView(store: store, draft: summary) {}, NSSize(width: 620, height: 420))
+        var rule = Automation(name: "Draft my reviews", kinds: [.reviewRequested], workingDirectory: "{worktree_dir}")
+        rule.background = .review
+        rule.scope = .others
+        store.mutateAutomationFile { $0.background.enabled = true; $0.automations = [rule] }
+        try save("settings-automations-background", AutomationsTab(store: store), NSSize(width: 520, height: 1800))
+        try save("rule-editor-background", RuleEditorSheet(store: store, rule: rule), NSSize(width: 560, height: 672), scrollToEnd: true)
+    }
+
+    /// A review draft on the fixture's review request (generic data only).
+    static func sampleDraft(_ store: Store) -> BackgroundDraft {
+        let pr = store.tracked.prs["PR_3"]!
+        return BackgroundDraft(runID: "0f3c1234-5678-4abc-8def-0123456789ab", action: .review, prID: pr.id, repo: pr.repo, number: pr.number, url: pr.url,
+                               title: pr.title, accountID: pr.accountID, login: "dana-work", head: "3f2a91c4d5e6f708192a3b4c5d6e7f8091a2b3c4", agent: .claude,
+                               sessionID: "0f3c1234-5678-4abc-8def-0123456789ab", cwd: "/tmp/gadgets", notCloned: false,
+                               createdAt: store.now.addingTimeInterval(-240),
+                               summary: "Bumps the build tools; the new linter flags two files, and the lockfile still pins the old version.",
+                               verdict: .requestChanges, body: """
+                                   Bumps the build tools to 2.4 and updates the CI image.
+
+                                   **Findings**
+                                   - Medium: `package-lock.json` still pins 2.3.1, so local builds and CI disagree.
+                                   - Low: the changelog entry is missing.
+
+                                   **Inline comments**
+                                   - `.github/workflows/ci.yml:14`: Use the same version as the lockfile.
+                                   """)
+    }
+
+    /// Background Runs add an In Background section to the Handle with Agent menus (also with the handler off).
+    func test_backgroundMenuSection() {
+        let store = Fixtures.sampleStore()
+        XCTAssertFalse(store.handlerSections(store.tracked.prs["PR_3"]!).contains { $0.title == "In Background" }, "off by default")
+        store.mutateAutomationFile { $0.background.enabled = true; $0.handler.enabled = false }
+        XCTAssertTrue(store.agentMenuShown)
+        XCTAssertEqual(store.handlerSections(store.tracked.prs["PR_3"]!).map(\.title), ["In Background"])
+        XCTAssertEqual(store.handlerSections(store.tracked.prs["PR_3"]!).last?.items.map(\.title), ["Review in Background", "Summarize"])
+        XCTAssertEqual(store.handlerSections(store.tracked.prs["PR_1"]!).last?.items.map(\.title), ["Summarize"], "my own pull request: no review")
+        XCTAssertEqual(store.handlerSections(store.tracked.prs["I_1"]!), [], "issues: no background runs")
+    }
+
     /// The panel on a plain backdrop with room for its edge.
     private func panel(_ model: PanelModel) -> some View {
         NotificationContent(model: model, onOpen: {}, onSnooze: {}, onMute: {}, onDismiss: {}, onHover: { _ in })
