@@ -471,6 +471,8 @@ extension NeedReason {
     var settingsLabel: String {
         switch self {
         case .toReview: "Review requested from me"
+        case .reReview: "Re-review: re-requested, or updated after I requested changes"
+        case .conflicts: "Conflicts on my pull requests"
         case .teamToReview: "Review requested from my team"
         case .assigned: "Assigned to me"
         case .changesRequested: "Changes requested on my pull requests"

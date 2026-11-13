@@ -1,12 +1,26 @@
 import Foundation
 
 /// Status panel sections; a PR is in exactly one, checked in this order.
+/// Superseded by `Bucket`; goes with `isDone` / `group` once the 0.7.0 lists are built on `Attention.bucket`.
 public enum PRGroup: String, Sendable, CaseIterable { case mine, toReview, involved }
 
-/// Why a pull request or issue needs me, in breakdown order; the raw value is the breakdown wording.
-public enum NeedReason: String, Codable, Sendable, CaseIterable {
-    case toReview = "to review", teamToReview = "team review", assigned, changesRequested = "changes requested", ciFailed = "CI failed"
-    case mentioned, newComments = "with new comments", readyToMerge = "ready to merge"
+/// Why a pull request or issue needs me, in priority order (`needReason`, `sorted`, `breakdown`); the raw value is the
+/// breakdown wording and the stored key, so it never changes.
+public enum NeedReason: String, Codable, Sendable, CaseIterable, CodingKeyRepresentable {
+    case toReview = "to review", reReview = "to re-review", changesRequested = "changes requested", ciFailed = "CI failed"
+    case conflicts = "with conflicts", mentioned, assigned, newComments = "with new comments", readyToMerge = "ready to merge"
+    case teamToReview = "team review"
+}
+
+/// Where a tracked item lives: whose turn it is. Exactly one per item (`Attention.bucket`); hidden and muted are flags, not buckets.
+public enum Bucket: String, Sendable, CaseIterable {
+    /// My pull requests. Your turn: `fix`, `merge`. Waiting on others: `waitingReview`, `waitingCI`, `waitingMerge`. And `draft`.
+    case fix, merge, waitingReview, waitingCI, waitingMerge, draft
+    /// Others' pull requests. Needs your review: `review`, `reReview`. Then `teamReview`, `reviewed`.
+    case review, reReview, teamReview, reviewed
+    case issueAssigned, issueMine, issueMentioned
+    /// Open, not mine, no review role (commented, mentioned, assigned); merged or closed.
+    case watching, closed
 }
 
 public enum Attention {
@@ -23,25 +37,87 @@ public enum Attention {
         !pr.muted && !pr.hidden && (unread(pr) > 0 || awaitingMyReview(pr))
     }
 
-    /// Open, shown, unmuted, and: my review is awaited (directly or via a team), an unread assignment or mention, or I'm the
-    /// author (of an issue: or assignee) and it has changes requested, failed CI, unread comments or reviews, or is ready
-    /// to merge. Only reasons in `counting` (Settings > General) apply; the first match wins, so each item counts once.
+    /// `reviewDecision`, else (no required reviews) the reviewers' latest deciding reviews: any change request, else any approval.
+    public static func decision(_ pr: TrackedPR) -> String? {
+        pr.reviewDecision ?? (pr.reviewers.contains { $0.state == "CHANGES_REQUESTED" } ? "CHANGES_REQUESTED"
+            : pr.reviewers.contains { $0.state == "APPROVED" } ? "APPROVED" : nil)
+    }
+
+    /// The head moved since my review (a nil commit, gone after a force-push, counts as moved). False when I never reviewed.
+    public static func movedSinceMyReview(_ pr: TrackedPR) -> Bool {
+        pr.myReview.map { $0.commitOID != pr.headOID } ?? false
+    }
+
+    static func ciOK(_ pr: TrackedPR) -> Bool { pr.ci == .success || pr.ci == .none }
+
+    /// Conflicts with the base branch, or approved and green but behind it under strict protection: the author's move.
+    public static func conflicted(_ pr: TrackedPR) -> Bool {
+        pr.mergeState == "DIRTY" || (pr.mergeState == "BEHIND" && decision(pr) == "APPROVED" && ciOK(pr))
+    }
+
+    /// Whose turn: the first matching rule wins (0.7.0 design §3.3). Reads only stored state, so it is the same everywhere.
+    public static func bucket(_ pr: TrackedPR) -> Bucket {
+        guard pr.state == .open else { return .closed }
+        let roles = pr.roles
+        if pr.isIssue { return roles.contains(.assigned) ? .issueAssigned : roles.contains(.author) ? .issueMine : .issueMentioned }
+        if roles.contains(.author) {
+            let decision = decision(pr)
+            if pr.isDraft { return .draft }
+            if decision == "CHANGES_REQUESTED" || pr.ci == .failure || conflicted(pr) { return .fix }
+            if pr.autoMerge == true { return .waitingMerge }
+            if decision == "APPROVED" && ciOK(pr) && ["CLEAN", "HAS_HOOKS"].contains(pr.mergeState) { return .merge }
+            let noRequests = !pr.reviewers.contains(where: \.requested) && pr.requestedTeams.isEmpty
+            if pr.ci == .pending && (decision == "APPROVED" || (decision == nil && noRequests)) { return .waitingCI }
+            return .waitingReview
+        }
+        if !pr.isDraft {
+            if roles.contains(.reviewRequested) { return pr.myReview == nil ? .review : .reReview }
+            if ["CHANGES_REQUESTED", "DISMISSED"].contains(pr.myReview?.state), movedSinceMyReview(pr) { return .reReview }
+            if roles.contains(.teamReviewRequested) { return .teamReview }
+        }
+        return pr.myReview != nil || roles.contains(.reviewer) ? .reviewed : .watching
+    }
+
+    /// Why an open, shown, unmuted item needs me, from its bucket, plus unread mentions, assignments and (my pull requests and
+    /// issues, or issues assigned to me) unread comments or reviews. Only reasons in `counting` (Settings > General) apply;
+    /// the first match in `NeedReason` order wins, so each item counts once.
     public static func needReason(_ pr: TrackedPR, counting: Set<NeedReason> = Set(NeedReason.allCases)) -> NeedReason? {
         guard pr.state == .open, !pr.muted, !pr.hidden else { return nil }
         let unread = pr.events.filter { !$0.isOwn && $0.at > (pr.lastReadAt ?? .distantPast) }
-        let mine = pr.roles.contains(.author) || (pr.isIssue && pr.roles.contains(.assigned)), reviewable = !pr.isDraft
+        let mine = pr.roles.contains(.author) || (pr.isIssue && pr.roles.contains(.assigned)), bucket = bucket(pr)
         let talk: Set<EventKind> = [.comment, .reviewApproved, .reviewChangesRequested, .reviewCommented]
         let checks: [(NeedReason, Bool)] = [
-            (.toReview, reviewable && pr.roles.contains(.reviewRequested)),
-            (.teamToReview, reviewable && pr.roles.contains(.teamReviewRequested)),
-            (.assigned, unread.contains { $0.kind == .assigned }),
-            (.changesRequested, mine && pr.reviewDecision == "CHANGES_REQUESTED"),
-            (.ciFailed, mine && pr.ci == .failure),
+            (.toReview, bucket == .review),
+            (.reReview, bucket == .reReview),
+            (.changesRequested, bucket == .fix && decision(pr) == "CHANGES_REQUESTED"),
+            (.ciFailed, bucket == .fix && pr.ci == .failure),
+            (.conflicts, bucket == .fix && conflicted(pr)),
             (.mentioned, unread.contains { $0.kind == .mentioned }),
+            (.assigned, unread.contains { $0.kind == .assigned }),
             (.newComments, mine && unread.contains { talk.contains($0.kind) }),
-            (.readyToMerge, mine && pr.reviewDecision == "APPROVED" && pr.ci == .success && pr.mergeState == "CLEAN"),
+            (.readyToMerge, bucket == .merge),
+            (.teamToReview, bucket == .teamReview),
         ]
         return checks.first { counting.contains($0.0) && $0.1 }?.0
+    }
+
+    /// When the item entered `reason`: its newest event of a kind that causes the reason, else `updatedAt`.
+    public static func waitingSince(_ pr: TrackedPR, _ reason: NeedReason) -> Date { causedAt(pr, reason) ?? pr.updatedAt }
+
+    /// The newest event of a kind that causes `reason`; nil when none is stored.
+    static func causedAt(_ pr: TrackedPR, _ reason: NeedReason) -> Date? {
+        let kinds: Set<EventKind> = switch reason {
+        case .toReview, .teamToReview: [.reviewRequested, .readyForReview]
+        case .reReview: [.reviewRequested, .readyForReview, .newCommits, .reviewDismissed]
+        case .changesRequested: [.reviewChangesRequested]
+        case .ciFailed: [.ciFailed]
+        case .conflicts: [.conflicts]
+        case .mentioned: [.mentioned]
+        case .assigned: [.assigned]
+        case .newComments: [.comment, .reviewApproved, .reviewChangesRequested, .reviewCommented]
+        case .readyToMerge: [.reviewApproved, .ciPassed]
+        }
+        return pr.events.filter { kinds.contains($0.kind) }.map(\.at).max()
     }
 
     public static func needsMe(_ pr: TrackedPR, counting: Set<NeedReason> = Set(NeedReason.allCases)) -> Bool {
@@ -69,6 +145,7 @@ public enum Attention {
 
     /// Nothing left for me: merged or closed, or open and not mine, not assigned to me, no review asked of me or my team,
     /// nothing unread. Ignores the badge settings, so a switched-off reason never moves a request into Done.
+    /// Superseded by `bucket` (no Done group in 0.7.0).
     public static func isDone(_ pr: TrackedPR) -> Bool {
         guard pr.state == .open else { return true }
         return pr.roles.isDisjoint(with: [.author, .assigned, .reviewRequested, .teamReviewRequested])
@@ -80,17 +157,24 @@ public enum Attention {
         max(pr.updatedAt, pr.closedAt ?? .distantPast, pr.events.map(\.at).max() ?? .distantPast)
     }
 
-    /// The one list order: needs me, then unread (`isAttention`), then latest activity; ties by number, highest first.
-    /// Done pull requests rank by activity alone.
+    /// The one list order: items that need me first, by reason (`NeedReason` order), oldest waiting first (they are queues);
+    /// then the rest, latest activity first. Ties by number, highest first, then id. Unread is no rank of its own.
+    /// `counting: []` gives plain latest-activity order (Waiting on Others, Reviewed, Watching, Closed).
     public static func sorted(_ prs: [TrackedPR], counting: Set<NeedReason> = Set(NeedReason.allCases)) -> [TrackedPR] {
-        prs.map { pr -> (TrackedPR, (Int, Date, Int, String)) in
-            let rank = isDone(pr) ? 0 : needsMe(pr, counting: counting) ? 2 : isAttention(pr) ? 1 : 0
-            return (pr, (rank, lastActivity(pr), pr.number, pr.id))  // id: a stable order when numbers tie across repos
+        let rank = Dictionary(uniqueKeysWithValues: NeedReason.allCases.enumerated().map { ($1, $0) })
+        return prs.map { pr -> (pr: TrackedPR, rank: Int, at: Date) in
+            let reason = needReason(pr, counting: counting)
+            return (pr, reason.flatMap { rank[$0] } ?? rank.count, reason.map { waitingSince(pr, $0) } ?? lastActivity(pr))
         }
-        .sorted { $0.1 > $1.1 }
-        .map(\.0)
+        .sorted { a, b in
+            if a.rank != b.rank { return a.rank < b.rank }
+            if a.at != b.at { return a.rank < rank.count ? a.at < b.at : a.at > b.at }
+            return (a.pr.number, a.pr.id) > (b.pr.number, b.pr.id)  // id: a stable order when numbers tie across repos
+        }
+        .map(\.pr)
     }
 
+    /// Superseded by `bucket`.
     public static func group(_ pr: TrackedPR) -> PRGroup {
         if pr.roles.contains(.author) { return .mine }
         return awaitingMyReview(pr) ? .toReview : .involved

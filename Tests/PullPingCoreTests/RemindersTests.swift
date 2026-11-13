@@ -55,5 +55,29 @@ final class RemindersTests: XCTestCase {
         XCTAssertEqual(event.id, "reminder:\(iso(t0))")
         XCTAssertEqual(event.kind, .reviewReminder)
         XCTAssertFalse(event.isOwn)
+        XCTAssertEqual(event.summary, "Still waiting on your review (requested 0 min ago)")
+        XCTAssertEqual(Reminders.event(for: requested(), now: t0.addingTimeInterval(3 * 3600 + 600)).summary,
+                       "Still waiting on your review (requested 3 h ago)")
+    }
+
+    /// 0.7.0: also while a re-review waits (updated after my change request, no re-request), and team requests only while
+    /// their style isn't Off.
+    func testReReviewAndTeamScope() {
+        var pr = requested()
+        pr.roles = [.reviewer]
+        pr.headOID = "h2"
+        pr.myReview = MyReview(state: "CHANGES_REQUESTED", commitOID: "h1", submittedAt: t0.addingTimeInterval(-600))
+        pr.events = [PREvent(id: "head:h2", prID: "PR_1", kind: .newCommits, actor: "bob", at: t0, summary: "", url: nil, isOwn: false)]
+        XCTAssertEqual(Reminders.nextReminder(pr: pr, settings: settings, now: t0), t0.addingTimeInterval(3600))  // from the push
+        XCTAssertEqual(Reminders.event(for: pr, now: t0).summary, "Still waiting on your re-review")
+        pr.myReview?.state = "APPROVED"
+        XCTAssertNil(Reminders.nextReminder(pr: pr, settings: settings, now: t0), "approved, they pushed: not my turn")
+
+        var team = requested()
+        team.roles = [.teamReviewRequested]
+        XCTAssertEqual(Reminders.nextReminder(pr: team, settings: settings, now: t0), t0.addingTimeInterval(3600))
+        var quiet = settings
+        quiet.needStyles[.teamToReview] = .off
+        XCTAssertNil(Reminders.nextReminder(pr: team, settings: quiet, now: t0))
     }
 }

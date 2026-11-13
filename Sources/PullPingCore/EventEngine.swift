@@ -73,6 +73,11 @@ public enum EventEngine {
                 add("ci:\(s.headOID):\(s.ci.rawValue)", s.ci == .success ? .ciPassed : .ciFailed, "CI", now,
                     failed.map(\.name).joined(separator: ", "), failed.first?.url ?? s.url, silent: false)
             }
+            // Once per head (the id dedupes); not for a pull request already conflicted when it was last refreshed. Actor "CI" =
+            // no person, as for CI events.
+            if s.mergeState == "DIRTY" && (old.mergeState != "DIRTY" || headChanged) {
+                add("conflict:\(s.headOID)", .conflicts, "CI", now, "conflicts with the base branch", s.url, silent: false)
+            }
         }
         let wasRequested = old?.reviewers.contains { $0.requested && mine($0.login) } ?? false
         let isRequested = s.reviewers.contains { $0.requested && mine($0.login) }
@@ -118,6 +123,8 @@ public enum EventEngine {
         pr.reviewers = s.reviewers
         pr.requestedTeams = s.requestedTeams
         pr.assignees = s.assignees
+        pr.myReview = s.myReview
+        pr.autoMerge = s.autoMerge
         pr.updatedAt = s.updatedAt
         pr.closedAt = s.closedAt
         pr.lastSeenAt = ([pr.lastSeenAt, s.updatedAt] + nodes.map(\.at)).max()!

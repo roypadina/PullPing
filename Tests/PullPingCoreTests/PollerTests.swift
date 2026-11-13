@@ -75,6 +75,43 @@ final class PollerTests: XCTestCase {
         XCTAssertEqual(third.stats.batches, 0)
     }
 
+    /// mergeStateStatus is computed lazily after a push and resolving it doesn't bump updatedAt: my PR stays in the changed
+    /// set while UNKNOWN; someone else's doesn't.
+    func testUnknownMergeStateIsRefreshedUntilItResolves() async throws {
+        github.prs["PR_1"] = .init(updatedAt: t0, node: prNode("PR_1", number: 1, updatedAt: t0, mergeState: "UNKNOWN"))
+        github.prs["PR_2"] = .init(updatedAt: t0, node: prNode("PR_2", number: 2, author: "bob", updatedAt: t0, mergeState: "UNKNOWN"))
+        github.involved = ["PR_1", "PR_2"]
+        let poller = poller()
+        _ = await poller.poll(account: account)
+        github.prs["PR_1"]?.node = prNode("PR_1", number: 1, updatedAt: t0, mergeState: "DIRTY")
+        let second = try await polled(poller)
+        XCTAssertEqual(refreshedIDs().last, ["PR_1"])
+        XCTAssertEqual(store.state.prs["PR_1"]?.mergeState, "DIRTY")
+        XCTAssertEqual(second.events.map(\.kind), [.conflicts])
+        let third = try await polled(poller)
+        XCTAssertEqual(third.stats.batches, 0)
+    }
+
+    /// State from 0.6.1 has no `autoMerge` / `myReview`: every open pull request is refreshed once, issues aren't.
+    func testPullRequestsFromBefore070AreRefreshedOnce() async throws {
+        seed()
+        github.prs["PR_1"]?.node = prNode("PR_1", number: 1, updatedAt: t0)  // CI settled: only the backfill refreshes it
+        github.prs["I_1"] = .init(updatedAt: t0, node: issueNode("I_1", number: 3, updatedAt: t0, assignees: [me]), issue: true)
+        github.issues = ["I_1"]
+        let poller = poller()
+        _ = await poller.poll(account: account)
+        XCTAssertEqual(store.state.prs["PR_1"]?.autoMerge, false)
+        XCTAssertNil(store.state.prs["I_1"]?.autoMerge)
+        store.update { state in for id in state.prs.keys { state.prs[id]?.autoMerge = nil } }  // as written by 0.6.1
+
+        let backfill = try await polled(poller)
+        XCTAssertEqual(refreshedIDs().last, ["PR_1", "PR_2"])
+        XCTAssertEqual(backfill.events, [])
+        XCTAssertEqual(store.state.prs["PR_2"]?.autoMerge, false)
+        let steady = try await polled(poller)
+        XCTAssertEqual(steady.stats.batches, 0)
+    }
+
     /// The search index lags the PR: a team request found by the requested search later, with no PR update, still lands.
     func testTeamRequestFoundByALaggingSearchIsRefreshed() async throws {
         github.prs["PR_3"] = .init(updatedAt: t0, node: prNode("PR_3", number: 3, author: "bob", updatedAt: t0, teams: ["core"]))

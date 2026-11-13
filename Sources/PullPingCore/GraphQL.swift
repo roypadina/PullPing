@@ -31,12 +31,14 @@ enum GraphQL {
         __typename
         ... on PullRequest {
           id number title url isDraft state merged mergedAt closedAt updatedAt headRefOid headRefName body
-          reviewDecision mergeStateStatus
+          reviewDecision mergeStateStatus isInMergeQueue autoMergeRequest { enabledAt }
           author { login avatarUrl }
           repository { nameWithOwner url isPrivate }
           assignees(first: 10) { nodes { login } }
           reviewRequests(first: 20) { nodes { requestedReviewer { __typename ... on User { login } ... on Team { slug name } } } }
-          latestReviews(first: 20) { nodes { author { login } state submittedAt url } }
+          latestReviews(first: 20) { nodes { author { login } state submittedAt url commit { oid } } }
+          latestOpinionatedReviews(first: 20) { nodes { author { login } state submittedAt commit { oid } } }
+          viewerLatestReview { author { login } state submittedAt commit { oid } }
           commits(last: 1) { nodes { commit { oid committedDate author { user { login } name }
             statusCheckRollup { state contexts(first: 30) { nodes { __typename
               ... on CheckRun { name conclusion status detailsUrl }
@@ -152,7 +154,11 @@ struct RawPR: Decodable {
         struct Reviewer: Decodable { var login: String?; var slug: String? }
         var requestedReviewer: Reviewer?
     }
-    struct Review: Decodable { var author: Login?; var state: String; var submittedAt: Date? }
+    struct Review: Decodable {
+        struct Commit: Decodable { var oid: String }
+        var author: Login?; var state: String; var submittedAt: Date?; var commit: Commit?
+    }
+    struct AutoMergeRequest: Decodable { var enabledAt: Date? }
     struct CommitNode: Decodable { var commit: Commit }
     struct Commit: Decodable {
         struct Author: Decodable { var user: Login?; var name: String? }
@@ -217,6 +223,11 @@ struct RawPR: Decodable {
     var assignees: Nodes<Login>
     var reviewRequests: Nodes<Requested>?
     var latestReviews: Nodes<Review>?
+    /// Latest APPROVED / CHANGES_REQUESTED per reviewer: a later comment-only review doesn't replace it, a dismissed one drops out.
+    var latestOpinionatedReviews: Nodes<Review>?
+    var viewerLatestReview: Review?
+    var isInMergeQueue: Bool?
+    var autoMergeRequest: AutoMergeRequest?
     var commits: Nodes<CommitNode>?
     var timelineItems: Timeline
     // Issue only.

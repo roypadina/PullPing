@@ -55,11 +55,22 @@ extension GitHubClient {
         let requested = raw.reviewRequests?.items.compactMap(\.requestedReviewer) ?? []
         let requestedUsers = requested.compactMap(\.login)
         s.requestedTeams = requested.compactMap(\.slug)
-        s.reviewers = raw.latestReviews?.items.compactMap { review in
-            review.author.map { ReviewSummary(login: $0.login, state: review.state, submittedAt: review.submittedAt, requested: requestedUsers.contains($0.login)) }
-        } ?? []
+        func summary(_ review: RawPR.Review) -> ReviewSummary? {
+            review.author.map { ReviewSummary(login: $0.login, state: review.state, submittedAt: review.submittedAt,
+                                              requested: requestedUsers.contains($0.login), commitOID: review.commit?.oid) }
+        }
+        // Deciding reviews first, as GitHub's reviewer list: a later comment-only review must not hide a change request.
+        let opinionated = raw.latestOpinionatedReviews?.items ?? []
+        s.reviewers = opinionated.compactMap(summary)
+        s.reviewers += (raw.latestReviews?.items.compactMap(summary) ?? []).filter { r in !s.reviewers.contains { $0.login == r.login } }
         s.reviewers += requestedUsers.filter { login in !s.reviewers.contains { $0.login == login } }
             .map { ReviewSummary(login: $0, state: "", submittedAt: nil, requested: true) }
+        // The viewer's own entry among the deciding reviews, else their latest review (a pending one doesn't count yet).
+        if let viewer = raw.viewerLatestReview, let login = viewer.author?.login, login.lowercased() != s.authorLogin.lowercased() {
+            let mine = opinionated.first { $0.author?.login == login } ?? (viewer.state == "PENDING" ? nil : viewer)
+            s.myReview = mine.map { MyReview(state: $0.state, commitOID: $0.commit?.oid, submittedAt: $0.submittedAt) }
+        }
+        s.autoMerge = s.isIssue ? nil : raw.isInMergeQueue == true || raw.autoMergeRequest != nil
         s.assignees = raw.assignees.items.map(\.login)
         s.timeline = raw.timelineItems.nodes?.compactMap { $0.flatMap(timelineNode) } ?? []
         return s

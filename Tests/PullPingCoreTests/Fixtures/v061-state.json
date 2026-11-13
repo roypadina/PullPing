@@ -1,0 +1,152 @@
+{
+ "prs": {
+  "PR_1": {
+   "id": "PR_1",
+   "accountID": "7A1C3E2B-0000-4000-8000-000000000001",
+   "isIssue": false,
+   "repo": "octo-org/widgets",
+   "number": 1,
+   "title": "PR 1",
+   "url": "https://github.com/octo-org/widgets/pull/1",
+   "authorLogin": "dana",
+   "isDraft": false,
+   "state": "open",
+   "reviewDecision": "APPROVED",
+   "mergeState": "CLEAN",
+   "ci": "success",
+   "checks": [
+    {
+     "name": "build",
+     "state": "success",
+     "url": "https://github.com/octo-org/widgets/actions/runs/1"
+    }
+   ],
+   "headOID": "h2",
+   "headRef": "feature",
+   "reviewers": [
+    {
+     "login": "alice",
+     "state": "APPROVED",
+     "submittedAt": "2027-01-15T07:00:00Z",
+     "requested": false
+    }
+   ],
+   "requestedTeams": [],
+   "assignees": [],
+   "roles": [
+    "author"
+   ],
+   "updatedAt": "2027-01-15T08:00:00Z",
+   "lastSeenAt": "2027-01-15T08:00:00Z",
+   "seenEventIDs": [
+    "PRR_1"
+   ],
+   "events": [
+    {
+     "id": "PRR_1",
+     "prID": "PR_1",
+     "kind": "reviewApproved",
+     "actor": "alice",
+     "at": "2027-01-15T07:00:00Z",
+     "summary": "LGTM",
+     "url": "https://github.com/octo-org/widgets/pull/1#pullrequestreview-1",
+     "isOwn": true,
+     "seeded": true
+    }
+   ],
+   "lastReadAt": "2027-01-15T08:00:00Z",
+   "muted": false,
+   "firstTrackedAt": "2027-01-14T08:00:00Z",
+   "hidden": false
+  },
+  "PR_2": {
+   "id": "PR_2",
+   "accountID": "7A1C3E2B-0000-4000-8000-000000000001",
+   "isIssue": false,
+   "repo": "octo-org/widgets",
+   "number": 2,
+   "title": "PR 2",
+   "url": "https://github.com/octo-org/widgets/pull/2",
+   "authorLogin": "bob",
+   "isDraft": false,
+   "state": "open",
+   "reviewDecision": "CHANGES_REQUESTED",
+   "mergeState": "BLOCKED",
+   "ci": "success",
+   "checks": [
+    {
+     "name": "build",
+     "state": "success",
+     "url": "https://github.com/octo-org/widgets/actions/runs/1"
+    }
+   ],
+   "headOID": "h2",
+   "headRef": "feature",
+   "reviewers": [
+    {
+     "login": "dana",
+     "state": "CHANGES_REQUESTED",
+     "submittedAt": "2027-01-15T06:00:00Z",
+     "requested": false
+    }
+   ],
+   "requestedTeams": [],
+   "assignees": [],
+   "roles": [
+    "reviewer",
+    "commenter"
+   ],
+   "updatedAt": "2027-01-15T08:00:00Z",
+   "lastSeenAt": "2027-01-15T08:00:00Z",
+   "seenEventIDs": [],
+   "events": [],
+   "lastReadAt": "2027-01-15T08:00:00Z",
+   "muted": false,
+   "firstTrackedAt": "2027-01-14T08:00:00Z",
+   "hidden": false,
+   "snoozedUntil": "2027-01-16T08:00:00Z",
+   "lastReminderAt": "2027-01-15T07:30:00Z"
+  },
+  "I_1": {
+   "id": "I_1",
+   "accountID": "7A1C3E2B-0000-4000-8000-000000000001",
+   "isIssue": true,
+   "repo": "octo-org/widgets",
+   "number": 3,
+   "title": "PR 3",
+   "url": "https://github.com/octo-org/widgets/issues/3",
+   "authorLogin": "bob",
+   "isDraft": false,
+   "state": "open",
+   "mergeState": "",
+   "ci": "none",
+   "checks": [],
+   "headOID": "",
+   "reviewers": [],
+   "requestedTeams": [],
+   "assignees": [],
+   "roles": [
+    "assigned"
+   ],
+   "updatedAt": "2027-01-15T08:00:00Z",
+   "lastSeenAt": "2027-01-15T08:00:00Z",
+   "seenEventIDs": [],
+   "events": [],
+   "lastReadAt": "2027-01-15T08:00:00Z",
+   "muted": false,
+   "firstTrackedAt": "2027-01-14T08:00:00Z",
+   "hidden": false
+  }
+ },
+ "ignoredIDs": [],
+ "baselinedAccounts": [
+  "7A1C3E2B-0000-4000-8000-000000000001"
+ ],
+ "baselinedIssueAccounts": [
+  "7A1C3E2B-0000-4000-8000-000000000001"
+ ],
+ "lastPollAt": [
+  "7A1C3E2B-0000-4000-8000-000000000001",
+  "2027-01-15T08:00:00Z"
+ ]
+}

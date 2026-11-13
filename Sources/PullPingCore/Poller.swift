@@ -200,12 +200,16 @@ public actor Poller {
             stats.dropped = dropped.count
 
             // 3. Changed = new, updated, state changed, or CI still pending (CI completion does not bump updatedAt),
-            // or the requested search disagrees with the team-request role (the search index lags the PR).
+            // or the requested search disagrees with the team-request role (the search index lags the PR),
+            // or my PR's merge state is still UNKNOWN (computed lazily after a push; resolving it doesn't bump updatedAt either),
+            // or an open PR last refreshed before 0.7.0 (no `autoMerge`): refreshed once to fill `myReview` / `autoMerge`.
             // shortcut: a PR seen by two accounts is one entry, owned by whichever account refreshed it last.
             let changed = stamps.values.filter { stamp in
                 guard let old = before.prs[stamp.id] else { return true }
                 return old.updatedAt != stamp.updatedAt || old.state != stamp.state || (old.state == .open && old.ci == .pending)
                     || (stamp.inRequested != old.roles.contains(.teamReviewRequested) && !old.roles.contains(.reviewRequested))
+                    || (old.state == .open && old.roles.contains(.author) && old.mergeState == "UNKNOWN")
+                    || (old.state == .open && !old.isIssue && old.autoMerge == nil)
             }.map(\.id).sorted()
             let fresh = changed.filter { before.prs[$0] == nil }
             let known = changed.filter { before.prs[$0] != nil }

@@ -40,7 +40,39 @@ final class SettingsTests: XCTestCase {
         settings.ntfyTopic = "team-prs"
         settings.phoneMine = [.ciFailed, .merged]
         settings.phoneOthers = [.reviewRequested]
+        settings.needStyles[.teamToReview] = .off
+        settings.badgeReasons = [.toReview]
         XCTAssertEqual(try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings)), settings)
+    }
+
+    func testNeedStyles() throws {
+        let settings = AppSettings()
+        XCTAssertEqual(NeedReason.allCases.map(settings.needStyle),
+                       [.alert, .alert, .alert, .alert, .banner, .alert, .alert, .banner, .banner, .banner])  // NeedReason order
+        XCTAssertEqual(AppSettings.needStyles(mine: AppSettings.defaultStyles, others: AppSettings.defaultOtherStyles),
+                       AppSettings.defaultNeedStyles, "an untouched 0.6 setup gets exactly the new defaults")
+        let data = try JSONEncoder().encode(settings)
+        XCTAssertTrue(String(decoding: data, as: UTF8.self).contains(#""to re-review":"alert""#))  // keyed object
+    }
+
+    /// Before 0.7.0 panels were styled per kind: each reason takes the stronger style of its kinds, Off stays Off.
+    func testNeedStylesMigrateFromKindStyles() throws {
+        let json = #"""
+        { "styles": { "reviewChangesRequested": "banner", "ciFailed": "off", "comment": "alert", "reviewApproved": "off", "ciPassed": "off" },
+          "otherStyles": { "reviewRequested": "off", "mentioned": "banner", "assigned": "off" },
+          "badgeReasons": ["to review", "CI failed"], "trackIssues": true }
+        """#
+        let s = try JSONDecoder().decode(AppSettings.self, from: Data(json.utf8))
+        XCTAssertEqual(s.needStyles, [.toReview: .off, .reReview: .off, .teamToReview: .off, .changesRequested: .banner, .ciFailed: .off,
+                                      .conflicts: .banner, .mentioned: .banner, .assigned: .banner, .newComments: .alert, .readyToMerge: .off])
+        XCTAssertEqual(s.badgeReasons, [.toReview, .ciFailed, .reReview, .conflicts])  // new reasons start counted
+        var later = s
+        later.badgeReasons.remove(.reReview)
+        later.needStyles[.toReview] = .alert
+        let again = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(later))
+        XCTAssertEqual(again.badgeReasons, [.toReview, .ciFailed, .conflicts], "migrates once")
+        XCTAssertEqual(again.needStyle(.toReview), .alert)
+        XCTAssertEqual(again.needStyle(.reReview), .off)
     }
 }
 

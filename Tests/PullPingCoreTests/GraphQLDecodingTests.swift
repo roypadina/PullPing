@@ -59,6 +59,9 @@ final class GraphQLDecodingTests: XCTestCase {
         XCTAssertEqual(s.reviewers.map(\.login), ["alice", "bob", "carol"])
         XCTAssertEqual(s.reviewers.map(\.state), ["APPROVED", "CHANGES_REQUESTED", ""])
         XCTAssertEqual(s.reviewers.map(\.requested), [false, false, true])
+        XCTAssertEqual(s.reviewers.map(\.commitOID), [nil, nil, nil])  // a response without the 0.7.0 fields still decodes
+        XCTAssertNil(s.myReview)
+        XCTAssertEqual(s.autoMerge, false)
         XCTAssertEqual(s.timeline.map(\.type), ["IssueComment", "PullRequestReview", "PullRequestReview", "ReadyForReviewEvent",
                                                 "ConvertToDraftEvent", "MergedEvent", "ClosedEvent", "ReopenedEvent",
                                                 "HeadRefForcePushedEvent", "ReviewDismissedEvent", "RenamedTitleEvent"])  // pending review dropped
@@ -68,6 +71,30 @@ final class GraphQLDecodingTests: XCTestCase {
         XCTAssertEqual(s.timeline[8].actor, "ghost")
         XCTAssertEqual(s.timeline[8].detail, "abc1234")
         XCTAssertEqual(s.timeline[10].detail, "Add widget cache")
+    }
+
+    func testRefreshDecodesReviewTurnFields() async throws {
+        let (client, _) = client(["Refresh": fixture("refresh-070")])
+        let s = try await client.refresh(["PR_7", "PR_8", "PR_9", "PR_10"], since: nil)
+        XCTAssertEqual(s.map(\.id), ["PR_7", "PR_8", "PR_9", "PR_10"])
+        let date = ISO8601DateFormatter().date(from:)
+
+        // My later comment-only review doesn't hide my change request on the older head; reviewers show deciding reviews first.
+        XCTAssertEqual(s[0].myReview, MyReview(state: "CHANGES_REQUESTED", commitOID: "aaa1111", submittedAt: date("2026-11-12T10:00:00Z")))
+        XCTAssertEqual(s[0].reviewers.map(\.login), ["alice", "dana", "erin", "carol"])
+        XCTAssertEqual(s[0].reviewers.map(\.state), ["CHANGES_REQUESTED", "CHANGES_REQUESTED", "COMMENTED", ""])
+        XCTAssertEqual(s[0].reviewers.map(\.commitOID), ["aaa1111", "aaa1111", nil, nil])
+        XCTAssertEqual(s[0].autoMerge, true)  // auto-merge enabled
+
+        XCTAssertNil(s[1].myReview)  // my own pull request: my comment review is ignored
+        XCTAssertEqual(s[1].autoMerge, true)  // in the merge queue
+        XCTAssertEqual(s[1].reviewers.map(\.state), ["APPROVED"])
+        XCTAssertNil(s[1].reviewers.first?.commitOID)  // reviewed commit force-pushed away
+
+        XCTAssertEqual(s[2].myReview, MyReview(state: "DISMISSED", commitOID: "bbb2222", submittedAt: date("2026-11-12T08:00:00Z")))
+        XCTAssertEqual(s[2].autoMerge, false)
+        XCTAssertEqual(s[2].mergeState, "UNKNOWN")
+        XCTAssertNil(s[3].myReview)  // a pending review is no review yet
     }
 
     func testRefreshFollowsTimelinePages() async throws {

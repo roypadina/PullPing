@@ -23,6 +23,11 @@ public struct AppSettings: Codable, Sendable, Equatable {
             : [.comment, .reviewApproved, .reviewChangesRequested, .reviewCommented, .merged, .closed].contains($0) ? .banner : .off
         return ($0, style)
     })
+    /// Settings > Notifications, one row per reason.
+    public static let defaultNeedStyles: [NeedReason: NotificationStyle] = [
+        .toReview: .alert, .reReview: .alert, .teamToReview: .banner, .changesRequested: .alert, .ciFailed: .alert, .conflicts: .banner,
+        .mentioned: .alert, .assigned: .alert, .newComments: .banner, .readyToMerge: .banner,
+    ]
 
     public var pollIntervalMinutes = 3
     public var retentionDays = 3
@@ -31,9 +36,11 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var playSound = true
     public var notificationsEnabled = true
     public var showMenuBarIcon = true
-    /// Pull requests I authored.
+    /// Panel style per reason (`Notify.reason`); events without a reason are Activity only. Replaces `styles` / `otherStyles`.
+    public var needStyles = AppSettings.defaultNeedStyles
+    /// Per event kind, pull requests I authored. Panels used these before 0.7.0; kept in the file so a downgrade keeps them.
     public var styles = AppSettings.defaultStyles
-    /// Everything else.
+    /// Per event kind, everything else (as `styles`).
     public var otherStyles = AppSettings.defaultOtherStyles
     public var inboxLayout = InboxLayout.unified
     public var badgeMode = BadgeMode.needsMe
@@ -80,7 +87,38 @@ public struct AppSettings: Codable, Sendable, Equatable {
         activityDays = try value(.activityDays, activityDays)
         // Saved before issue tracking (no trackIssues key): the newer `assigned` reason starts on, like the rest.
         if !c.contains(.trackIssues) { badgeReasons.insert(.assigned) }
+        // Saved before 0.7.0 (no needStyles key): styles come from the per-kind ones, the new reasons start counted.
+        if let saved = try c.decodeIfPresent([NeedReason: NotificationStyle].self, forKey: .needStyles) {
+            needStyles = saved
+        } else {
+            needStyles = Self.needStyles(mine: styles, others: otherStyles)
+            badgeReasons.formUnion([.reReview, .conflicts])
+        }
     }
+
+    /// 0.6 per-kind styles to per-reason ones: each reason takes the stronger style of the kinds that raised it, so a kind
+    /// switched Off stays Off. Team review keeps its Banner default unless review requests were Off.
+    static func needStyles(mine: [EventKind: NotificationStyle], others: [EventKind: NotificationStyle]) -> [NeedReason: NotificationStyle] {
+        func m(_ kind: EventKind) -> NotificationStyle { mine[kind] ?? defaultStyles[kind] ?? .off }
+        func o(_ kind: EventKind) -> NotificationStyle { others[kind] ?? defaultOtherStyles[kind] ?? .off }
+        func stronger(_ a: NotificationStyle, _ b: NotificationStyle) -> NotificationStyle {
+            [a, b].contains(.alert) ? .alert : [a, b].contains(.banner) ? .banner : .off
+        }
+        var result = defaultNeedStyles
+        result[.toReview] = o(.reviewRequested)
+        result[.reReview] = o(.reviewRequested)
+        result[.teamToReview] = o(.reviewRequested) == .off ? .off : .banner
+        result[.changesRequested] = m(.reviewChangesRequested)
+        result[.ciFailed] = m(.ciFailed)
+        result[.mentioned] = stronger(m(.mentioned), o(.mentioned))
+        result[.assigned] = stronger(m(.assigned), o(.assigned))
+        result[.newComments] = stronger(m(.comment), o(.comment))
+        result[.readyToMerge] = stronger(m(.reviewApproved), m(.ciPassed))
+        return result
+    }
+
+    /// The panel style of a reason (Settings > Notifications).
+    public func needStyle(_ reason: NeedReason) -> NotificationStyle { needStyles[reason] ?? Self.defaultNeedStyles[reason] ?? .off }
 
     public func isPaused(_ now: Date) -> Bool { (pausedUntil ?? .distantPast) > now }
 
@@ -96,7 +134,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
             && (pr.roles.contains(.author) ? phoneMine : phoneOthers).contains(kind)
     }
 
-    /// `reviewReminder` follows the `reviewRequested` style.
+    /// `reviewReminder` follows the `reviewRequested` style. Phone push priority; panels use `needStyle` since 0.7.0.
     public func style(for kind: EventKind, mine: Bool) -> NotificationStyle {
         let kind = kind == .reviewReminder ? .reviewRequested : kind
         return (mine ? styles : otherStyles)[kind] ?? (mine ? Self.defaultStyles : Self.defaultOtherStyles)[kind] ?? .off

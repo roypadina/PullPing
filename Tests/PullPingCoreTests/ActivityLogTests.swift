@@ -89,14 +89,20 @@ final class ActivityLogTests: XCTestCase {
     func testQuietReasons() {
         var settings = AppSettings()
         var pr = pr()
+        pr.roles = [.author]
         func reason(_ e: PREvent = event(), offered: Bool = false) -> ActivityEntry.Quiet? {
             ActivityEntry.Quiet.reason(e, pr: pr, settings: settings, offered: offered, now: t0)
         }
-        XCTAssertNil(reason())  // others' comment: banner by default
+        XCTAssertNil(reason())  // a comment on my pull request: new comments, banner by default
         XCTAssertEqual(reason(event(actor: me, own: true)), .own)
         XCTAssertNil(reason(event(.merged, actor: me, own: true), offered: true))  // a Run button shows it
-        XCTAssertEqual(reason(event(.labeled)), .styleOff)  // others' labels: Off by default
+        XCTAssertEqual(reason(event(.labeled)), .activityOnly)  // asks nothing of me
+        XCTAssertEqual(reason(event(.merged)), .activityOnly)
         XCTAssertNil(reason(event(.labeled), offered: true))
+        settings.needStyles[.newComments] = .off
+        XCTAssertEqual(reason(), .styleOff)
+        XCTAssertNil(reason(offered: true))
+        settings.needStyles[.newComments] = .banner
         pr.snoozedUntil = t0.addingTimeInterval(60)
         XCTAssertEqual(reason(), .snoozed)
         pr.muted = true
@@ -111,6 +117,21 @@ final class ActivityLogTests: XCTestCase {
         pr.snoozedUntil = nil
         settings = AppSettings()
         XCTAssertNil(reason())
+        pr.roles = [.commenter]
+        XCTAssertEqual(reason(), .activityOnly)  // a comment on someone else's pull request
+    }
+
+    func testEventEntryRecordsTheNeed() throws {
+        var mine = pr()
+        mine.roles = [.author]
+        let entry = ActivityEntry(event: event(), pr: mine, account: "dana", panel: .banner, quiet: nil, phone: false, at: t0)
+        XCTAssertEqual(entry.need, .newComments)
+        let decoded = try ActivityLog.decoder.decode(ActivityEntry.self, from: ActivityLog.encoder.encode(entry))
+        XCTAssertEqual(decoded.need, .newComments)
+        XCTAssertNil(ActivityEntry(event: event(.labeled), pr: mine, account: "dana", panel: .notShown, quiet: .activityOnly,
+                                   phone: false, at: t0).need)
+        let old = #"{"at":"2026-11-01T10:00:00Z","kind":"event","event":"comment","quiet":"styleOff"}"#  // before 0.7.0
+        XCTAssertNil(try ActivityLog.decoder.decode(ActivityEntry.self, from: Data(old.utf8)).need)
     }
 
     func testEventEntryRecordsWhatHappened() {

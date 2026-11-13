@@ -9,12 +9,15 @@ public struct ActivityEntry: Codable, Sendable, Equatable {
 
     /// Why an event showed no panel, in the order `Store.show` checks.
     public enum Quiet: String, Codable, Sendable, CaseIterable {
-        case own, notificationsOff, paused, muted, snoozed, styleOff
+        /// `activityOnly`: the event asks nothing of me (`Notify.reason` nil). `styleOff`: its reason is Off in Settings
+        /// (before 0.7.0: its kind).
+        case own, activityOnly, notificationsOff, paused, muted, snoozed, styleOff
 
         /// "Not shown: muted" (app) and the CLI.
         public var label: String {
             switch self {
             case .own: "your own"
+            case .activityOnly: "activity only"
             case .notificationsOff: "notifications off"
             case .paused: "paused"
             case .muted: "muted"
@@ -24,14 +27,16 @@ public struct ActivityEntry: Codable, Sendable, Equatable {
         }
 
         /// nil = the event gets a panel. `offered`: an ask-mode automation offers a Run button on it, which shows the panel
-        /// whatever the kind's style, also for an own event. Hidden pull requests still notify, so hidden is no reason.
+        /// whatever its reason and style, also for an own event. Hidden pull requests still notify, so hidden is no reason.
         public static func reason(_ event: PREvent, pr: TrackedPR, settings: AppSettings, offered: Bool, now: Date) -> Quiet? {
             if event.isOwn && !offered { return .own }
+            let need = Notify.reason(event, pr: pr)
+            if need == nil && !offered { return .activityOnly }
             if !settings.notificationsEnabled { return .notificationsOff }
             if settings.isPaused(now) { return .paused }
             if pr.muted { return .muted }
             if (pr.snoozedUntil ?? .distantPast) > now { return .snoozed }
-            if !offered && settings.style(for: event.kind, mine: pr.roles.contains(.author)) == .off { return .styleOff }
+            if !offered, let need, settings.needStyle(need) == .off { return .styleOff }
             return nil
         }
     }
@@ -55,6 +60,8 @@ public struct ActivityEntry: Codable, Sendable, Equatable {
     public var quiet: Quiet?
     public var phone: Bool?
     public var own: Bool?
+    /// What the event asked of me (`Notify.reason`); nil = Activity only, and on lines from before 0.7.0.
+    public var need: NeedReason?
     // Runs and Handle with Agent launches.
     public var automation: String?
     public var ok: Bool?
@@ -83,6 +90,7 @@ public struct ActivityEntry: Codable, Sendable, Equatable {
         self.quiet = quiet
         self.phone = phone
         own = e.isOwn ? true : nil
+        need = Notify.reason(e, pr: pr)
     }
 
     /// A launch PullPing started (app or `pullping run`); `error` nil = it started.
@@ -115,6 +123,7 @@ public struct ActivityEntry: Codable, Sendable, Equatable {
         quiet = value(.quiet)
         phone = value(.phone)
         own = value(.own)
+        need = value(.need)
         automation = value(.automation)
         ok = value(.ok)
         error = value(.error)

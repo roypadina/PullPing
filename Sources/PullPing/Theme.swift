@@ -54,6 +54,7 @@ extension EventKind {
         case .retitled: ("renamed", "pencil", Theme.neutral)
         case .labeled: ("changed labels", "tag", Theme.neutral)
         case .reviewReminder: ("reminder", "bell.badge", Theme.needsYou)
+        case .conflicts: ("Conflicts with base", "exclamationmark.triangle", Theme.bad)
         }
     }
 

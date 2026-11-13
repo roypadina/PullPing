@@ -32,9 +32,8 @@ public enum SmokeRunner {
         }
 
         let prs = store.state.prs.values.filter { $0.accountID == accountID }
-        let open = prs.filter { $0.state == .open }
-        func count(_ group: PRGroup) -> Int { open.filter { Attention.group($0) == group }.count }
-        print("groups: mine=\(count(.mine)) toReview=\(count(.toReview)) involved=\(count(.involved)) closedKept=\(prs.count - open.count)")
+        let buckets = Dictionary(grouping: prs, by: Attention.bucket).mapValues(\.count)
+        print("buckets: " + Bucket.allCases.compactMap { b in buckets[b].map { "\(b.rawValue)=\($0)" } }.joined(separator: " "))
         let notify = result.events.filter { !$0.isOwn }.count
         print("events (would notify = \(notify), own/silent = \(result.events.count - notify)):")
         for event in result.events {

@@ -246,4 +246,33 @@ final class EventEngineTests: XCTestCase {
         XCTAssertEqual(pr.events.last?.id, "IC_new_4")
         XCTAssertEqual(pr.events.first?.id, "old-5")
     }
+
+    func testConflictsOncePerHead() {
+        func conflicted(_ head: String, _ mergeState: String = "DIRTY") -> PRSnapshot {
+            var s = snap(author: me, head: head)
+            s.mergeState = mergeState
+            return s
+        }
+        var pr = tracked(conflicted("aaa1111", "CLEAN"))
+        var events: [PREvent]
+        (pr, events) = diff(pr, conflicted("aaa1111"))
+        XCTAssertEqual(loud(events).map(\.id), ["conflict:aaa1111"])
+        XCTAssertEqual(events.first.map { [$0.kind.label, $0.actor] }, ["Conflicts", "CI"])
+        (pr, events) = diff(pr, conflicted("aaa1111", "UNKNOWN"))
+        (pr, events) = diff(pr, conflicted("aaa1111"))
+        XCTAssertEqual(events.filter { $0.kind == .conflicts }, [], "same head: once")
+        (pr, events) = diff(pr, conflicted("bbb2222"))
+        XCTAssertEqual(events.filter { $0.kind == .conflicts }.map(\.id), ["conflict:bbb2222"], "a push that still conflicts")
+        // Already conflicted when last refreshed (e.g. before 0.7.0): no event.
+        XCTAssertEqual(diff(tracked(conflicted("ccc3333")), conflicted("ccc3333")).events.filter { $0.kind == .conflicts }, [])
+    }
+
+    func testReviewTurnFieldsAreCopied() {
+        var s = snap()
+        s.myReview = MyReview(state: "APPROVED", commitOID: "aaa1111", submittedAt: t0)
+        s.autoMerge = true
+        let pr = diff(tracked(), s).pr
+        XCTAssertEqual(pr.myReview, s.myReview)
+        XCTAssertEqual(pr.autoMerge, true)
+    }
 }
