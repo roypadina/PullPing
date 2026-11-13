@@ -70,6 +70,13 @@ final class BackgroundCLITests: XCTestCase {
         XCTAssertEqual(run(["background", "cancel", String(id.prefix(6))]).error, "pullping: Review in Background · octo-org/widgets #7 is cancelled already")
         XCTAssertEqual(run(["background", "cancel", "zzzz"]).status, 1)
         XCTAssertEqual(run(["background", "cancel", "ab"]).status, 2)
+        // Codex as Handle with Agent's agent: refused before anything is queued, dry run included.
+        XCTAssertEqual(run(["handler", "set", "--agent", "codex"]).status, 0)
+        let count = runs.count
+        for line in [["background", "run", "summarize", "--pr", "octo-org/widgets#7"], ["background", "run", "summarize", "--pr", "octo-org/widgets#7", "--dry-run"]] {
+            XCTAssertEqual(run(line).error, "pullping: Background runs need Claude Code for now")
+        }
+        XCTAssertEqual(runs.count, count)
     }
 
     func testDryRunWritesNothing() throws {
@@ -99,6 +106,11 @@ final class BackgroundCLITests: XCTestCase {
         XCTAssertEqual(run(["rule", "edit", String(rule.id.uuidString.prefix(8)), "--background", "off"]).status, 0)
         XCTAssertNil(store.load().automations.last?.background)
         XCTAssertEqual(run(["rule", "add", "--name", "x", "--on", "comment", "--background", "post"]).status, 2)
+        let codex = run(["rule", "add", "--name", "x", "--on", "comment", "--agent", "codex", "--background", "review"])
+        XCTAssertEqual(codex.status, 2)
+        XCTAssertTrue(codex.error.hasPrefix("pullping: Background runs need Claude Code for now: --background needs --agent claude"), codex.error)
+        XCTAssertEqual(run(["rule", "edit", String(rule.id.uuidString.prefix(8)), "--background", "review", "--agent", "codex"]).status, 2)
+        XCTAssertEqual(store.load().automations.last?.agent, .claude)
         XCTAssertEqual(run(["hook", "add", "--pr", "octo-org/widgets#7", "--on", "comment", "--prompt", "p", "--background", "review"]).error,
                        "pullping: --background is for rules only: a hook always opens a session\nRun `pullping hook --help` for usage.")
     }

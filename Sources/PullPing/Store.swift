@@ -1015,7 +1015,7 @@ final class Store {
         let t = Date(), runID = UUID().uuidString.lowercased(), title = rule?.name ?? action.title
         let refusal = automationStore.mutate { file -> String? in
             guard file.enabled else { return "Run Automations is off" }
-            if let reason = BackgroundQueue.eligible(action, pr: pr)
+            if let reason = BackgroundPlanner.unsupported((rule ?? file.handler).agent) ?? BackgroundQueue.eligible(action, pr: pr)
                 ?? BackgroundQueue.admit(action, pr: pr, settings: file.background, runs: file.runs, now: t, auto: auto) { return reason }
             file.runs.append(.background(action, pr: pr, rule: rule, eventID: event?.id ?? "manual:\(t.ISO8601Format())", runID: runID, at: t))
             return nil

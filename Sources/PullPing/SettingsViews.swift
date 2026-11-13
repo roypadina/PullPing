@@ -770,7 +770,7 @@ struct AutomationsTab: View {
         } header: {
             Text("Background Runs")
         } footer: {
-            Text("Agents run without a terminal and can only read: the repository folder and the pull request's diff and discussion. PullPing posts nothing until you click Post in a draft. Review in Background and Summarize are in each pull request's Handle with Agent menu; a rule can run in the background too. At most 2 at once, 10 minutes each.").formFooter()
+            Text("Claude Code runs without a terminal and can only read: the repository folder and the pull request's diff and discussion. Codex can't run in the background yet. PullPing posts nothing until you click Post in a draft. Review in Background and Summarize are in each pull request's Handle with Agent menu; a rule can run in the background too. At most 2 at once, 10 minutes each.").formFooter()
         }
         .disabled(!store.automationsEnabled)
     }
@@ -895,6 +895,7 @@ struct RuleEditorSheet: View {
         let rule = edited
         func blank(_ s: String) -> Bool { s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         return (handler || !blank(rule.name)) && !rule.kinds.isEmpty && !blank(rule.prompt) && !blank(rule.workingDirectory)
+            && (rule.background == nil || BackgroundPlanner.unsupported(rule.agent) == nil)
     }
 
     /// The "Use the scenario's prompt" checkbox: a `{task}` line before the safety line (else at the end), or none.
@@ -986,7 +987,10 @@ struct RuleEditorSheet: View {
                     }
                 } footer: {
                     if rule.background != nil {
-                        Text("In the background the agent only reads (no shell, network or write tools) and the run ends in a draft you post yourself; Open in, Session, Working directory and Prompt are not used.").formFooter()
+                        if let reason = BackgroundPlanner.unsupported(rule.agent) {
+                            Text(verbatim: "\(reason): choose Claude to save this rule.").font(.subheadline).foregroundStyle(Theme.bad)
+                        }
+                        Text("In the background Claude Code only reads (no shell, network or write tools) and the run ends in a draft you post yourself; Open in, Session, Working directory and Prompt are not used.").formFooter()
                     }
                     if rule.usesLinkedSession {
                         Text("Runs only on pull requests with a linked session, in that session's agent and folder; Command still applies. Pull requests without a link are skipped.").formFooter()

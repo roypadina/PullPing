@@ -179,13 +179,15 @@ Check: `pullping rule list`.
 
 ## Step 8: background runs (optional)
 
-A background run starts the agent without a terminal on one pull request: Review in Background drafts a review,
-Summarize writes a summary. The agent can only read (PullPing fetches the diff and the discussion first; it gets no
-shell, no network and no write tools), it uses the user's agent quota, and PullPing posts nothing by itself: the user
-reads the draft in PullPing and clicks Post. No command posts a draft, and nothing approves on its own.
+A background run starts Claude Code without a terminal on one pull request: Review in Background drafts a review,
+Summarize writes a summary. Background runs need Claude Code for now: PullPing refuses one with Codex as the agent, so
+skip this step for a user who works only with Codex. The agent can only read (PullPing fetches the diff and the
+discussion first; it gets no shell, no network and no write tools), it uses the user's Claude Code quota, and PullPing
+posts nothing by itself: the user reads the draft in PullPing and clicks Post. No command posts a draft, and nothing
+approves on its own.
 
-Ask: "May PullPing run your agent in the background on pull requests? It can only read, it uses your agent's quota,
-and it never posts by itself. (default: no)". On a yes:
+Ask: "May PullPing run Claude Code in the background on pull requests? It can only read, it uses your Claude Code
+quota, and it never posts by itself. (default: no)". On a yes:
 
 ```bash
 pullping background on

@@ -186,7 +186,7 @@ PullPing can start a local coding agent ([Claude Code](https://docs.anthropic.co
 [Codex](https://github.com/openai/codex)) in a terminal when a pull request event arrives. It writes the prompt to a
 file and a small script, opens a terminal that runs it, and stops there: it never talks to the agent, never reads its
 output and never adds a permission flag. [Background runs](#background-runs-and-drafts), off by default, are the one
-exception: there the agent only reads, and its answer is a draft you post yourself.
+exception: there the agent (Claude Code only, for now) only reads, and its answer is a draft you post yourself.
 
 ### Set it up with your agent
 
@@ -337,7 +337,7 @@ within a minute. Recent Runs shows who handed off (`--by`, default the calling s
 
 Off by default: **Settings → Automations → Background Runs**. Then each pull request's **Handle with Agent ▸** menu
 (the row's context menu, the detail toolbar, Pull Request in the menu bar, and the notification's ⌄ with Handle with Agent on) ends with **In
-Background**: **Review in Background** (others' open pull requests) and **Summarize**. PullPing starts your agent
+Background**: **Review in Background** (others' open pull requests) and **Summarize**. PullPing starts Claude Code
 without a terminal, and the run ends in a **draft**: a notification **Review draft ready** with the agent's summary
 and the verdict it suggests, and **Review Draft…**, **Open Session** and **Discard**.
 
@@ -472,9 +472,10 @@ An automation lets an event on GitHub start a process on your Mac, so PullPing k
   `--restricted` also ignores your settings files, so an allow rule such as `Bash(*)` there adds nothing, keeps file
   reads inside those two folders and refuses a permission bypass. It needs Claude Code 2.1.248 or later; an older one
   fails the run.
-- **It cannot** run commands, reach the network, write files or talk to GitHub. Codex has no switch that removes its
-  shell, so a Codex run gets `codex exec --sandbox read-only --ignore-user-config --ignore-rules` with web search off:
-  its commands can read files but cannot write or reach the network.
+- **It cannot** run commands, reach the network, write files or talk to GitHub.
+- **Claude Code only, for now.** Codex has no switch that turns off its shell and its other tools (apps, plugins,
+  sub-agents, browser and computer use), so a background run with Codex as the agent is refused; Codex still works for
+  everything that opens a terminal.
 - **Its answer is untrusted input.** PullPing checks it before showing it: a summary of at most 600 characters, one of
   four verdicts, a body of at most 60,000 characters with control and text-direction characters removed, and at most 50
   inline comments, each checked against the diff's changed lines (one that isn't on one is marked) and listed under the

@@ -103,7 +103,8 @@ public enum AutomationCLI {
           --enable | --disable                default enabled
           --by <text>                         who wrote it, shown in Settings; default $CLAUDE_CODE_SESSION_ID
           --background review|summarize|off   rules only: run headless and end in a draft (pullping background), instead
-                                              of a session in a terminal; --target, --session and --prompt are not used
+                                              of a session in a terminal (Claude Code only, for now); --target,
+                                              --session and --prompt are not used
           --json                              print the saved automation as JSON
 
         Prompt placeholders: {pr_url} {pr_number} {repo} {repo_owner} {repo_name} {repo_dir} {repo_root} {main_dir}
@@ -363,9 +364,9 @@ public enum AutomationCLI {
         Background runs (Settings → Automations → Background Runs; off by default): PullPing starts your agent without a
         terminal on one pull request, and the run ends in a draft. The agent can only read: PullPing fetches the diff and
         the discussion into the run's folder first, and the agent gets read-only file tools on that folder and the
-        repository's folder: no shell, no network, no MCP servers, no write tools (Codex: its read-only sandbox, with no
-        network). Nothing is posted to GitHub until you click Post in PullPing's draft window: no command posts, and an
-        approval or a change request is never automatic.
+        repository's folder: no shell, no network, no MCP servers, no write tools. Background runs need Claude Code
+        (2.1.248 or later) for now: with Codex as the agent, a run is refused. Nothing is posted to GitHub until you click
+        Post in PullPing's draft window: no command posts, and an approval or a change request is never automatic.
 
         review: others' open pull requests that are not drafts, with the Review requested task (Re-review when you
         reviewed an older commit; pullping prompts). summarize: any pull request. At most 2 runs at once and 10 waiting,
@@ -730,6 +731,7 @@ public enum AutomationCLI {
         if blank(a.name) { throw Usage(message: "the name is empty") }
         if blank(a.prompt) { throw Usage(message: "the prompt is empty") }
         if a.launcher == .custom && blank(a.customCommand) { throw Usage(message: "--launcher custom needs --custom-command") }
+        if a.background != nil, let reason = BackgroundPlanner.unsupported(a.agent) { throw Usage(message: "\(reason): --background needs --agent claude") }
         if wasAutomatic && a.source != "cli" { a.autoNoticeAt = a.autoNoticeAt ?? now }  // made automatic in Settings: no CLI notice
         a.source = "cli"
         a.by = PromptTemplate.clean(values["by"] ?? env["CLAUDE_CODE_SESSION_ID"] ?? "", max: 64)
@@ -1608,7 +1610,7 @@ extension AutomationCLI {
             if let failure = store.failure { throw Failure(message: failure) }
             guard let pr = tracked(ref, in: state()) else { throw Failure(message: "PullPing is not tracking \(ref.repo) #\(ref.number) yet") }
             guard file.enabled else { throw Failure(message: "Automations are off (pullping automations on)") }
-            if let reason = BackgroundQueue.eligible(action, pr: pr) { throw Failure(message: reason) }
+            if let reason = BackgroundPlanner.unsupported(file.handler.agent) ?? BackgroundQueue.eligible(action, pr: pr) { throw Failure(message: reason) }
             let runID = UUID().uuidString.lowercased()
             if flags.contains("dry-run") {
                 let runDir = (store.runsDirectory ?? URL(fileURLWithPath: NSTemporaryDirectory())).appendingPathComponent(runID)

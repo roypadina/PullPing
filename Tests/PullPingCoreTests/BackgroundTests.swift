@@ -100,12 +100,16 @@ final class BackgroundTests: XCTestCase {
         XCTAssertTrue(plan.script.hasPrefix("#!/bin/zsh -il\n"))
         XCTAssertTrue(plan.script.contains("cd '\(runDir.path)' || exit 1\n\\claude -p --session-id '\(session)'"), plan.script)
         XCTAssertFalse(plan.script.contains("exec /bin/zsh"), "headless: no shell is left open")
-        let codex = try BackgroundPlanner.plan(.summarize, agent: .codex, agentCommand: "", pr: pr(), runDir: runDir,
-                                               location: RepoLocation(repoDir: dir.path, repoRoot: dir.path, mainDir: dir.path, worktreeDir: dir.path, source: "remote"),
-                                               task: "t", sessionID: session, home: dir.path)
-        XCTAssertNil(codex.sessionID)
-        XCTAssertEqual(codex.cwd, dir.path)
-        XCTAssertFalse(codex.notCloned)
+        let cloned = try BackgroundPlanner.plan(.summarize, agent: .claude, agentCommand: "", pr: pr(), runDir: runDir,
+                                                location: RepoLocation(repoDir: dir.path, repoRoot: dir.path, mainDir: dir.path, worktreeDir: dir.path, source: "remote"),
+                                                task: "t", sessionID: session, home: dir.path)
+        XCTAssertEqual(cloned.cwd, dir.path)
+        XCTAssertFalse(cloned.notCloned)
+        // Codex background runs are off until its other tool surfaces can be turned off.
+        XCTAssertThrowsError(try BackgroundPlanner.plan(.summarize, agent: .codex, agentCommand: "", pr: pr(), runDir: runDir, location: nil,
+                                                        task: "t", sessionID: nil, home: dir.path)) {
+            XCTAssertEqual($0 as? BackgroundError, BackgroundError("Background runs need Claude Code for now"))
+        }
         var bad = pr()
         bad.repo = "octo-org/widgets; rm"
         XCTAssertThrowsError(try BackgroundPlanner.plan(.review, agent: .claude, agentCommand: "", pr: bad, runDir: runDir, location: nil, task: "t", sessionID: session, home: dir.path))

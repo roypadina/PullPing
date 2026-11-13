@@ -1,8 +1,8 @@
 import Foundation
 
 // Background runs (Settings → Automations → Background Runs, `pullping background`, `pullping drafts`).
-// Safety model, from the design: the agent runs headless with read-only file tools only (no shell, network, MCP or
-// write tool); PullPing fetches the diff and the discussion into the run folder first. Its answer is a draft, parsed and
+// Safety model, from the design: the agent (Claude Code only, `BackgroundPlanner.unsupported`) runs headless with read-only
+// file tools only (no shell, network, MCP or write tool); PullPing fetches the diff and the discussion into the run folder first. Its answer is a draft, parsed and
 // checked here as untrusted input. Nothing reaches GitHub without the user's click in the draft window, the post is
 // pinned to the commit the draft was made at, and approvals and change requests are never automatic. No CLI path posts.
 
@@ -184,6 +184,11 @@ public enum BackgroundPlanner {
     /// schema: OpenAI's strict structured outputs reject some length keywords.
     public static let schema = #"{"type":"object","additionalProperties":false,"required":["summary","verdict","body","comments"],"properties":{"summary":{"type":"string"},"verdict":{"type":"string","enum":["approve","request_changes","comment","none"]},"body":{"type":"string"},"comments":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["path","line","body"],"properties":{"path":{"type":"string"},"line":{"type":"integer"},"body":{"type":"string"}}}}}}"#
 
+    /// Why `agent` can't run in the background, or nil. Checked when a run is asked for (menu, rule, CLI), when a rule is saved
+    /// with a background action, and again by `plan`.
+    /// shortcut: Codex background disabled until its apps/plugins/multi_agent/browser/computer surfaces can be turned off, revisit with codex features
+    public static func unsupported(_ agent: AgentKind) -> String? { agent == .claude ? nil : "Background runs need Claude Code for now" }
+
     /// The task for a run: review's (re-review when I reviewed an older commit) or summarize's, the user's text when set.
     public static func task(_ action: BackgroundAction, pr: TrackedPR, file: AutomationFile) -> String {
         switch action {
@@ -208,6 +213,7 @@ public enum BackgroundPlanner {
     /// new session id (a UUID); ignored for Codex.
     public static func plan(_ action: BackgroundAction, agent: AgentKind, agentCommand: String, pr: TrackedPR, runDir: URL,
                             location: RepoLocation?, task: String, sessionID: String?, home: String) throws -> BackgroundPlan {
+        if let reason = unsupported(agent) { throw BackgroundError(reason) }
         guard LaunchPlanner.isValidRepo(pr.repo) else { throw LaunchError.badRepository(pr.repo) }
         let dir = runDir.path
         let cwd = try location.map { try LaunchPlanner.directory($0.worktreeDir, home: home) } ?? dir
@@ -238,8 +244,9 @@ public enum BackgroundPlanner {
     /// settings files ignored so a user allow rule such as `Bash(*)` cannot add anything, bypassPermissions refused) +
     /// `--tools Read,Grep,Glob` (the only built-in tools that exist in the session) + no MCP server (`--strict-mcp-config` with
     /// an empty config, `--disallowedTools mcp__*`). Session persistence stays on: Open Session resumes it.
-    /// Codex has no flag that removes its shell: `--sandbox read-only` (no writes, no network), no user config or rules
-    /// (no MCP servers, no allow rules), web search off.
+    /// Codex (unreachable: `plan` refuses it, see `unsupported`) has no flag that removes its shell: `--sandbox read-only` (no
+    /// writes, no network), no user config or rules (no MCP servers, no allow rules), web search off; its apps, plugins,
+    /// multi-agent, browser and computer use stay on, which is why it is not used.
     public static func command(agent: AgentKind, agentCommand: String, sessionID: String?, runDir: String) -> String {
         let q = LaunchPlanner.shellQuote
         let override = agentCommand.trimmingCharacters(in: .whitespacesAndNewlines)
