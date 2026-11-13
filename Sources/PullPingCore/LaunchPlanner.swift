@@ -7,12 +7,19 @@ public enum PromptTemplate {
         template.replacing(#/\{([a-z_]+)\}/#) { match in values[String(match.1)] ?? String(match.0) }
     }
 
-    /// Text written by others on GitHub: C0/C1 control characters (newlines too) become spaces, trimmed, at most `max` characters.
+    /// Text written by others on GitHub: C0/C1 control characters (newlines too) become spaces, invisible ones go
+    /// (`isInvisible`), trimmed, at most `max` characters.
     public static func clean(_ text: String, max: Int) -> String {
         var scalars = String.UnicodeScalarView()
-        for scalar in text.unicodeScalars { scalars.append(scalar.value < 0x20 || (0x7F...0x9F).contains(scalar.value) ? " " : scalar) }
+        for scalar in text.unicodeScalars where !scalar.isInvisible { scalars.append(scalar.value < 0x20 || (0x7F...0x9F).contains(scalar.value) ? " " : scalar) }
         return String(String(scalars).trimmingCharacters(in: .whitespaces).prefix(max))
     }
+}
+
+extension Unicode.Scalar {
+    /// Shows nothing but is read by a model or a parser: format characters (text direction, zero-width, soft hyphen, Unicode
+    /// tags) and the rest of the default-ignorable ones (variation selectors, fillers). Text can hide in them.
+    var isInvisible: Bool { properties.generalCategory == .format || properties.isDefaultIgnorableCodePoint }
 }
 
 public struct LaunchPlan: Sendable, Equatable {

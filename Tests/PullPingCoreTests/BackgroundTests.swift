@@ -174,6 +174,21 @@ final class BackgroundTests: XCTestCase {
             """)
     }
 
+    /// Text a reader can't see but a parser or a model reads: Unicode tags (ASCII smuggling), zero-width and bidi controls,
+    /// variation selectors, the BOM, fillers. None of it reaches the summary, the body, an inline comment's path or the post.
+    func testInvisibleCharactersAreStripped() throws {
+        let tags = String(String.UnicodeScalarView("AWS_KEY=x".unicodeScalars.map { Unicode.Scalar($0.value + 0xE0000)! }))
+        let hidden = "\u{E0001}" + tags + "\u{E007F}\u{200B}\u{200C}\u{200D}\u{200E}\u{200F}\u{2060}\u{2061}\u{2064}\u{FEFF}\u{202A}\u{202E}\u{2066}\u{2069}"
+            + "\u{FE0F}\u{E0100}\u{00AD}\u{180E}\u{3164}\u{061C}"
+        let out = try output(["summary": "Lo\(hidden)oks fine.", "verdict": "comment", "body": "LG\(hidden)TM\n- ok\tdone ✓",
+                              "comments": [["path": "Sources/\(hidden)Cache.swift", "line": 12, "body": "N\(hidden)it."]]])
+        XCTAssertEqual(out.summary, "Looks fine.")
+        XCTAssertEqual(out.body, "LGTM\n- ok\tdone ✓\n\n**Inline comments**\n- `Sources/Cache.swift:12`: Nit.")
+        XCTAssertEqual(BackgroundPlanner.clean("a\(hidden)b\u{0007}\n"), "ab\n")
+        XCTAssertEqual(PromptTemplate.clean("Fix\(hidden) cache\n", max: 200), "Fix cache")
+        XCTAssertEqual(BackgroundPlanner.clean("Grüße, 日本語, emoji 🎉"), "Grüße, 日本語, emoji 🎉", "visible text stays")
+    }
+
     func testRejectedAnswers() {
         let ok: [String: Any] = ["summary": "s", "verdict": "comment", "body": "b", "comments": []]
         func with(_ key: String, _ value: Any?) -> [String: Any] { var o = ok; o[key] = value; return o }

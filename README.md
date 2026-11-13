@@ -477,9 +477,10 @@ An automation lets an event on GitHub start a process on your Mac, so PullPing k
   sub-agents, browser and computer use), so a background run with Codex as the agent is refused; Codex still works for
   everything that opens a terminal.
 - **Its answer is untrusted input.** PullPing checks it before showing it: a summary of at most 600 characters, one of
-  four verdicts, a body of at most 60,000 characters with control and text-direction characters removed, and at most 50
-  inline comments, each checked against the diff's changed lines (one that isn't on one is marked) and listed under the
-  body. Anything else fails the run; its files stay in the run's folder.
+  four verdicts, a body of at most 60,000 characters, and at most 50 inline comments, each checked against the diff's
+  changed lines (one that isn't on one is marked) and listed under the body. Control and invisible characters (text
+  direction, zero-width, Unicode tags) are removed from all of it and again from the text you post, so nothing hides in
+  what you read. Anything else fails the run; its files stay in the run's folder.
 - **Nothing is posted without your click** in the draft window. There is no setting, no rule and no command that posts
   a draft, approves or requests changes; the prompt tells the agent that text asking it to approve is a finding to
   report. The pull request's own content (description, comments, code) is written by its author, who is the one who

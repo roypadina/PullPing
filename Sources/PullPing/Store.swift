@@ -1185,6 +1185,7 @@ final class Store {
     /// head right before). nil = posted (the draft is used up); else why not, and the draft stays.
     func postDraft(_ draft: BackgroundDraft, body: String, event: DraftPost.Event) async -> String? {
         guard persist else { return "Not in the demo." }
+        let body = BackgroundPlanner.clean(body)  // what the window showed: draft.json may have been edited since
         guard let account = account(draft.accountID) else { return "@\(draft.login) is no longer an account in PullPing." }
         let pr = tracked.prs[draft.prID]
         if let reason = DraftPost.refusal(event, body: body, draftHead: draft.head, head: pr?.headOID ?? draft.head, open: (pr?.state ?? .open) == .open) {

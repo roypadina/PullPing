@@ -345,13 +345,14 @@ public enum BackgroundPlanner {
         return body.trimmingCharacters(in: .whitespacesAndNewlines) + "\n\n**Inline comments**\n" + items.joined(separator: "\n")
     }
 
-    /// Markdown as the agent wrote it, minus control characters (newlines and tabs stay) and bidirectional overrides, which
-    /// could show the reader text other than what gets posted.
-    static func clean(_ text: String) -> String {
+    /// Markdown as the agent wrote it, minus control characters (newlines and tabs stay) and invisible ones (bidirectional
+    /// overrides, zero-width, Unicode tags, variation selectors: `isInvisible`), which could show the reader text other than
+    /// what gets posted, or hide text in it. Also the draft window's text, right before it is posted.
+    public static func clean(_ text: String) -> String {
         var scalars = String.UnicodeScalarView()
         for s in text.unicodeScalars {
             let v = s.value
-            if (v < 0x20 && v != 0x0A && v != 0x09) || (0x7F...0x9F).contains(v) || (0x202A...0x202E).contains(v) || (0x2066...0x2069).contains(v) { continue }
+            if (v < 0x20 && v != 0x0A && v != 0x09) || (0x7F...0x9F).contains(v) || s.isInvisible { continue }
             scalars.append(s)
         }
         return String(scalars)
