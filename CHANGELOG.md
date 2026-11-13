@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Ghostex shows up under **Open in** again: Ghostex 11.5 changed its app id, so PullPing thought it was not installed and every Ghostex run failed.
+- A run that doesn't start (app not installed, folder missing, Handle with Agent off, no linked session, limits reached) now says why in a notification panel instead of only beeping; Recent Runs and Activity keep the detail.
+
 ## [0.6.1] - 2026-11-04
 
 ### Added

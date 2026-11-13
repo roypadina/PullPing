@@ -18,14 +18,14 @@ extension Launcher {
         }
     }
 
-    /// The app that must be installed (the app checks with NSWorkspace); nil = Custom, the user's own line.
-    public var bundleID: String? {
+    /// The app that must be installed, any one of these ids (the app checks with NSWorkspace); empty = Custom, the user's own line.
+    public var bundleIDs: [String] {
         switch self {
-        case .terminal: "com.apple.Terminal"
-        case .iterm2: "com.googlecode.iterm2"
-        case .ghostty: "com.mitchellh.ghostty"
-        case .ghostex: "com.madda.ghostex.gpui"
-        case .custom: nil
+        case .terminal: ["com.apple.Terminal"]
+        case .iterm2: ["com.googlecode.iterm2"]
+        case .ghostty: ["com.mitchellh.ghostty"]
+        case .ghostex: ["com.madda.ghostex.host", "com.madda.ghostex.gpui"]  // .host since Ghostex 11.5
+        case .custom: []
         }
     }
 }

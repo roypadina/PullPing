@@ -4,7 +4,7 @@ import PullPingCore
 
 extension Launcher {
     /// The Open in picker, `pullping launchers` and every launch: is the launcher's app installed (Custom: always)?
-    var isInstalled: Bool { bundleID.map { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil } ?? true }
+    var isInstalled: Bool { bundleIDs.isEmpty || bundleIDs.contains { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil } }
 }
 
 /// Writes a run's prompt (0600) and script (0700) under `runs/`, then runs the launch line and stops: PullPing never talks

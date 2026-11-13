@@ -748,13 +748,19 @@ final class Store {
         let file = automationStore.load()
         guard file.enabled, edited != nil || file.handler.enabled else {
             AgentLauncher.log.info("handler skipped: Handle with Agent or Run Automations is off")
-            NSSound.beep()
+            runFailed("Handle with Agent didn't run", "Turn on Run Automations and Handle with Agent in Settings → Automations.", id: Automation.handlerID)
             return
         }
         var handler = edited ?? file.handler
         let resume = mode == .resume || (mode == .handle && file.link(for: pr.repo, number: pr.number) != nil)
         handler.sessionID = resume ? Automation.linkedSession : nil
         launch(handler, pr: pr, login: account.login, event: event, eventID: "manual:\(t.ISO8601Format())", key: "handler|\(prID)", file: file, at: t)
+    }
+
+    /// A run that didn't start: a beep alone went unnoticed, so a note panel says why (Recent Runs and the log keep it too).
+    private func runFailed(_ title: String, _ message: String, id: UUID) {
+        NSSound.beep()
+        NotificationPanels.shared.show(note: message, title: title, id: id, actions: [])
     }
 
     /// Plans, launches and records one run. `event` nil = manual (Run menu, Try). Every run checks the duplicate and
@@ -769,7 +775,7 @@ final class Store {
         if event != nil {
             guard let current = AutomationMatcher.current(automation.id, in: file.automations, now: t) else {
                 AgentLauncher.log.info("run skipped: the automation was turned off, removed or expired")
-                NSSound.beep()
+                runFailed("\(automation.name) didn't run", "It was turned off, removed or expired.", id: automation.id)
                 return
             }
             automation = current
@@ -779,7 +785,7 @@ final class Store {
         if launching.contains(key) { return }
         if let reason = AutomationMatcher.blocked(automation, prID: prID, eventID: eventID, runs: file.runs, now: t, manual: true) {
             AgentLauncher.log.info("run skipped: \(reason, privacy: .public)")
-            NSSound.beep()
+            runFailed("\(automation.name) didn't run", reason, id: automation.id)
             return
         }
         launch(automation, pr: pr, login: account.login, event: event, eventID: eventID, key: key, file: file, at: t)
@@ -792,7 +798,7 @@ final class Store {
         if launching.contains(key) { return }
         if automation.usesLinkedSession && file.link(for: pr.repo, number: pr.number) == nil {
             AgentLauncher.log.info("run skipped: \(LaunchError.noLinkedSession.localizedDescription, privacy: .public)")
-            NSSound.beep()
+            runFailed("\(automation.name) didn't run", "\(pr.repo) #\(pr.number): \(LaunchError.noLinkedSession.localizedDescription)", id: automation.id)
             return
         }
         launching.insert(key)
@@ -805,6 +811,7 @@ final class Store {
                 if error == nil, let link { $0.setLink(link) }
             }
             self.record([ActivityEntry(run: a, pr: pr, account: login, event: event?.kind, error: error, at: t)])
+            if let error { self.runFailed("Couldn't start \(name)", "\(pr.repo) #\(pr.number): \(error)", id: a.id) }
             self.launching.remove(key)
             self.reload()
         }

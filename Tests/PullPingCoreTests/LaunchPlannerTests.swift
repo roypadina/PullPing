@@ -206,7 +206,8 @@ final class LaunchPlannerTests: XCTestCase {
             XCTAssertEqual($0.localizedDescription, "iTerm2 is not installed; choose another app under Open in (--launcher)")
         }
         XCTAssertNoThrow(try plan(.ghostty))
-        XCTAssertEqual(Launcher.allCases.filter { $0.bundleID == nil }, [.custom])  // only Custom needs no app
+        XCTAssertEqual(Launcher.allCases.filter { $0.bundleIDs.isEmpty }, [.custom])  // only Custom needs no app
+        XCTAssertEqual(Launcher.ghostex.bundleIDs, ["com.madda.ghostex.host", "com.madda.ghostex.gpui"])  // renamed in Ghostex 11.5
     }
 
     /// `{repo_dir}`: the first root (in order) holding the repository in any case, else the fallback; the result is checked like any cwd.
