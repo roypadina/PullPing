@@ -17,7 +17,7 @@ public enum Notify {
         case .ciFailed where mine: return .ciFailed
         case .conflicts where mine: return .conflicts
         case .comment where mine, .reviewCommented where mine: return .newComments
-        case .reviewApproved where mine, .ciPassed where mine: return bucket == .merge ? .readyToMerge : nil
+        case .reviewApproved where mine, .ciPassed where mine, .readyToMerge where mine: return bucket == .merge ? .readyToMerge : nil
         case .mentioned: return .mentioned
         case .assigned: return .assigned
         default: return nil

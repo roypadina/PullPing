@@ -56,7 +56,7 @@ final class MainWindow {
 
     /// The activity log (All Accounts, or the first account with the per-account layout).
     func showActivity() {
-        store?.selection = SidebarItem(scope: .all, filter: .all, activity: true)
+        store?.selection = SidebarItem(scope: .all, filter: .needsMe, activity: true)
         show()
     }
 }

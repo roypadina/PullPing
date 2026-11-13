@@ -28,6 +28,48 @@ public struct LaunchPlan: Sendable, Equatable {
     public var repo: RepoLocation? = nil
     /// Ghostex: the line reads `$PULLPING_GHOSTEX_PROJECT`, which the launcher sets from `ghostex projects` (`GhostexProjects.pick`).
     public var needsGhostexProject = false
+    /// Ghostex resume: `ghostex` arguments that focus the session when it already runs there (instead of a second copy), and
+    /// that then type the draft line into it (`GhostexSessions`). nil = always a new session.
+    public var focusRunning: [String]? = nil
+    public var draftLine: [String]? = nil
+}
+
+/// Ghostex sessions PullPing starts, focuses or finds. Every value reaches `ghostex` as an argument, never as shell text.
+public enum GhostexSessions {
+    /// The run detail's suffix when a click focused a running session instead of starting one.
+    public static let focusedNote = " (focused running session)"
+
+    /// `/bin/zsh` arguments running `ghostex <args>` in a login shell (Homebrew on PATH); `args` stay argv.
+    public static func shell(_ args: [String]) -> [String] { ["-lc", "ghostex \"$@\"", "zsh"] + args }
+
+    /// `create-session`'s `{ok, session: {globalRef, …}}`: the new session's ref, nil when absent or not a plain ref.
+    public static func globalRef(_ json: Data) -> String? {
+        let raw = (try? JSONSerialization.jsonObject(with: json)) as? [String: Any]
+        guard let ref = (raw?["session"] as? [String: Any])?["globalRef"] as? String, ref.wholeMatch(of: #/[A-Za-z0-9:_-]{1,64}/#) != nil else { return nil }
+        return ref
+    }
+
+    /// `focus … --if-running --json`: `{"focused": true, …}` when it focused a running session (`notRunning` is `false`).
+    public static func focused(_ json: Data) -> Bool {
+        ((try? JSONSerialization.jsonObject(with: json)) as? [String: Any])?["focused"] as? Bool == true
+    }
+
+    /// `sessions --json` (`{ok, sessions: [{agentSessionId, …}]}`) lists a session of this agent session. Looks, never focuses.
+    public static func running(_ json: Data, sessionID: String) -> Bool {
+        let rows = (((try? JSONSerialization.jsonObject(with: json)) as? [String: Any])?["sessions"] as? [[String: Any]]) ?? []
+        return rows.contains { $0["agentSessionId"] as? String == sessionID }
+    }
+
+    public static func focus(globalRef: String) -> [String] { ["focus", globalRef] }
+    public static func focusRunning(sessionID: String, agent: AgentKind) -> [String] {
+        ["focus", "--agent-session-id", sessionID, "--agent", agent.rawValue, "--if-running", "--json"]
+    }
+    public static let sessions = ["sessions", "--json"]
+    /// Typed into the running session's input without Enter (the user presses Return): a fixed sentence and PullPing's own
+    /// prompt path, no GitHub text. The agent session id is a Ghostex selector.
+    public static func draft(sessionID: String, promptPath: String) -> [String] {
+        ["send-text", sessionID, "Read \(promptPath) and act on it."]
+    }
 }
 
 /// `ghostex create-session` needs a project id; `--cwd` still opens the folder, so any project works, the closest one reads best.
@@ -158,8 +200,11 @@ public enum LaunchPlanner {
         // The prompt is the agent's positional argument: starting with "-" it would be an option (`{summary}` = "--settings=…"),
         // and a bare placeholder could be a subcommand (`logout`). A leading newline makes it plain text for claude and codex alike.
         if promptText.first == "-" || a.prompt.first == "{" { promptText = "\n" + promptText }
+        let reuse = a.launcher == .ghostex ? session : nil  // only Ghostex can find the window of an agent session
         return LaunchPlan(cwd: cwd, title: title, promptText: promptText, promptPath: promptPath,
-                          scriptPath: scriptPath, script: script, launchLine: line, repo: location, needsGhostexProject: a.launcher == .ghostex)
+                          scriptPath: scriptPath, script: script, launchLine: line, repo: location, needsGhostexProject: a.launcher == .ghostex,
+                          focusRunning: reuse.map { GhostexSessions.focusRunning(sessionID: $0, agent: a.agent) },
+                          draftLine: reuse.map { GhostexSessions.draft(sessionID: $0, promptPath: promptPath) })
     }
 
     /// Interactive sessions: the user watches and steers. The command override replaces the leading word; no permission flags ever.

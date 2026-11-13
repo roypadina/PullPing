@@ -2,52 +2,105 @@ import AppKit
 import Observation
 import PullPingCore
 
-/// Status panel and sidebar filters. Hidden pull requests appear only under Hidden.
+/// Sidebar rows and status panel filters: whose turn it is (0.7.0 design §2.1). Needs Me gathers the items that need me
+/// from the other rows; every item lives in one of the others (`home`). Hidden items show only under Muted & Hidden.
+/// Raw values are stored (panel filter); an unknown one falls back to Needs Me.
 enum Filter: String, CaseIterable {
-    case inbox, all, mine, toReview, involved, recentlyClosed, muted, hidden
+    case needsMe, myPRs, reviews, issues, watching, closed, mutedHidden
 
     var title: String {
         switch self {
-        case .inbox: "Inbox"
-        case .all: "All"
-        case .mine: "Mine"
-        case .toReview: "To Review"
-        case .involved: "Involved"
-        case .recentlyClosed: "Recently Closed"
-        case .muted: "Muted"
-        case .hidden: "Hidden"
+        case .needsMe: "Needs Me"
+        case .myPRs: "My Pull Requests"
+        case .reviews: "Reviews"
+        case .issues: "Issues"
+        case .watching: "Watching"
+        case .closed: "Closed"
+        case .mutedHidden: "Muted & Hidden"
         }
     }
 
     var symbol: String {
         switch self {
-        case .inbox: "tray"
-        case .all: "tray.full"
-        case .mine: "person"
-        case .toReview: "eye"
-        case .involved: "bubble.left.and.bubble.right"
-        case .recentlyClosed: "archivebox"
-        case .muted: "bell.slash"
-        case .hidden: "eye.slash"
+        case .needsMe: "tray"
+        case .myPRs: "person"
+        case .reviews: "eye"
+        case .issues: "smallcircle.filled.circle"
+        case .watching: "bubble.left.and.bubble.right"
+        case .closed: "archivebox"
+        case .mutedHidden: "bell.slash"
         }
     }
 
-    /// Lists that show active rows first and Done pull requests (`Attention.isDone`) in their own group below.
-    var splitsDone: Bool { ![.recentlyClosed, .muted, .hidden].contains(self) }
+    /// The row an item lives in: its bucket's area, or Muted & Hidden while hidden. Never Needs Me.
+    static func home(_ pr: TrackedPR) -> Filter {
+        if pr.hidden { return .mutedHidden }
+        switch Attention.bucket(pr) {
+        case .fix, .merge, .waitingReview, .waitingCI, .waitingMerge, .draft: return .myPRs
+        case .review, .reReview, .teamReview, .reviewed: return .reviews
+        case .issueAssigned, .issueMine, .issueMentioned: return .issues
+        case .watching: return .watching
+        case .closed: return .closed
+        }
+    }
 
-    /// Inbox and All hold the same rows; Inbox shows them in Mine · To Review · Involved sections.
-    func matches(_ pr: TrackedPR) -> Bool {
-        guard self != .hidden else { return pr.hidden }
-        guard !pr.hidden else { return false }
+    /// `counting`: the reasons that count (Settings > General), for Needs Me.
+    func matches(_ pr: TrackedPR, counting: Set<NeedReason>) -> Bool {
         switch self {
-        case .inbox, .all, .hidden: return true
-        case .mine: return Attention.group(pr) == .mine
-        case .toReview: return Attention.group(pr) == .toReview
-        case .involved: return Attention.group(pr) == .involved
-        case .recentlyClosed: return pr.state != .open
-        case .muted: return pr.muted
+        case .needsMe: Attention.needReason(pr, counting: counting) != nil
+        case .mutedHidden: pr.muted || pr.hidden
+        default: Filter.home(pr) == self
         }
     }
+
+    /// The row's badge counts only its "your turn" sections (Waiting on Others, Reviewed and the rest never count).
+    func badges(_ pr: TrackedPR) -> Bool {
+        switch self {
+        case .needsMe, .issues: true
+        case .myPRs: [.fix, .merge].contains(Attention.bucket(pr))
+        case .reviews: [.review, .reReview, .teamReview].contains(Attention.bucket(pr))
+        case .watching, .closed, .mutedHidden: false
+        }
+    }
+
+    /// The list's sections in order, empty ones dropped. `prs` come in `Attention.sorted` order; sections that are not
+    /// somebody's queue (Waiting on Others, Reviewed, Watching, Closed…) are re-sorted by latest activity.
+    func sections(_ prs: [TrackedPR]) -> [ListSection] {
+        func by(_ pr: TrackedPR) -> String {
+            let bucket = Attention.bucket(pr)
+            switch self {
+            case .needsMe:
+                if [.review, .reReview, .teamReview].contains(bucket) { return "To Review" }
+                return !pr.isIssue && pr.roles.contains(.author) ? "Your Pull Requests" : "Mentions & Assigned"
+            case .myPRs: return [.fix, .merge].contains(bucket) ? "Your Turn" : bucket == .draft ? "Drafts" : "Waiting on Others"
+            case .reviews: return [.review, .reReview].contains(bucket) ? "Needs Your Review" : bucket == .teamReview ? "Team Requests" : "Reviewed"
+            case .issues: return bucket == .issueAssigned ? "Assigned to Me" : bucket == .issueMine ? "Opened by Me" : "Mentioned"
+            case .watching, .closed: return ""
+            case .mutedHidden: return pr.hidden ? "Hidden" : "Muted"
+            }
+        }
+        let order: [String] = switch self {
+        case .needsMe: ["To Review", "Your Pull Requests", "Mentions & Assigned"]
+        case .myPRs: ["Your Turn", "Waiting on Others", "Drafts"]
+        case .reviews: ["Needs Your Review", "Team Requests", "Reviewed"]
+        case .issues: ["Assigned to Me", "Opened by Me", "Mentioned"]
+        case .watching, .closed: [""]
+        case .mutedHidden: ["Muted", "Hidden"]
+        }
+        let queues: Set<String> = ["To Review", "Your Pull Requests", "Mentions & Assigned", "Your Turn", "Needs Your Review", "Team Requests",
+                                   "Assigned to Me", "Opened by Me", "Mentioned"]
+        let grouped = Dictionary(grouping: prs, by: by)
+        return order.compactMap { title in
+            grouped[title].map { ListSection(title: title, prs: queues.contains(title) ? $0 : Attention.sorted($0, counting: []), collapsed: title == "Drafts") }
+        }
+    }
+}
+
+/// One titled part of a list ("" = untitled); `collapsed` until opened (Drafts).
+struct ListSection {
+    let title: String
+    let prs: [TrackedPR]
+    var collapsed = false
 }
 
 /// Which accounts a list shows.
@@ -99,16 +152,6 @@ enum Snooze: CaseIterable {
         case .tomorrow:
             Calendar.current.date(bySettingHour: 9, minute: 0, second: 0,
                                   of: Calendar.current.date(byAdding: .day, value: 1, to: now) ?? now) ?? now.addingTimeInterval(86_400)
-        }
-    }
-}
-
-extension PRGroup {
-    var title: String {
-        switch self {
-        case .mine: "Mine"
-        case .toReview: "To Review"
-        case .involved: "Involved"
         }
     }
 }
@@ -174,9 +217,11 @@ final class Store {
     /// Re-read every 30 s so relative times stay current without a per-view timer.
     private(set) var now = Date()
     /// Main-window sidebar row; nil only in screenshots. Read `listSelection`.
-    var selection: SidebarItem? = SidebarItem(scope: .all, filter: .inbox)
+    var selection: SidebarItem? = SidebarItem(scope: .all, filter: .needsMe)
     /// Main-window selection; the Pull Request menu acts on it.
     var selectedID: String?
+    /// Activity entries after this are new: the sidebar dot and the feed's New section. Set when the feed is left.
+    var activitySeenAt: Date { didSet { if persist { UserDefaults.standard.set(activitySeenAt, forKey: DefaultsKey.activitySeenAt) } } }
     /// Phone notification secrets: keychain only. The demo store never reads or writes the keychain.
     var ntfyToken: String { didSet { if persist { Keychain.set(Keychain.ntfyTokenService, ntfyToken) } } }
     var ntfyFallbackURL: String { didSet { if persist { Keychain.set(Keychain.ntfyFallbackService, ntfyFallbackURL) } } }
@@ -190,6 +235,7 @@ final class Store {
         automationStore = AutomationStore(url: persist ? AutomationStore.defaultURL : nil)
         automationFile = automationStore.load()
         activityLog = ActivityLog(url: persist ? ActivityLog.defaultURL() : nil)
+        activitySeenAt = persist ? UserDefaults.standard.object(forKey: DefaultsKey.activitySeenAt) as? Date ?? Date() : Date()
         ntfyToken = persist ? Keychain.get(Keychain.ntfyTokenService) : ""
         ntfyFallbackURL = persist ? Keychain.get(Keychain.ntfyFallbackService) : ""
     }
@@ -247,19 +293,23 @@ final class Store {
     var breakdown: String { Attention.breakdown(prs, counting: settings.badgeReasons) }
     var isPaused: Bool { settings.isPaused(now) }
 
-    func prs(_ scope: Scope, _ filter: Filter) -> [TrackedPR] { prs.filter { scope.matches($0) && filter.matches($0) } }
+    func prs(_ scope: Scope, _ filter: Filter) -> [TrackedPR] {
+        prs.filter { scope.matches($0) && filter.matches($0, counting: settings.badgeReasons) }
+    }
 
-    /// Sidebar badges and panel segments, by the menu-bar measure ("all unread" when the count is off).
-    func count(_ scope: Scope, _ filter: Filter = .all) -> Int {
-        let enabled = enabledIDs, needsMe = settings.badgeMode == .needsMe
-        return tracked.prs.values.filter {
-            enabled.contains($0.accountID) && scope.matches($0) && filter.matches($0) && (needsMe ? Attention.needsMe($0, counting: settings.badgeReasons) : Attention.isAttention($0))
+    /// Sidebar badges (the row's "your turn" sections) and panel segments (`filter` nil: every row), by the menu-bar measure
+    /// ("all unread" when the count is off).
+    func count(_ scope: Scope, _ filter: Filter? = nil) -> Int {
+        let enabled = enabledIDs, needsMe = settings.badgeMode == .needsMe, counting = settings.badgeReasons
+        return tracked.prs.values.filter { pr in
+            enabled.contains(pr.accountID) && scope.matches(pr) && (filter.map { $0.matches(pr, counting: counting) && $0.badges(pr) } ?? true)
+                && (needsMe ? Attention.needsMe(pr, counting: counting) : Attention.isAttention(pr))
         }.count
     }
 
     /// The sidebar row the list shows: per-account layout has no All Accounts rows, a removed account falls back.
     var listSelection: SidebarItem {
-        var item = selection ?? SidebarItem(scope: .all, filter: .inbox)
+        var item = selection ?? SidebarItem(scope: .all, filter: .needsMe)
         item.scope = resolve(item.scope)
         return item
     }
@@ -278,6 +328,9 @@ final class Store {
     var hasError: Bool { !errorAccounts.isEmpty }
     /// Enabled accounts that have never finished a poll.
     var firstSync: [Account] { accounts.filter { $0.enabled && tracked.lastPollAt[$0.id] == nil } }
+
+    /// The scope has activity after `activitySeenAt` (the log is oldest first).
+    func hasNewActivity(_ scope: Scope) -> Bool { (activity.last { scope.matches($0) }?.at ?? .distantPast) > activitySeenAt }
 
     func account(_ id: UUID) -> Account? { accounts.first { $0.id == id } }
     func login(for pr: TrackedPR) -> String? { multiAccount ? account(pr.accountID).map(\.displayName) : nil }
@@ -312,7 +365,7 @@ final class Store {
         syncing = true
         let accounts = self.accounts
         Task {
-            handle(await poller.pollAll(accounts: accounts, reason: reason))
+            await handle(await poller.pollAll(accounts: accounts, reason: reason))
         }
     }
 
@@ -322,7 +375,7 @@ final class Store {
         if !paused { poll(.wake) }
     }
 
-    func handle(_ report: PollReport) {
+    func handle(_ report: PollReport) async {
         syncing = false
         offline = report.offline
         for (id, result) in report.results { statuses[id] = result.status }
@@ -330,10 +383,32 @@ final class Store {
         let plan = AutomationMatcher.plan(events: report.events, prs: tracked.prs, automations: automationFile.automations, runs: automationFile.runs,
                                           settingsEnabled: automationFile.enabled, paused: isPaused, accounts: accounts, now: now,
                                           sessions: automationFile.sessions)
-        for match in plan.auto { run(match.automation, prID: match.pr.id, event: match.event) }
+        // An automatic run never types into or focuses a session the user may be typing in: one open in Ghostex becomes an
+        // offer with Go to Session.
+        var live: [AutomationMatcher.Match] = []
+        for match in plan.auto {
+            if let id = ghostexSession(match), await AgentLauncher.runsInGhostex(sessionID: id) { live.append(match) } else {
+                run(match.automation, prID: match.pr.id, event: match.event, auto: true)
+            }
+        }
+        record(live.map { match in
+            var entry = ActivityEntry(run: match.automation, pr: match.pr, account: account(match.pr.accountID)?.login ?? "", event: match.event.kind,
+                                      error: nil, at: Date())
+            entry.ok = nil
+            entry.error = "session is running in Ghostex: asked instead"
+            return entry
+        })
         // A new pull request's seeded history stays out of panels and the activity log. Own events go on: `show` logs them
         // and shows one only when an automation offers to run on it ("when I merge it, …").
-        show(report.events.filter { $0.seeded != true }, offers: plan.offers)
+        show(report.events.filter { $0.seeded != true }, offers: plan.offers + live, live: live)
+    }
+
+    /// The agent session an automatic run would resume in Ghostex (its pull request's link, or a hook's own session), else nil.
+    private func ghostexSession(_ match: AutomationMatcher.Match) -> String? {
+        let a = match.automation
+        guard a.launcher == .ghostex else { return nil }
+        let id = a.usesLinkedSession ? link(for: match.pr)?.sessionID : a.sessionID
+        return id.flatMap { $0.isEmpty ? nil : $0 }
     }
 
     private func reload() {
@@ -378,11 +453,13 @@ final class Store {
 
     // MARK: Notifications and reminders
 
-    /// Groups by PR, drops own/off/muted/snoozed/paused (`ActivityEntry.Quiet`), one panel per PR, one sound per batch. Phone
-    /// pushes go out per event. Every event goes to the activity log with what happened to it.
-    /// `offers` (ask-mode automations) add Run buttons and make the panel an alert, whatever the kind's style. Handle with
-    /// Agent adds its buttons after them, without making the panel an alert.
-    func show(_ events: [PREvent], offers: [AutomationMatcher.Match] = []) {
+    /// Groups by PR, drops own/activity-only/off/muted/snoozed/paused (`ActivityEntry.Quiet`), one panel per PR, one sound per
+    /// batch. A panel's style is its reasons' (`Notify.reason`, Settings > Notifications). Phone pushes go out per event. Every
+    /// event goes to the activity log with what happened to it.
+    /// `offers` (ask-mode automations) add Run buttons and make the panel an alert, whatever the reason's style (`live`: Go to
+    /// Session, an automatic run whose session is open in Ghostex). Handle with Agent adds its buttons after them, without
+    /// making the panel an alert.
+    func show(_ events: [PREvent], offers: [AutomationMatcher.Match] = [], live: [AutomationMatcher.Match] = []) {
         let t = Date()
         push(events, now: t)
         var shown = false
@@ -394,7 +471,7 @@ final class Store {
             let prOffers = offers.filter { $0.pr.id == prID }
             let offered = Set(prOffers.map(\.event.id))
             let quiet = group.map { ActivityEntry.Quiet.reason($0, pr: pr, settings: settings, offered: offered.contains($0.id), now: t) }
-            let styled = zip(group, quiet).filter { $0.1 == nil }.map { ($0.0, settings.style(for: $0.0.kind, mine: pr.roles.contains(.author))) }
+            let styled = zip(group, quiet).filter { $0.1 == nil }.map { event, _ in (event, Notify.reason(event, pr: pr).map(settings.needStyle) ?? .alert) }
             let alert = !prOffers.isEmpty || styled.contains { $0.1 == .alert }
             let user = account(pr.accountID)?.login ?? ""
             logged += zip(group, quiet).map { event, quiet in
@@ -403,7 +480,9 @@ final class Store {
             }
             guard !styled.isEmpty else { continue }
             let actions = prOffers.map { match in
-                PanelAction(id: match.automation.id, title: "Run \(match.automation.name)") { [weak self] in self?.run(match.automation, prID: match.pr.id, event: match.event) }
+                PanelAction(id: match.automation.id, title: live.contains(match) ? "Go to Session" : "Run \(match.automation.name)") { [weak self] in
+                    self?.run(match.automation, prID: match.pr.id, event: match.event)
+                }
             } + (handler.handlerEvent(in: styled.map(\.0)).map { handlerActions(pr, event: $0) } ?? [])
             NotificationPanels.shared.show(pr: pr, events: styled.map(\.0), alert: alert,
                                            account: login(for: pr), autoHide: settings.autoHideSeconds, actions: actions)
@@ -523,8 +602,9 @@ final class Store {
     /// Main-window selection from outside (⌘↩, links): switches the sidebar when the pull request isn't in the current list.
     func reveal(_ id: String) {
         selectedID = id
-        guard let pr = tracked.prs[id], listSelection.activity || !(listSelection.scope.matches(pr) && listSelection.filter.matches(pr)) else { return }
-        selection = SidebarItem(scope: settings.inboxLayout == .unified ? .all : .account(pr.accountID), filter: pr.hidden ? .hidden : .all)
+        guard let pr = tracked.prs[id],
+              listSelection.activity || !(listSelection.scope.matches(pr) && listSelection.filter.matches(pr, counting: settings.badgeReasons)) else { return }
+        selection = SidebarItem(scope: settings.inboxLayout == .unified ? .all : .account(pr.accountID), filter: Filter.home(pr))
     }
 
     /// Removes the rows and ignores the ids; Edit > Undo puts them back (UND-1).
@@ -766,7 +846,8 @@ final class Store {
     /// Plans, launches and records one run. `event` nil = manual (Run menu, Try). Every run checks the duplicate and
     /// max-runs caps; the cooldown and per-poll budget were applied by `AutomationMatcher.plan` for automatic ones.
     /// Event runs (Run buttons, automatic) launch the automation as saved now, and not at all once it is off, removed or expired.
-    func run(_ automation: Automation, prID: String, event: PREvent?) {
+    /// `auto`: started on its own (never focuses or types into a running session).
+    func run(_ automation: Automation, prID: String, event: PREvent?, auto: Bool = false) {
         let t = Date()
         guard let pr = tracked.prs[prID], let account = account(pr.accountID) else { return }
         let file = automationStore.load()
@@ -788,13 +869,13 @@ final class Store {
             runFailed("\(automation.name) didn't run", reason, id: automation.id)
             return
         }
-        launch(automation, pr: pr, login: account.login, event: event, eventID: eventID, key: key, file: file, at: t)
+        launch(automation, pr: pr, login: account.login, event: event, eventID: eventID, key: key, file: file, at: t, auto: auto)
     }
 
     /// Resolves a linked session, plans, launches and records one run. A new Claude session starts with an id PullPing picks
     /// and, once launched, is the pull request's linked session.
     private func launch(_ automation: Automation, pr: TrackedPR, login: String, event: PREvent?, eventID: String, key: String,
-                        file: AutomationFile, at t: Date) {
+                        file: AutomationFile, at t: Date, auto: Bool = false) {
         if launching.contains(key) { return }
         if automation.usesLinkedSession && file.link(for: pr.repo, number: pr.number) == nil {
             AgentLauncher.log.info("run skipped: \(LaunchError.noLinkedSession.localizedDescription, privacy: .public)")
@@ -824,11 +905,15 @@ final class Store {
             // Where the pull request's code is: its linked session's folder, else a found session's (`RepoLocator` hints).
             let candidate = found[pr.id]?.candidate
             let hints = [file.link(for: pr.repo, number: pr.number)?.cwd, candidate?.workDir, candidate?.launchDir].compactMap { $0 }
-            let plan = try LaunchPlanner.plan(a, pr: pr, event: event, account: login, runID: UUID().uuidString,
+            var plan = try LaunchPlanner.plan(a, pr: pr, event: event, account: login, runID: UUID().uuidString,
                                               runsDir: AgentLauncher.runsDir, home: NSHomeDirectory(), newSessionID: newID,
                                               folders: file.repoFolders, index: index, hints: hints, installed: { $0.isInstalled })
+            if auto { plan.focusRunning = nil }  // the user may be typing in it: `handle` turned a live one into an ask already
             let link = newID.map { SessionLink(pr: PRRef(repo: pr.repo, number: pr.number), agent: .claude, sessionID: $0, cwd: plan.cwd, setAt: t, source: "app", by: "") }
-            Task { record(a, await AgentLauncher.launch(plan), link, note) }
+            Task {
+                let launched = await AgentLauncher.launch(plan)
+                record(a, launched.error, link, note + launched.note)
+            }
         } catch {
             AgentLauncher.log.error("run not planned: \(error.localizedDescription, privacy: .public)")
             record(automation, error.localizedDescription, nil, "")

@@ -1,9 +1,5 @@
 import Foundation
 
-/// Status panel sections; a PR is in exactly one, checked in this order.
-/// Superseded by `Bucket`; goes with `isDone` / `group` once the 0.7.0 lists are built on `Attention.bucket`.
-public enum PRGroup: String, Sendable, CaseIterable { case mine, toReview, involved }
-
 /// Why a pull request or issue needs me, in priority order (`needReason`, `sorted`, `breakdown`); the raw value is the
 /// breakdown wording and the stored key, so it never changes.
 public enum NeedReason: String, Codable, Sendable, CaseIterable, CodingKeyRepresentable {
@@ -78,6 +74,63 @@ public enum Attention {
         return pr.myReview != nil || roles.contains(.reviewer) ? .reviewed : .watching
     }
 
+    /// A row's status chip: what the item waits on, in words (0.7.0 design §5.2). `symbol` is an SF Symbol name.
+    public struct Lead: Equatable, Sendable {
+        public enum Tone: Sendable { case needsYou, good, bad, merged, neutral }
+        public var text: String, symbol: String, tone: Tone
+    }
+
+    /// The status chip of an item's bucket; nil for open issues and Watching (their other chips say enough).
+    public static func lead(_ pr: TrackedPR) -> Lead? {
+        let requester = pr.events.last { $0.kind == .reviewRequested && !$0.summary.hasPrefix("via team") }?.actor ?? pr.authorLogin
+        switch bucket(pr) {
+        case .review: return Lead(text: "Review requested by @\(requester)", symbol: "eye", tone: .needsYou)
+        case .reReview where pr.roles.contains(.reviewRequested):
+            return Lead(text: "Re-review requested by @\(requester)", symbol: "arrow.triangle.2.circlepath", tone: .needsYou)
+        case .reReview:
+            let pushes = pr.events.filter { $0.kind == .newCommits && $0.at > (pr.myReview?.submittedAt ?? .distantPast) }.count
+            return Lead(text: pushes == 0 ? "Re-review · updated since your review" : "Re-review · \(pushes) push\(pushes == 1 ? "" : "es") since your review",
+                        symbol: "arrow.triangle.2.circlepath", tone: .needsYou)
+        case .teamReview:
+            return Lead(text: pr.requestedTeams.first.map { "Requested from team \($0)" } ?? "Requested from your team", symbol: "person.3", tone: .neutral)
+        case .reviewed:
+            let since = movedSinceMyReview(pr) ? " · updated since" : ""
+            switch pr.myReview?.state {
+            case "APPROVED": return Lead(text: "You approved" + since, symbol: "checkmark.circle", tone: .good)
+            case "CHANGES_REQUESTED":
+                return Lead(text: "You requested changes · waiting on @\(pr.authorLogin)" + since, symbol: "exclamationmark.bubble", tone: .neutral)
+            case "DISMISSED": return Lead(text: "Your review was dismissed" + since, symbol: "hand.raised.slash", tone: .neutral)
+            case "COMMENTED": return Lead(text: "You commented" + since, symbol: "text.bubble", tone: .neutral)
+            default: return Lead(text: "You reviewed", symbol: "text.bubble", tone: .neutral)
+            }
+        case .fix:
+            if decision(pr) == "CHANGES_REQUESTED" {
+                let by = pr.reviewers.first { $0.state == "CHANGES_REQUESTED" }.map { " by @\($0.login)" } ?? ""
+                return Lead(text: "Changes requested" + by, symbol: "exclamationmark.bubble", tone: .bad)
+            }
+            if pr.ci == .failure {
+                let check = pr.checks.first { $0.state == .failure }.map { ": \($0.name)" } ?? ""
+                return Lead(text: "CI failed" + check, symbol: "xmark.circle", tone: .bad)
+            }
+            return pr.mergeState == "DIRTY" ? Lead(text: "Conflicts with base", symbol: "exclamationmark.triangle", tone: .bad)
+                : Lead(text: "Behind base: update branch", symbol: "arrow.down.circle", tone: .bad)
+        case .merge: return Lead(text: "Approved · Ready to merge", symbol: "checkmark.circle", tone: .good)
+        case .waitingReview:
+            if decision(pr) == "APPROVED" { return Lead(text: "Approved · not mergeable yet", symbol: "clock", tone: .neutral) }
+            let waiting = pr.reviewers.filter(\.requested).map { "@\($0.login)" } + pr.requestedTeams.map { "@\($0)" }
+            return Lead(text: waiting.isEmpty ? "Waiting for review" : "Waiting on " + waiting.joined(separator: ", "), symbol: "clock", tone: .neutral)
+        case .waitingCI: return Lead(text: "CI running", symbol: "circle.dotted", tone: .neutral)
+        case .waitingMerge: return Lead(text: "Auto-merge on", symbol: "arrow.triangle.merge", tone: .neutral)
+        case .draft: return Lead(text: "Draft", symbol: "circle.dashed", tone: .neutral)
+        case .closed:
+            if pr.state == .merged { return Lead(text: "Merged", symbol: "arrow.triangle.merge", tone: .merged) }
+            if pr.isIssue && pr.stateReason == "COMPLETED" { return Lead(text: "Completed", symbol: "checkmark.circle", tone: .merged) }
+            if pr.isIssue && pr.stateReason == "NOT_PLANNED" { return Lead(text: "Not planned", symbol: "slash.circle", tone: .neutral) }
+            return Lead(text: "Closed", symbol: "xmark.circle", tone: .neutral)
+        case .issueAssigned, .issueMine, .issueMentioned, .watching: return nil
+        }
+    }
+
     /// Why an open, shown, unmuted item needs me, from its bucket, plus unread mentions, assignments and (my pull requests and
     /// issues, or issues assigned to me) unread comments or reviews. Only reasons in `counting` (Settings > General) apply;
     /// the first match in `NeedReason` order wins, so each item counts once.
@@ -115,7 +168,7 @@ public enum Attention {
         case .mentioned: [.mentioned]
         case .assigned: [.assigned]
         case .newComments: [.comment, .reviewApproved, .reviewChangesRequested, .reviewCommented]
-        case .readyToMerge: [.reviewApproved, .ciPassed]
+        case .readyToMerge: [.reviewApproved, .ciPassed, .readyToMerge]
         }
         return pr.events.filter { kinds.contains($0.kind) }.map(\.at).max()
     }
@@ -143,15 +196,6 @@ public enum Attention {
         }
     }
 
-    /// Nothing left for me: merged or closed, or open and not mine, not assigned to me, no review asked of me or my team,
-    /// nothing unread. Ignores the badge settings, so a switched-off reason never moves a request into Done.
-    /// Superseded by `bucket` (no Done group in 0.7.0).
-    public static func isDone(_ pr: TrackedPR) -> Bool {
-        guard pr.state == .open else { return true }
-        return pr.roles.isDisjoint(with: [.author, .assigned, .reviewRequested, .teamReviewRequested])
-            && unread(pr) == 0 && !awaitingMyReview(pr)
-    }
-
     /// Latest of updated, closed and the newest event.
     public static func lastActivity(_ pr: TrackedPR) -> Date {
         max(pr.updatedAt, pr.closedAt ?? .distantPast, pr.events.map(\.at).max() ?? .distantPast)
@@ -172,11 +216,5 @@ public enum Attention {
             return (a.pr.number, a.pr.id) > (b.pr.number, b.pr.id)  // id: a stable order when numbers tie across repos
         }
         .map(\.pr)
-    }
-
-    /// Superseded by `bucket`.
-    public static func group(_ pr: TrackedPR) -> PRGroup {
-        if pr.roles.contains(.author) { return .mine }
-        return awaitingMyReview(pr) ? .toReview : .involved
     }
 }

@@ -55,6 +55,7 @@ extension EventKind {
         case .labeled: ("changed labels", "tag", Theme.neutral)
         case .reviewReminder: ("reminder", "bell.badge", Theme.needsYou)
         case .conflicts: ("Conflicts with base", "exclamationmark.triangle", Theme.bad)
+        case .readyToMerge: ("Ready to merge", "checkmark.circle", Theme.good)
         }
     }
 
@@ -81,32 +82,70 @@ struct Chip: View {
     }
 }
 
+extension Attention.Lead.Tone {
+    var color: Color {
+        switch self {
+        case .needsYou: Theme.needsYou
+        case .good: Theme.good
+        case .bad: Theme.bad
+        case .merged: Theme.merged
+        case .neutral: Theme.neutral
+        }
+    }
+}
+
 extension TrackedPR {
-    /// Issue, state, review decision, CI and muted chips, in reading order. Pull requests carry no kind chip.
+    /// Issue, the status chip of its bucket (`Attention.lead`), Draft, CI and Muted, in reading order.
     var chips: [Chip] {
         var chips: [Chip] = []
         if isIssue { chips.append(Chip(text: "Issue", symbol: "smallcircle.filled.circle")) }
-        switch state {
-        case .merged: chips.append(Chip(text: "Merged", symbol: "arrow.triangle.merge", tint: Theme.merged))
-        case .closed where isIssue && stateReason == "COMPLETED": chips.append(Chip(text: "Completed", symbol: "checkmark.circle", tint: Theme.merged))
-        case .closed where isIssue && stateReason == "NOT_PLANNED": chips.append(Chip(text: "Not planned", symbol: "slash.circle"))
-        case .closed: chips.append(Chip(text: "Closed", symbol: "xmark.circle"))
-        case .open: if isDraft { chips.append(Chip(text: "Draft", symbol: "circle.dashed")) }
-        }
-        switch reviewDecision {
-        case "APPROVED": chips.append(Chip(text: "Approved", symbol: "checkmark.circle", tint: Theme.good))
-        case "CHANGES_REQUESTED": chips.append(Chip(text: "Changes requested", symbol: "exclamationmark.bubble", tint: Theme.bad))
-        case "REVIEW_REQUIRED" where state == .open: chips.append(Chip(text: "Review required", symbol: "eye"))
-        default: break
-        }
-        switch ci {
-        case .success: chips.append(Chip(text: "CI passed", symbol: "checkmark.circle", tint: Theme.good))
-        case .failure: chips.append(Chip(text: "CI failed", symbol: "xmark.circle", tint: Theme.bad))
-        case .pending: chips.append(Chip(text: "CI running", symbol: "circle.dotted", tint: Theme.needsYou))
-        case .none: break
+        let lead = Attention.lead(self)
+        if let lead { chips.append(Chip(text: lead.text, symbol: lead.symbol, tint: lead.tone.color)) }
+        if state == .open && isDraft && Attention.bucket(self) != .draft { chips.append(Chip(text: "Draft", symbol: "circle.dashed")) }
+        if state == .open && !(lead?.text.hasPrefix("CI") ?? false) {  // the status chip may already be about CI
+            switch ci {
+            case .success: chips.append(Chip(text: "CI passed", symbol: "checkmark.circle", tint: Theme.good))
+            case .failure: chips.append(Chip(text: "CI failed", symbol: "xmark.circle", tint: Theme.bad))
+            case .pending: chips.append(Chip(text: "CI running", symbol: "circle.dotted", tint: Theme.needsYou))
+            case .none: break
+            }
         }
         if muted { chips.append(Chip(text: "Muted", symbol: "bell.slash")) }
         return chips
+    }
+}
+
+extension NeedReason {
+    /// A notification panel's title: what the event asks of me.
+    var panelTitle: String {
+        switch self {
+        case .toReview: "Review requested"
+        case .reReview: "Re-review needed"
+        case .changesRequested: "Changes requested"
+        case .ciFailed: "CI failed"
+        case .conflicts: "Conflicts with base"
+        case .mentioned: "Mentioned"
+        case .assigned: "Assigned to you"
+        case .newComments: "New comments"
+        case .readyToMerge: "Ready to merge"
+        case .teamToReview: "Team review requested"
+        }
+    }
+
+    /// A notification panel's symbol and hue: amber for a turn, red for something broken, green for ready.
+    var look: (symbol: String, hue: Color) {
+        switch self {
+        case .toReview: ("eye", Theme.needsYou)
+        case .reReview: ("arrow.triangle.2.circlepath", Theme.needsYou)
+        case .teamToReview: ("person.3", Theme.needsYou)
+        case .changesRequested: ("exclamationmark.bubble", Theme.bad)
+        case .ciFailed: ("xmark.octagon", Theme.bad)
+        case .conflicts: ("exclamationmark.triangle", Theme.bad)
+        case .mentioned: ("at", Theme.needsYou)
+        case .assigned: ("person.crop.circle.badge.checkmark", Theme.needsYou)
+        case .newComments: ("bubble.left", Theme.needsYou)
+        case .readyToMerge: ("checkmark.circle", Theme.good)
+        }
     }
 }
 

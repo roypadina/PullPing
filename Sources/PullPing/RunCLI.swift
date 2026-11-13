@@ -7,9 +7,10 @@ enum RunCLI {
     static func run(_ args: [String], env: [String: String]) async -> (output: String, error: String, status: Int32) {
         let store = AutomationStore(url: AutomationStore.defaultURL, repair: false), now = Date()
         let handoff = args.first == "session"
-        let request: RunRequest
+        var request: RunRequest
         do {
-            request = handoff ? try AutomationCLI.prepareHandlerRun(Array(args.dropFirst(2)), store: store, state: trackedState(env), env: env, now: now)
+            request = handoff ? try AutomationCLI.prepareHandlerRun(Array(args.dropFirst(2)), store: store, state: trackedState(env), env: env, now: now,
+                                                                     focusRunning: { AgentLauncher.focusRunning(sessionID: $0.sessionID, agent: $0.agent) })
                 : try AutomationCLI.prepareRun(Array(args.dropFirst()), store: store, state: trackedState(env), env: env, now: now)
         } catch {
             return AutomationCLI.outcome(error, group: handoff ? "session" : "run")
@@ -27,7 +28,9 @@ enum RunCLI {
                                               runsDir: AgentLauncher.runsDir, home: NSHomeDirectory(), newSessionID: request.newSessionID,
                                               folders: request.folders, hints: request.hints, installed: { $0.isInstalled })
             if request.dryRun { return (AutomationCLI.dryRun(plan, json: request.json), "", 0) }
-            return finish(await AgentLauncher.launch(plan), cwd: plan.cwd)
+            let launched = request.focused ? AgentLauncher.draft(plan) : await AgentLauncher.launch(plan)
+            request.note += launched.note
+            return finish(launched.error, cwd: plan.cwd)
         } catch {
             if request.dryRun { return ("", "pullping: \(error.localizedDescription)", 1) }
             return finish(error.localizedDescription)

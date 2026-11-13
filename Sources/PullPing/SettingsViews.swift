@@ -231,9 +231,7 @@ struct AddAccountSheet: View {
 
 struct NotificationsTab: View {
     @Bindable var store: Store
-    static let height: CGFloat = 640  // plan height; the 18-row table scrolls
-    private static let kinds = EventKind.allCases.filter { $0 != .reviewReminder }
-    private static let column: CGFloat = 112
+    static let height: CGFloat = 820  // the whole tab, no scrolling
 
     var body: some View {
         Form {
@@ -254,23 +252,17 @@ struct NotificationsTab: View {
                 }
             }
             Section {
-                ForEach(Self.kinds, id: \.self) { kind in
-                    LabeledContent(kind.label) {
-                        HStack(spacing: 8) {
-                            stylePicker(kind, mine: true)
-                            stylePicker(kind, mine: false)
-                        }
+                ForEach(NeedReason.notifyOrder, id: \.self) { reason in
+                    Picker(reason.notifyLabel, selection: Binding(get: { store.settings.needStyle(reason) }, set: { store.settings.needStyles[reason] = $0 })) {
+                        Text("Off").tag(NotificationStyle.off)
+                        Text("Banner").tag(NotificationStyle.banner)
+                        Text("Alert").tag(NotificationStyle.alert)
                     }
                 }
             } header: {
-                HStack(spacing: 8) {
-                    Text("Notify Me About")
-                    Spacer()
-                    Text("Mine").frame(width: Self.column, alignment: .trailing)
-                    Text("Others").frame(width: Self.column, alignment: .trailing)
-                }
+                Text("Notify Me When")
             } footer: {
-                Text("Mine: pull requests and issues you opened. Others: ones you review, are assigned to, are mentioned in or comment on. A banner hides after a few seconds; an alert stays until you act on it.").formFooter()
+                Text("A notification means something needs you. Everything else (merges, CI passed, new commits, labels…) is listed in Activity without a notification. A banner hides after a few seconds; an alert stays until you act on it.").formFooter()
             }
             .disabled(!store.settings.notificationsEnabled)
             Section {
@@ -280,24 +272,11 @@ struct NotificationsTab: View {
             } header: {
                 Text("Review Reminders")
             } footer: {
-                Text("Repeats until you review, the request is removed, or the pull request is merged or closed.").formFooter()
+                Text("For reviews and re-reviews asked of you (team requests while their notification is on). Repeats until you review, the request is removed, or the pull request is merged or closed.").formFooter()
             }
             .disabled(!store.settings.notificationsEnabled)
         }
         .formStyle(.grouped)
-    }
-
-    private func stylePicker(_ kind: EventKind, mine: Bool) -> some View {
-        Picker("\(kind.label), \(mine ? "mine" : "others")", selection: Binding(
-            get: { store.settings.style(for: kind, mine: mine) },
-            set: { if mine { store.settings.styles[kind] = $0 } else { store.settings.otherStyles[kind] = $0 } })) {
-            Text("Off").tag(NotificationStyle.off)
-            Text("Banner").tag(NotificationStyle.banner)
-            Text("Alert").tag(NotificationStyle.alert)
-        }
-        .labelsHidden()
-        .fixedSize()
-        .frame(width: Self.column, alignment: .trailing)
     }
 }
 
@@ -467,6 +446,26 @@ struct GeneralTab: View {
 }
 
 extension NeedReason {
+    /// Settings > Notifications, in this order (0.7.0 design §4.2).
+    static let notifyOrder: [NeedReason] = [.toReview, .reReview, .teamToReview, .changesRequested, .ciFailed, .conflicts, .mentioned, .assigned,
+                                            .newComments, .readyToMerge]
+
+    /// Settings > Notifications.
+    var notifyLabel: String {
+        switch self {
+        case .toReview: "Review requested"
+        case .reReview: "Re-review: requested again or updated"
+        case .teamToReview: "Team review requested"
+        case .changesRequested: "Changes requested on your pull request"
+        case .ciFailed: "CI failed on your pull request"
+        case .conflicts: "Conflicts on your pull request"
+        case .mentioned: "Mentioned"
+        case .assigned: "Assigned to you"
+        case .newComments: "New comments on your pull requests and issues"
+        case .readyToMerge: "Your pull request is ready to merge"
+        }
+    }
+
     /// Settings > General > Count in the Menu Bar.
     var settingsLabel: String {
         switch self {
@@ -538,7 +537,7 @@ struct AutomationsTab: View {
                 Text("Handle with Agent")
             } footer: {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Adds a Handle with Agent button to the notifications you pick in Edit… and to the pull request's menu. When an agent has linked its session to the pull request (`pullping session set`, or one PullPing started), the button becomes Resume Session and New Session.").formFooter()
+                    Text("Adds a Handle with Agent button to the notifications you pick in Edit… and to the pull request's menu. When an agent has linked its session to the pull request (`pullping session set`, or one PullPing started), the button becomes Resume Session and New Session. In Ghostex, Resume Session focuses the session when it is already open there; other apps always open a new window.").formFooter()
                     Text("When a pull request has no linked session, PullPing searches your local Claude Code and Codex transcripts (`~/.claude/projects`, `~/.codex/sessions`) for the pull request's URL or branch. Only file names and folders are read into PullPing; nothing leaves your Mac.").formFooter()
                 }
             }

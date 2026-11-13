@@ -267,6 +267,32 @@ final class EventEngineTests: XCTestCase {
         XCTAssertEqual(diff(tracked(conflicted("ccc3333")), conflicted("ccc3333")).events.filter { $0.kind == .conflicts }, [])
     }
 
+    /// CI passed (or the approval came) while mergeStateStatus was still UNKNOWN: Ready to merge fires once it resolves.
+    func testReadyToMergeWhenMergeStateResolves() {
+        func mine(_ ci: CIState, _ mergeState: String, head: String = "aaa1111") -> PRSnapshot {
+            var s = snap(author: me, head: head, ci: ci)
+            s.reviewDecision = "APPROVED"
+            s.mergeState = mergeState
+            s.autoMerge = false
+            return s
+        }
+        var pr = tracked(mine(.pending, "UNKNOWN"))
+        var events: [PREvent]
+        (pr, events) = diff(pr, mine(.success, "UNKNOWN"))
+        XCTAssertEqual(events.map(\.kind), [.ciPassed])
+        XCTAssertNil(Notify.reason(events[0], pr: pr), "not mergeable yet: Activity only")
+        (pr, events) = diff(pr, mine(.success, "CLEAN"))
+        XCTAssertEqual(events.map(\.id), ["ready:aaa1111"])
+        XCTAssertEqual(events.first.map { [$0.kind.label, $0.actor] }, ["Ready to merge", "CI"])
+        XCTAssertEqual(Notify.reason(events[0], pr: pr), .readyToMerge)
+        XCTAssertEqual(diff(pr, mine(.success, "CLEAN")).events, [], "once")
+        // CI passing straight into a clean state says it itself: no second event.
+        (pr, events) = diff(pr, mine(.pending, "UNKNOWN", head: "bbb2222"))
+        (pr, events) = diff(pr, mine(.success, "CLEAN", head: "bbb2222"))
+        XCTAssertEqual(events.map(\.kind), [.ciPassed])
+        XCTAssertEqual(Notify.reason(events[0], pr: pr), .readyToMerge)
+    }
+
     func testReviewTurnFieldsAreCopied() {
         var s = snap()
         s.myReview = MyReview(state: "APPROVED", commitOID: "aaa1111", submittedAt: t0)

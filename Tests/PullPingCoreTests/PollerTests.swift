@@ -41,7 +41,7 @@ final class PollerTests: XCTestCase {
         XCTAssertEqual([first.stats.changed, first.stats.new, first.stats.batches, first.stats.refreshed], [2, 2, 1, 2])
         XCTAssertEqual(store.state.prs["PR_2"]?.roles, [.reviewRequested])
         XCTAssertEqual(store.state.prs["PR_1"]?.lastReadAt, t0)  // baseline = read
-        XCTAssertEqual(Attention.group(store.state.prs["PR_2"]!), .toReview)
+        XCTAssertEqual(Attention.bucket(store.state.prs["PR_2"]!), .review)
 
         // alice comments on PR_2; PR_1 is unchanged but its CI is still pending.
         clock.now = t0.addingTimeInterval(180)

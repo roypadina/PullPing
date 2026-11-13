@@ -41,8 +41,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated { Self.store?.setPaused(false) }
         }
         // First launch only (MBX-18); smoke mode never gets here.
-        guard !UserDefaults.standard.bool(forKey: DefaultsKey.didShowWelcome) else { return }
+        guard !UserDefaults.standard.bool(forKey: DefaultsKey.didShowWelcome) else { return WelcomeWindow.showWhatsNewOnce() }
         UserDefaults.standard.set(true, forKey: DefaultsKey.didShowWelcome)
+        UserDefaults.standard.set(true, forKey: DefaultsKey.didShowWhatsNew070)  // the welcome already describes 0.7
         WelcomeWindow.show()
     }
 

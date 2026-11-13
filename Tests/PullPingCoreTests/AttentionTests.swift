@@ -43,15 +43,6 @@ final class AttentionTests: XCTestCase {
         XCTAssertEqual(Attention.badgeCount(prs, enabledAccounts: [work, home]), 2)
     }
 
-    func testGroups() {
-        XCTAssertEqual(Attention.group(pr(roles: [.author, .reviewRequested])), .mine)
-        XCTAssertEqual(Attention.group(pr(roles: [.reviewRequested])), .toReview)
-        XCTAssertEqual(Attention.group(pr(roles: [.commenter])), .involved)
-        var draft = pr(roles: [.reviewRequested])
-        draft.isDraft = true
-        XCTAssertEqual(Attention.group(draft), .involved)
-    }
-
     func testNeedsMeAndBreakdown() {
         var review = pr("R", roles: [.reviewRequested])
         XCTAssertEqual(Attention.needReason(review), .toReview)
@@ -115,7 +106,7 @@ final class AttentionTests: XCTestCase {
         XCTAssertEqual(Attention.needReason(assignedPR), .assigned)
         assigned.lastReadAt = t0
         XCTAssertNil(Attention.needReason(assigned))
-        XCTAssertFalse(Attention.isDone(assigned))
+        XCTAssertEqual(Attention.bucket(assigned), .issueAssigned)
 
         // New comments by others: my issue, or an issue assigned to me; not a pull request I'm only assigned to.
         XCTAssertEqual(Attention.needReason(issue([.author], [.comment])), .newComments)
@@ -126,30 +117,8 @@ final class AttentionTests: XCTestCase {
 
         var involved = issue([.commenter], [.comment])
         involved.lastReadAt = t0
-        XCTAssertTrue(Attention.isDone(involved))
+        XCTAssertNil(Attention.needReason(involved))
         XCTAssertEqual(Attention.breakdown([pr("R", roles: [.reviewRequested]), issue([.assigned], [.assigned])]), "1 to review · 1 assigned")
-    }
-
-    func testIsDone() {
-        var merged = pr(roles: [.author])
-        merged.state = .merged
-        XCTAssertTrue(Attention.isDone(merged))
-        var closed = pr(roles: [.reviewRequested], events: [(t0, false)])
-        closed.state = .closed
-        XCTAssertTrue(Attention.isDone(closed))
-
-        var reviewed = pr(roles: [.reviewer], events: [(t0, true), (t0.addingTimeInterval(10), false)])
-        reviewed.lastReadAt = t0.addingTimeInterval(10)
-        XCTAssertTrue(Attention.isDone(reviewed))  // others' PR, reviewed, all read
-        reviewed.events.append(PREvent(id: "new", prID: "PR_1", kind: .comment, actor: "bob", at: t0.addingTimeInterval(20), summary: "", url: nil, isOwn: false))
-        XCTAssertFalse(Attention.isDone(reviewed))  // an unread comment keeps it active
-
-        XCTAssertFalse(Attention.isDone(pr(roles: [.author])))  // my open PR
-        XCTAssertFalse(Attention.isDone(pr(roles: [.assigned])))
-        XCTAssertFalse(Attention.isDone(pr(roles: [.teamReviewRequested])))
-        var draft = pr(roles: [.reviewRequested])
-        draft.isDraft = true
-        XCTAssertFalse(Attention.isDone(draft))  // a request stays active even while the PR is a draft
     }
 
     func testSortedOrder() {

@@ -6,10 +6,10 @@ import SwiftUI
 struct StatusPanelView: View {
     let store: Store
     @State private var selection: String?
-    @State private var showHidden = false
-    @State private var showDone = false
+    /// Collapsed groups the user opened (Waiting on Others, Reviewed, Drafts), by title.
+    @State private var opened: Set<String> = []
     @FocusState private var listFocused: Bool
-    @AppStorage(DefaultsKey.panelFilter) private var filter = Filter.inbox
+    @AppStorage(DefaultsKey.panelFilter) private var filter = Filter.needsMe
     /// Account id, empty = All Accounts; `Store.panelScope` resolves it.
     @AppStorage(DefaultsKey.panelAccount) private var account = ""
 
@@ -29,6 +29,7 @@ struct StatusPanelView: View {
             HStack {
                 Button("Open Window") { MainWindow.shared.show() }
                 Spacer()
+                Button("Activity") { MainWindow.shared.showActivity() }
             }
             .padding(10)
         }
@@ -48,24 +49,16 @@ struct StatusPanelView: View {
                     }
                     .font(.caption).foregroundStyle(.secondary)
                     if !store.breakdown.isEmpty {
-                        Text(store.breakdown).font(.caption).foregroundStyle(Theme.needsYou).lineLimit(2)
+                        Text(store.breakdown).font(.caption).foregroundStyle(Theme.needsYou).lineLimit(3)
                     }
                 }
                 Spacer()
-                buttons
-            }
-            HStack(spacing: 8) {
-                if store.accounts.count > 1 {
-                    // Segments while they fit the 380 pt panel; a menu once names get long (no header overflow).
-                    ViewThatFits(in: .horizontal) {
-                        scopePicker(scope).pickerStyle(.segmented)
-                        scopePicker(scope).pickerStyle(.menu).fixedSize()
-                    }
-                }
-                Spacer(minLength: 0)
+                // In the title row (design §5.3), so the account segments get the whole row below.
                 Menu {  // a Menu, not a menu Picker: that one is as wide as its longest item
                     Picker("Filter", selection: $filter) {
-                        ForEach(Filter.allCases, id: \.self) { Label($0.title, systemImage: $0.symbol).tag($0) }
+                        ForEach(Filter.allCases.filter { $0 != .issues || store.settings.trackIssues }, id: \.self) {
+                            Label($0.title, systemImage: $0.symbol).tag($0)
+                        }
                     }
                     .pickerStyle(.inline)
                     .labelsHidden()
@@ -75,6 +68,14 @@ struct StatusPanelView: View {
                 .menuStyle(.borderlessButton)
                 .fixedSize()
                 .help("Filter")
+                buttons
+            }
+            if store.accounts.count > 1 {
+                // Segments while they fit the 380 pt panel; a menu once names get long (no header overflow).
+                ViewThatFits(in: .horizontal) {
+                    scopePicker(scope).pickerStyle(.segmented)
+                    scopePicker(scope).pickerStyle(.menu).fixedSize()
+                }
             }
         }
         .padding(12)
@@ -132,24 +133,36 @@ struct StatusPanelView: View {
         .help("More: Open Window, Pause Notifications, Settings, Quit")
     }
 
+    /// The filter's sections; Needs Me adds what waits on others and what I reviewed, collapsed.
     @ViewBuilder private func content(_ scope: Scope) -> some View {
-        let prs = store.prs(scope, filter)
-        let done = filter.splitsDone ? prs.filter(Attention.isDone) : []
-        let active = filter.splitsDone ? prs.filter { !Attention.isDone($0) } : prs
-        let hidden = filter == .hidden ? [] : store.prs(scope, .hidden)
-        if prs.isEmpty && hidden.isEmpty {
-            EmptyState(store: store, filter: filter).frame(maxWidth: .infinity, maxHeight: .infinity)
+        let sections = filter.sections(store.prs(scope, filter)) + (filter == .needsMe ? [
+            ListSection(title: "Waiting on Others", prs: Filter.myPRs.sections(store.prs(scope, .myPRs)).first { $0.title == "Waiting on Others" }?.prs ?? [], collapsed: true),
+            ListSection(title: "Reviewed", prs: Filter.reviews.sections(store.prs(scope, .reviews)).first { $0.title == "Reviewed" }?.prs ?? [], collapsed: true),
+        ].filter { !$0.prs.isEmpty } : [])
+        let ids = sections.flatMap(\.prs).map(\.id)
+        if ids.isEmpty {
+            EmptyState(store: store, filter: filter, scope: scope).frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             List(selection: $selection) {
-                if active.isEmpty && !done.isEmpty {
-                    EmptyState(store: store, filter: filter, done: true).frame(maxWidth: .infinity).padding(.vertical, 16)
+                if !sections.contains(where: { !$0.collapsed }) {  // Needs Me is empty: say so above the collapsed groups
+                    EmptyState(store: store, filter: filter, scope: scope).frame(maxWidth: .infinity).padding(.vertical, 16)
                 }
-                PRRows(store: store, prs: active, sectioned: filter == .inbox)
-                collapsed("Done", done, $showDone)
-                collapsed("Hidden", hidden, $showHidden)
+                ForEach(sections, id: \.title) { section in
+                    if section.title.isEmpty {
+                        PRRows(store: store, prs: section.prs)
+                    } else if section.collapsed {
+                        Section(isExpanded: Binding(get: { opened.contains(section.title) }, set: { _ in opened.formSymmetricDifference([section.title]) })) {
+                            PRRows(store: store, prs: section.prs)
+                        } header: {
+                            Text("\(section.title) (\(section.prs.count))")
+                        }
+                    } else {
+                        Section(section.title) { PRRows(store: store, prs: section.prs) }
+                    }
+                }
             }
             .listStyle(.sidebar)
-            .onChange(of: (prs + hidden).map(\.id)) { _, ids in  // never act on a row the list no longer shows
+            .onChange(of: ids) { _, ids in  // never act on a row the list no longer shows
                 if let selection, !ids.contains(selection) { self.selection = nil }
             }
             .focused($listFocused)
@@ -164,17 +177,6 @@ struct StatusPanelView: View {
                 return .handled
             }
             .onAppear { listFocused = true }
-        }
-    }
-
-    /// "Done (3)", "Hidden (2)": collapsed until opened; nothing when empty.
-    @ViewBuilder private func collapsed(_ title: String, _ prs: [TrackedPR], _ isExpanded: Binding<Bool>) -> some View {
-        if !prs.isEmpty {
-            Section(isExpanded: isExpanded) {
-                PRRows(store: store, prs: prs, sectioned: false)
-            } header: {
-                Text("\(title) (\(prs.count))")
-            }
         }
     }
 }

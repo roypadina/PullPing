@@ -158,8 +158,10 @@ public enum DefaultsKey {
     /// Status panel: last filter and account (empty = All Accounts).
     public static let panelFilter = "panelFilter"
     public static let panelAccount = "panelAccount"
-    /// Main window: the Done section is expanded.
-    public static let showDone = "showDone"
+    /// Main window › Activity: entries after this date are new (sidebar dot, New section).
+    public static let activitySeenAt = "activitySeenAt"
+    /// The one-time "what changed in 0.7" note was shown (or the welcome window was).
+    public static let didShowWhatsNew070 = "didShowWhatsNew070"
 }
 
 extension Account {

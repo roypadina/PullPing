@@ -70,14 +70,24 @@ struct SidebarView: View {
         }
     }
 
+    /// Issues only while tracked; Muted & Hidden only when it holds something.
     @ViewBuilder private func rows(_ scope: Scope) -> some View {
-        ForEach(Filter.allCases, id: \.self) { filter in
+        ForEach(Filter.allCases.filter { shown($0, scope) }, id: \.self) { filter in
             Label(filter.title, systemImage: filter.symbol)
                 .badge(store.count(scope, filter))
                 .tag(SidebarItem(scope: scope, filter: filter))
         }
         Label("Activity", systemImage: "clock.arrow.circlepath")
-            .tag(SidebarItem(scope: scope, filter: .all, activity: true))
+            .badge(store.hasNewActivity(scope) ? Text(verbatim: "●").accessibilityLabel("New activity") : nil)
+            .tag(SidebarItem(scope: scope, filter: .needsMe, activity: true))
+    }
+
+    private func shown(_ filter: Filter, _ scope: Scope) -> Bool {
+        switch filter {
+        case .issues: store.settings.trackIssues
+        case .mutedHidden: !store.prs(scope, .mutedHidden).isEmpty
+        default: true
+        }
     }
 
     private func header(_ account: Account) -> some View {
@@ -113,44 +123,51 @@ struct Avatar: View {
 struct PRListView: View {
     @Bindable var store: Store
     @Binding var query: String
-    @AppStorage(DefaultsKey.showDone) private var showDone = true
+    /// Collapsed sections (Drafts) the user opened, by title.
+    @State private var opened: Set<String> = []
 
-    private var rows: [TrackedPR] {
+    /// The selected row's sections; while searching, every row's items under their row's name.
+    private var sections: [ListSection] {
         let item = store.listSelection
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        return store.prs(item.scope, item.filter).filter { pr in
-            q.isEmpty || "\(pr.repo) #\(pr.number) \(pr.title) \(pr.authorLogin)".lowercased().contains(q)
+        guard !q.isEmpty else { return item.filter.sections(store.prs(item.scope, item.filter)) }
+        let hits = store.prs.filter { pr in
+            item.scope.matches(pr) && "\(pr.repo) #\(pr.number) \(pr.title) \(pr.authorLogin)".lowercased().contains(q)
         }
+        let byRow = Dictionary(grouping: hits, by: Filter.home)
+        return Filter.allCases.compactMap { row in byRow[row].map { ListSection(title: row.title, prs: $0) } }
     }
 
     var body: some View {
-        let rows = rows
+        let sections = sections
         let filter = store.listSelection.filter
-        let done = filter.splitsDone ? rows.filter(Attention.isDone) : []
-        let active = filter.splitsDone ? rows.filter { !Attention.isDone($0) } : rows
+        let ids = sections.flatMap(\.prs).map(\.id)
         List(selection: $store.selectedID) {
             ForEach(store.errorAccounts) { account in  // FLW-17: inline, with the fix one click away
                 AccountErrorRow(account: account, status: store.statuses[account.id] ?? .ok)
             }
-            if active.isEmpty && !done.isEmpty && query.isEmpty {
-                EmptyState(store: store, filter: filter, done: true).frame(maxWidth: .infinity).padding(.vertical, 24)
-            }
-            PRRows(store: store, prs: active, sectioned: filter == .inbox)
-            if !done.isEmpty {
-                // This list style draws no disclosure for collapsible sections, so the header is the toggle.
-                Section(isExpanded: $showDone) {
-                    PRRows(store: store, prs: done, sectioned: false)
-                } header: {
-                    Button { showDone.toggle() } label: {
-                        Label("Done (\(done.count))", systemImage: showDone ? "chevron.down" : "chevron.right")
-                            .contentShape(Rectangle())
+            ForEach(sections, id: \.title) { section in
+                if section.title.isEmpty {
+                    PRRows(store: store, prs: section.prs)
+                } else if section.collapsed {
+                    let open = opened.contains(section.title)
+                    // This list style draws no disclosure for collapsible sections, so the header is the toggle.
+                    Section(isExpanded: Binding(get: { open }, set: { _ in opened.formSymmetricDifference([section.title]) })) {
+                        PRRows(store: store, prs: section.prs)
+                    } header: {
+                        Button { opened.formSymmetricDifference([section.title]) } label: {
+                            Label("\(section.title) (\(section.prs.count))", systemImage: open ? "chevron.down" : "chevron.right")
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityValue(open ? "Expanded" : "Collapsed")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityValue(showDone ? "Expanded" : "Collapsed")
+                } else {
+                    Section("\(section.title) (\(section.prs.count))") { PRRows(store: store, prs: section.prs) }
                 }
             }
         }
-        .onChange(of: rows.map(\.id), initial: true) { _, ids in  // the detail never shows a row the list doesn't
+        .onChange(of: ids, initial: true) { _, ids in  // the detail never shows a row the list doesn't
             if let id = store.selectedID, !ids.contains(id) { store.selectedID = nil }
         }
         .contextMenu(forSelectionType: String.self) { ids in
@@ -159,11 +176,11 @@ struct PRListView: View {
             ids.forEach(store.open)
         }
         .overlay {
-            if rows.isEmpty {
+            if ids.isEmpty {
                 if !query.isEmpty {
                     ContentUnavailableView.search(text: query)
                 } else {
-                    EmptyState(store: store, filter: filter)
+                    EmptyState(store: store, filter: filter, scope: store.listSelection.scope)
                 }
             }
         }
@@ -174,7 +191,7 @@ struct PRListView: View {
                     .frame(maxWidth: .infinity).padding(6).background(.bar)
             }
         }
-        .searchable(text: $query, prompt: "Search pull requests")
+        .searchable(text: $query, prompt: "Search all pull requests")
         .toolbar {
             ToolbarItem {
                 Button("Refresh", systemImage: "arrow.clockwise") { store.refresh() }
@@ -203,18 +220,14 @@ struct AccountErrorRow: View {
     }
 }
 
-/// Empty states (FLW-14): no accounts, first sync, nothing tracked.
+/// Empty states (FLW-14): no accounts, first sync, nothing in this row.
 struct EmptyState: View {
     let store: Store
-    var filter: Filter = .all
-    /// The list has only Done pull requests (shown below this).
-    var done = false
+    var filter: Filter = .needsMe
+    var scope: Scope = .all
 
     var body: some View {
-        if done {
-            ContentUnavailableView("Nothing Needs You", systemImage: "checkmark.circle",
-                                   description: Text("Pull requests with nothing left for you are in Done."))
-        } else if store.accounts.isEmpty {
+        if store.accounts.isEmpty {
             ContentUnavailableView {
                 Label("No Accounts", systemImage: "person.crop.circle.badge.plus")
             } description: {
@@ -224,36 +237,24 @@ struct EmptyState: View {
             }
         } else if let first = store.firstSync.first {
             ProgressView { Text(verbatim: "Syncing \(first.displayName)…") }
-        } else if filter == .all || filter == .inbox {
-            ContentUnavailableView("No Pull Requests", systemImage: "arrow.triangle.pull",
-                                   description: Text("Pull requests you open, review or comment on appear here."))
+        } else if filter == .needsMe {
+            let waiting = store.prs(scope, .myPRs).filter { [.waitingReview, .waitingCI, .waitingMerge].contains(Attention.bucket($0)) }.count
+            ContentUnavailableView("Nothing Needs You", systemImage: "checkmark.circle",
+                                   description: Text(waiting == 0 ? "Reviews to do and your pull requests to fix or merge appear here."
+                                                     : "\(waiting) of your pull requests \(waiting == 1 ? "is" : "are") waiting on others."))
         } else {
-            ContentUnavailableView("No Pull Requests", systemImage: filter.symbol,
+            ContentUnavailableView("Nothing Here", systemImage: filter.symbol,
                                    description: Text("Nothing in \(filter.title) right now."))
         }
     }
 }
 
-/// List rows; `sectioned` groups them Mine · To Review · Involved (the Inbox filter).
+/// List rows of one section.
 struct PRRows: View {
     let store: Store
     let prs: [TrackedPR]
-    let sectioned: Bool
 
     var body: some View {
-        if sectioned {
-            ForEach(PRGroup.allCases, id: \.self) { group in
-                let rows = prs.filter { Attention.group($0) == group }
-                if !rows.isEmpty {
-                    Section(group.title) { rowViews(rows) }
-                }
-            }
-        } else {
-            rowViews(prs)
-        }
-    }
-
-    private func rowViews(_ prs: [TrackedPR]) -> some View {
         ForEach(prs) { pr in
             PRRow(pr: pr, account: store.login(for: pr), now: store.now).tag(pr.id)
         }
@@ -382,7 +383,9 @@ struct PRDetailView: View {
                     }
                     ForEach(pr.reviewers, id: \.login) { reviewer in
                         let look = Self.review(reviewer)
-                        LabeledContent { Chip(text: look.word, symbol: look.symbol, tint: look.tint) } label: { Text(verbatim: "@\(reviewer.login)") }
+                        // An older commit than the head: the review predates the latest push.
+                        let on = reviewer.commitOID.flatMap { $0 == pr.headOID || reviewer.requested ? nil : " on \($0.prefix(7))" } ?? ""
+                        LabeledContent { Chip(text: look.word + on, symbol: look.symbol, tint: look.tint) } label: { Text(verbatim: "@\(reviewer.login)") }
                     }
                     ForEach(pr.requestedTeams, id: \.self) { team in
                         LabeledContent { Chip(text: "Requested", symbol: "clock", tint: Theme.needsYou) } label: { Text(verbatim: "team/\(team)") }
@@ -465,10 +468,13 @@ struct PRDetailView: View {
             }
             Text(pr.title).font(.title2.bold()).textSelection(.enabled)
             Text(verbatim: "by @\(pr.authorLogin)").foregroundStyle(.secondary)
+            if let reason = Attention.needReason(pr, counting: store.settings.badgeReasons) {
+                Label("Your turn: \(reason.panelTitle)", systemImage: "hand.point.right").foregroundStyle(Theme.needsYou)
+            }
             HStack(spacing: 4) {
-                if pr.state == .open && !pr.isDraft { Chip(text: "Open", symbol: "circle.circle", tint: Theme.good) }
                 ForEach(Array(pr.chips.enumerated()), id: \.offset) { $0.element }
-                if pr.state == .open, let merge = Self.mergeWord(pr.mergeState) {
+                // My pull requests' status chip already says conflicts, behind or ready.
+                if pr.state == .open, !pr.roles.contains(.author), let merge = Self.mergeWord(pr.mergeState) {
                     Chip(text: merge.word, symbol: merge.symbol, tint: merge.tint)
                 }
             }

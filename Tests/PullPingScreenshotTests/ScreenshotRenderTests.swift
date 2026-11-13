@@ -81,7 +81,7 @@ final class ScreenshotRenderTests: XCTestCase {
         try render(RuleEditorSheet(store: store, rule: review), size: NSSize(width: 560, height: 672), dark: false, scrollToEnd: true,
                    to: URL(fileURLWithPath: dir).appendingPathComponent("rule-editor.png"))
         let pr = { store.tracked.prs[$0]! }
-        let handle = PanelModel(pr: pr("PR_5"), events: pr("PR_5").events, alert: false, account: "@dana-work",
+        let handle = PanelModel(pr: pr("PR_9"), events: Array(pr("PR_9").events.suffix(1)), alert: false, account: "@dana",
                                 actions: [PanelAction(id: Automation.handlerID, title: "Handle with Agent") {}])
         let resume = PanelModel(pr: pr("PR_2"), events: Array(pr("PR_2").events.prefix(1)), alert: false, account: "@dana",
                                 actions: [PanelAction(id: Automation.handlerResumeActionID, title: "Resume Session") {},
@@ -106,6 +106,55 @@ final class ScreenshotRenderTests: XCTestCase {
         XCTAssertFalse(store.activity.isEmpty)
         try render(ActivityView(store: store, query: .constant(""), selection: .constant(nil)), size: NSSize(width: 460, height: 620), dark: false,
                    to: URL(fileURLWithPath: dir).appendingPathComponent("activity.png"))
+    }
+
+    /// Every sidebar row's sections from the fixtures (one pull request per bucket), and the Notifications table's reasons.
+    func test_sections() {
+        let store = Fixtures.sampleStore()
+        func sections(_ filter: Filter) -> [String] {
+            filter.sections(store.prs(.all, filter)).map { "\($0.title): " + $0.prs.map(\.id).joined(separator: " ") }
+        }
+        XCTAssertEqual(sections(.needsMe), ["To Review: PR_3 PR_9 PR_13", "Your Pull Requests: PR_2 PR_1", "Mentions & Assigned: PR_15 I_1"])
+        XCTAssertEqual(sections(.myPRs), ["Your Turn: PR_2 PR_1", "Waiting on Others: PR_11 PR_12 PR_10", "Drafts: PR_4"])
+        XCTAssertEqual(sections(.reviews), ["Needs Your Review: PR_3 PR_9", "Team Requests: PR_13", "Reviewed: PR_8 PR_14"])
+        XCTAssertEqual(sections(.issues), ["Assigned to Me: I_4", "Opened by Me: I_1"])
+        XCTAssertEqual(sections(.watching), [": PR_15 PR_5 PR_6"])
+        XCTAssertEqual(sections(.closed), [": I_2 I_3 PR_7"])
+        XCTAssertEqual(sections(.mutedHidden), ["Muted: PR_6", "Hidden: PR_16"])
+        XCTAssertTrue(Filter.myPRs.sections(store.prs(.all, .myPRs)).last!.collapsed, "Drafts start collapsed")
+        XCTAssertEqual([store.count(.all, .needsMe), store.count(.all, .myPRs), store.count(.all, .reviews), store.count(.all, .watching)], [7, 2, 3, 0])
+        XCTAssertEqual(Set(NeedReason.notifyOrder), Set(NeedReason.allCases))
+    }
+
+    /// Dev-only review sheets (not docs): every row's list, the whole status panel, a panel per reason, Activity.
+    /// RENDER_REVIEW=<dir> swift test --filter ScreenshotRenderTests/test_renderReview
+    func test_renderReview() throws {
+        guard let dir = ProcessInfo.processInfo.environment["RENDER_REVIEW"] else { throw XCTSkip("set RENDER_REVIEW=<dir> to render") }
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let store = Fixtures.sampleStore()
+        func save(_ name: String, _ view: some View, _ size: NSSize) throws {
+            try render(view, size: size, dark: false, to: URL(fileURLWithPath: dir).appendingPathComponent("\(name).png"))
+        }
+        for filter in Filter.allCases {
+            store.selection = SidebarItem(scope: .all, filter: filter)
+            try save("list-\(filter.rawValue)", PRListView(store: store, query: .constant("")), NSSize(width: 460, height: 1100))
+        }
+        store.selection = nil
+        try render(StatusPanelView(store: store), size: NSSize(width: 380, height: 520), dark: false, scrollToEnd: true,
+                   to: URL(fileURLWithPath: dir).appendingPathComponent("status-panel-end.png"))
+        let pr = { store.tracked.prs[$0]! }
+        let panels = VStack(spacing: 10) {
+            ForEach(["PR_9", "PR_3", "PR_13", "PR_15", "PR_1", "I_4"], id: \.self) { id in
+                self.panel(PanelModel(pr: pr(id), events: Array(pr(id).events.suffix(1)), alert: true, account: "@dana"))
+            }
+        }
+        try save("panels", panels, NSSize(width: Theme.panelWidth + 40, height: (Theme.panelHeight + 50) * 6))
+        try save("note", panel({ let m = PanelModel(pr: pr("PR_1"), events: [], alert: true, account: nil, actions: [PanelAction(id: UUID(), title: "Notification Settings") {}]); m.note = ("New in PullPing 0.7",
+            "Lists sort by whose turn it is: Needs Me first. A notification now means something needs you; merges, CI passes and other updates are listed in Activity."); return m }()),
+                 NSSize(width: Theme.panelWidth + 40, height: Theme.panelHeight + 40))
+        store.activityLog.flush()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        try save("activity-tall", ActivityView(store: store, query: .constant(""), selection: .constant(nil)), NSSize(width: 460, height: 1100))
     }
 
     /// The panel on a plain backdrop with room for its edge.

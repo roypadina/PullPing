@@ -191,6 +191,34 @@ final class LaunchPlannerTests: XCTestCase {
         XCTAssertNil(GhostexProjects.pick(Data("not json".utf8), cwd: "/x"))
     }
 
+    /// Ghostex: focus the new session by its ref; a resume focuses the running copy and types the draft line; argv only.
+    func testGhostexFocusAndReuse() throws {
+        // create-session's result shape (ghostex-control reference, Ghostex 11.5): `{ok, session: {projectId, sessionId, globalRef?, …}, provider}`.
+        let created = #"{"ok":true,"session":{"projectId":"P1","sessionId":"G7","globalRef":"S1:P1:G7","title":"PullPing: octo-org/widgets #12"},"provider":"zmx"}"#
+        XCTAssertEqual(GhostexSessions.globalRef(Data(created.utf8)), "S1:P1:G7")
+        XCTAssertNil(GhostexSessions.globalRef(Data(#"{"ok":true,"session":{"projectId":"P1","sessionId":"G7"}}"#.utf8)), "no ref: not focused")
+        XCTAssertNil(GhostexSessions.globalRef(Data(#"{"session":{"globalRef":"S1;rm -rf ~"}}"#.utf8)), "not a plain ref")
+        XCTAssertNil(GhostexSessions.globalRef(Data(#"{"session":{"globalRef":"\#(String(repeating: "a", count: 65))"}}"#.utf8)))
+        XCTAssertNil(GhostexSessions.globalRef(Data("Created session".utf8)))
+        XCTAssertEqual(GhostexSessions.focus(globalRef: "S1:P1:G7"), ["focus", "S1:P1:G7"])
+
+        // `focus --if-running --json`: the miss case checked on a Mac with Ghostex 11.5 (2026-11-13); the hit is `focused: true`.
+        XCTAssertFalse(GhostexSessions.focused(Data(#"{"focused": false, "ok": true, "reason": "notRunning"}"#.utf8)))
+        XCTAssertTrue(GhostexSessions.focused(Data(#"{"focused": true, "ok": true}"#.utf8)))
+        XCTAssertFalse(GhostexSessions.focused(Data("".utf8)))
+        let sessions = #"{"ok":true,"sessions":[{"globalRef":"S1:P1:G2","agentName":"claude","agentSessionId":"0f3c2a1e-5b7d-4c9e-8a10-2b4d6f8e1c3a"},{"globalRef":"S1:P1:G3"}]}"#
+        XCTAssertTrue(GhostexSessions.running(Data(sessions.utf8), sessionID: "0f3c2a1e-5b7d-4c9e-8a10-2b4d6f8e1c3a"))
+        XCTAssertFalse(GhostexSessions.running(Data(sessions.utf8), sessionID: "other"))
+        XCTAssertEqual(GhostexSessions.shell(["focus", "a b"]), ["-lc", "ghostex \"$@\"", "zsh", "focus", "a b"])
+
+        let resume = try plan(automation(session: "0f3c2a1e-5b7d-4c9e-8a10-2b4d6f8e1c3a", launcher: .ghostex))
+        XCTAssertEqual(resume.focusRunning, ["focus", "--agent-session-id", "0f3c2a1e-5b7d-4c9e-8a10-2b4d6f8e1c3a", "--agent", "claude", "--if-running", "--json"])
+        XCTAssertEqual(resume.draftLine, ["send-text", "0f3c2a1e-5b7d-4c9e-8a10-2b4d6f8e1c3a", "Read /tmp/pp runs/RUN.prompt.md and act on it."])
+        XCTAssertEqual(try plan(automation(agent: .codex, session: "thread-1", launcher: .ghostex)).focusRunning?[4], "codex")
+        XCTAssertNil(try plan(automation(launcher: .ghostex)).focusRunning, "a new session has nothing to reuse")
+        XCTAssertNil(try plan(automation(session: "0f3c2a1e-5b7d-4c9e-8a10-2b4d6f8e1c3a")).focusRunning, "Terminal can't find a window")
+    }
+
     func testLaunchLines() throws {
         XCTAssertEqual(try plan(automation(launcher: .terminal)).launchLine, "open -a Terminal '/tmp/pp runs/RUN.command'")
         let ghostex = try plan(automation(launcher: .ghostex))

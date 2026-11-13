@@ -129,16 +129,17 @@ public struct ActivityEntry: Codable, Sendable, Equatable {
         error = value(.error)
     }
 
-    /// "Review approved · alice", "Ran Fix CI", "Failed: Fix CI": the app row and `pullping activity`.
+    /// "Review approved · alice", "Ran Fix CI", "Failed: Fix CI", "Asked: Fix CI": the app row and `pullping activity`.
     public var what: String {
-        guard kind == .event else { return (ok == false ? "Failed: " : "Ran ") + (automation ?? "") }
+        guard kind == .event else { return (ok == false ? "Failed: " : ok == nil ? "Asked: " : "Ran ") + (automation ?? "") }
         let label = event?.label ?? ""
         return actor.map { $0.isEmpty || $0 == "CI" ? label : "\(label) · \($0)" } ?? label
     }
 
-    /// "banner, phone", "not shown: muted", "OK", "failed: <error>".
+    /// "banner, phone", "not shown: muted", "OK", "failed: <error>"; a run not started (`ok` nil): why, e.g. "session is running in
+    /// Ghostex: asked instead".
     public var outcome: String {
-        guard kind == .event else { return ok == false ? "failed: \(error ?? "")" : "OK" }
+        guard kind == .event else { return ok == false ? "failed: \(error ?? "")" : ok == nil ? error ?? "" : "OK" }
         let panel = quiet.map { "not shown: \($0.label)" } ?? self.panel?.rawValue ?? "not shown"
         return phone == true ? "\(panel), phone" : panel
     }

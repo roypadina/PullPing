@@ -127,6 +127,12 @@ public enum EventEngine {
         pr.autoMerge = s.autoMerge
         pr.updatedAt = s.updatedAt
         pr.closedAt = s.closedAt
+        // Ready to merge with no event of its own: mergeStateStatus was still UNKNOWN when CI passed or the approval came (GitHub
+        // computes it lazily), or a blocking review went away. Not when this refresh's CI or approval event already says it.
+        if let old, Attention.bucket(old) != .merge, Attention.bucket(pr) == .merge,
+           !events.contains(where: { [.ciPassed, .reviewApproved].contains($0.kind) && !$0.isOwn }) {
+            add("ready:\(s.headOID)", .readyToMerge, "CI", now, "", s.url, silent: false)
+        }
         pr.lastSeenAt = ([pr.lastSeenAt, s.updatedAt] + nodes.map(\.at)).max()!
         pr.seenEventIDs = Array(pr.seenEventIDs.suffix(seenCap))
         pr.events = Array((pr.events + events).suffix(eventCap))

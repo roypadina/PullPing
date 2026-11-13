@@ -195,7 +195,7 @@ extension KeyedDecodingContainer {
 public enum EventKind: String, Codable, Sendable, CaseIterable, CodingKeyRepresentable {
     case comment, mentioned, reviewApproved, reviewChangesRequested, reviewCommented, reviewRequested, assigned, newCommits,
          ciPassed, ciFailed, readyForReview, convertedToDraft, merged, closed, reopened, reviewDismissed, retitled, labeled, reviewReminder,
-         conflicts
+         conflicts, readyToMerge
 }
 
 extension EventKind {
@@ -222,12 +222,13 @@ extension EventKind {
         case .labeled: "Labels changed"
         case .reviewReminder: "Reminder: review requested"
         case .conflicts: "Conflicts"
+        case .readyToMerge: "Ready to merge"
         }
     }
 }
 
 public struct PREvent: Identifiable, Codable, Sendable, Equatable {
-    /// GitHub node id, or "ci:<oid>:<state>", "head:<oid>", "conflict:<oid>", "rr:<login>:<date>", "assign:<login>:<date>", "reminder:<date>".
+    /// GitHub node id, or "ci:<oid>:<state>", "head:<oid>", "conflict:<oid>", "ready:<oid>", "rr:<login>:<date>", "assign:<login>:<date>", "reminder:<date>".
     /// Unique per PR only: key lists that mix PRs by `prID` + `id`.
     public let id: String
     public var prID: String

@@ -973,6 +973,19 @@ final class AutomationCLITests: XCTestCase {
         try transcript(sid, [#"{"cwd":"/x"}"#], age: 40)
         XCTAssertEqual(resumeError(), "pullping: Session 1a2b3c4d… appears to be open in another terminal (changed 40 s ago); continue there, or add --force")
         XCTAssertNoThrow(try resume(["--force"]).get())
+        // Open in Ghostex: focused there instead of refused (the closure focuses); not running there: refused as before.
+        store.mutate { $0.handler.launcher = .ghostex }
+        var focusedIDs: [String] = []
+        let pr12 = ["--pr", "https://github.com/octo-org/widgets/pull/12"]
+        let focused = try AutomationCLI.prepareHandlerRun(pr12, store: store, state: tracked, env: env, now: t0) { focusedIDs.append($0.sessionID); return true }
+        XCTAssertTrue(focused.focused)
+        XCTAssertEqual(focusedIDs, [sid])
+        XCTAssertThrowsError(try AutomationCLI.prepareHandlerRun(pr12, store: store, state: tracked, env: env, now: t0) { _ in false })
+        var done = focused
+        done.note += GhostexSessions.focusedNote
+        XCTAssertEqual(AutomationCLI.finishRun(done, runID: "R1", error: nil, store: store, now: t0).output,
+                       "Focused claude 1a2b3c4d… in Ghostex; its input holds a line pointing at the prompt: press Return there.")
+        store.mutate { $0.handler.launcher = .terminal; $0.runs = [] }
         // the caller's own session: never, not even with --force
         XCTAssertEqual(resumeError(["--force"], env: ["CLAUDE_CODE_SESSION_ID": sid]), "pullping: Session 1a2b3c4d… is this session; continue here")
         try transcript(sid, [#"{"cwd":"/x"}"#], age: 600)

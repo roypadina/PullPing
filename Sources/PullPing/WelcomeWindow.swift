@@ -1,3 +1,4 @@
+import PullPingCore
 import ServiceManagement
 import SwiftUI
 
@@ -25,6 +26,17 @@ enum WelcomeWindow {
         }
         if let window { AccessoryWindows.shared.show(window) }
     }
+
+    /// Once, after an update to 0.7 (a first launch gets the welcome instead): lists and notifications changed.
+    static func showWhatsNewOnce() {
+        guard !UserDefaults.standard.bool(forKey: DefaultsKey.didShowWhatsNew070) else { return }
+        UserDefaults.standard.set(true, forKey: DefaultsKey.didShowWhatsNew070)
+        let id = UUID(uuidString: "0D7A0000-0000-4000-8000-000000000070")!
+        NotificationPanels.shared.show(
+            note: "Lists sort by whose turn it is: Needs Me first. A notification now means something needs you; merges, CI passes and other updates are listed in Activity.",
+            title: "New in PullPing 0.7", id: id,
+            actions: [PanelAction(id: id, title: "Notification Settings") { SettingsWindow.shared.show(tab: "Notifications") }])
+    }
 }
 
 struct WelcomeView: View {
@@ -42,9 +54,9 @@ struct WelcomeView: View {
                 }
             }
             row("arrow.triangle.pull", "PullPing lives in the menu bar.",
-                "Click its icon for your pull requests: Mine, To Review and Involved. A number shows how many need you.")
+                "Click its icon for what needs you: reviews to do, your pull requests to fix or merge. A number shows how many.")
             row("bell.badge", "Notifications stay out of your way.",
-                "A small panel appears at the top right when a pull request needs you. Click it to open the pull request.")
+                "A small panel appears at the top right only when something needs you. Everything else is listed in Activity.")
             row("questionmark.circle", "Icon missing?",
                 "Open PullPing again from Applications to get the window, or check System Settings > Menu Bar.")
             LaunchAtLoginToggle()

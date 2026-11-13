@@ -2,31 +2,53 @@ import AppKit
 import PullPingCore
 import SwiftUI
 
-/// Main window › Activity: what PullPing saw and did, newest first by day: every event (shown or not, and why), reminder and
-/// run of the sidebar scope. A row shows its pull request in the detail column; double-click or Return opens it in the browser.
+/// Activity's filters: everything, entries that asked something of me (a notify reason), my pull requests, reviews, runs.
+enum ActivityFilter: String, CaseIterable {
+    case all = "All", needsMe = "Needs Me", mine = "My PRs", reviews = "Reviews", runs = "Runs"
+}
+
+/// Main window › Activity: a read-only log of what PullPing saw and did, newest first, entries since the last visit under New,
+/// the rest by day: every event (notified or not, and why), reminder and run of the sidebar scope. A row shows its pull request
+/// in the detail column; double-click or Return opens it in the browser.
 struct ActivityView: View {
     let store: Store
     @Binding var query: String
     /// An index into `store.activity`, which is oldest first, so new entries don't move it.
     @Binding var selection: Int?
+    @State private var filter = ActivityFilter.all
+    /// `store.activitySeenAt` when the feed opened: what counts as new while it stays open.
+    @State private var seenAt: Date?
 
-    /// Newest day first; rows newest first.
-    private var days: [(day: Date, rows: [Int])] {
+    /// New first, then by day, newest first; rows newest first.
+    private var days: [(title: String, rows: [Int])] {
         let scope = store.listSelection.scope
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         let rows = store.activity.indices.reversed().filter { i in
             let e = store.activity[i]
-            return scope.matches(e) && (q.isEmpty || "\(e.repo) #\(e.number) \(e.title) \(e.actor ?? "") \(e.automation ?? "")".lowercased().contains(q))
+            return scope.matches(e) && matches(e) && (q.isEmpty || "\(e.repo) #\(e.number) \(e.title) \(e.actor ?? "") \(e.automation ?? "")".lowercased().contains(q))
         }
-        return Dictionary(grouping: rows) { Calendar.current.startOfDay(for: store.activity[$0].at) }
-            .sorted { $0.key > $1.key }.map { ($0.key, $0.value) }
+        let seen = seenAt ?? store.activitySeenAt
+        let new = rows.filter { store.activity[$0].at > seen }
+        return (new.isEmpty ? [] : [("New", new)]) + Dictionary(grouping: rows.filter { store.activity[$0].at <= seen }) { Calendar.current.startOfDay(for: store.activity[$0].at) }
+            .sorted { $0.key > $1.key }.map { (Self.title($0.key), $0.value) }
+    }
+
+    private func matches(_ e: ActivityEntry) -> Bool {
+        let pr = e.prID.flatMap { store.tracked.prs[$0] }
+        switch filter {
+        case .all: return true
+        case .needsMe: return e.need != nil
+        case .mine: return pr?.roles.contains(.author) ?? false
+        case .reviews: return [.toReview, .reReview, .teamToReview].contains(e.need) || pr.map { Filter.home($0) == .reviews } ?? false
+        case .runs: return e.kind != .event
+        }
     }
 
     var body: some View {
         let days = days
         List(selection: $selection) {
-            ForEach(days, id: \.day) { day in
-                Section(Self.title(day.day)) {
+            ForEach(days, id: \.title) { day in
+                Section(day.title) {
                     ForEach(day.rows, id: \.self) { i in
                         let entry = store.activity[i]
                         ActivityEntryRow(entry: entry, account: store.multiAccount ? entry.accountID.flatMap(store.account)?.displayName ?? "@\(entry.account)" : nil)
@@ -35,9 +57,24 @@ struct ActivityView: View {
                 }
             }
         }
+        .safeAreaInset(edge: .top) {
+            Picker("Show", selection: $filter) {
+                ForEach(ActivityFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 12).padding(.vertical, 6)
+        }
         .onChange(of: selection) { _, i in store.selectedID = i.flatMap(pr)?.id }
         .contextMenu(forSelectionType: Int.self) { rows in
-            if !rows.isEmpty { Button("Open in Browser") { rows.forEach(open) } }
+            if !rows.isEmpty {
+                Button("Open in Browser") { rows.forEach(open) }
+                Button("Copy Link") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(rows.sorted().compactMap { store.activity.indices.contains($0) ? store.activity[$0].url?.absoluteString : nil }
+                        .joined(separator: "\n"), forType: .string)
+                }
+            }
         } primaryAction: { rows in
             rows.forEach(open)
         }
@@ -46,7 +83,7 @@ struct ActivityView: View {
                 if !query.isEmpty {
                     ContentUnavailableView.search(text: query)
                 } else {
-                    ContentUnavailableView("No Activity Yet", systemImage: "clock.arrow.circlepath",
+                    ContentUnavailableView("No Activity", systemImage: "clock.arrow.circlepath",
                                            description: Text("Every event PullPing sees appears here, notified or not, with every automation run. Kept for \(store.settings.activityDays) days."))
                 }
             }
@@ -54,8 +91,12 @@ struct ActivityView: View {
         .searchable(text: $query, prompt: "Search activity")
         .task {
             selection = nil  // indices shift when the log is compacted
+            seenAt = store.activitySeenAt
             store.compactActivity()
         }
+        // Seen once left: another row, or the window in the background.
+        .onDisappear { store.activitySeenAt = Date() }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in store.activitySeenAt = Date() }
     }
 
     /// The row's pull request while PullPing still tracks it.
@@ -77,7 +118,7 @@ struct ActivityView: View {
     }
 }
 
-/// Kind icon, title and time; repo #n and what happened; badges for what PullPing did.
+/// Kind icon, title and time; repo #n, who did what and the summary; chips for what PullPing did (no buttons: a log).
 struct ActivityEntryRow: View {
     let entry: ActivityEntry
     /// Only with more than one account.
@@ -92,10 +133,14 @@ struct ActivityEntryRow: View {
                     Spacer(minLength: 4)
                     Text(entry.at, format: .dateTime.hour().minute()).font(.caption).foregroundStyle(.secondary).monospacedDigit()
                 }
-                Text(verbatim: detail).font(.caption).foregroundStyle(.secondary).lineLimit(1).help(entry.error ?? "")
-                HStack(spacing: 4) {
-                    ForEach(Array(badges.enumerated()), id: \.offset) { $0.element }
-                    if let account { Chip(text: account, symbol: "person.crop.circle") }
+                Text(verbatim: detail).font(.caption).foregroundStyle(.secondary).lineLimit(1).help(entry.error ?? entry.summary ?? "")
+                let chips = chips
+                if !chips.isEmpty || account != nil || quiet != nil {
+                    HStack(spacing: 4) {
+                        ForEach(Array(chips.enumerated()), id: \.offset) { $0.element }
+                        if let account { Chip(text: account, symbol: "person.crop.circle") }
+                        if let quiet { Text(verbatim: quiet).font(.caption).foregroundStyle(.secondary) }
+                    }
                 }
             }
         }
@@ -103,11 +148,13 @@ struct ActivityEntryRow: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// Events: "octo-org/widgets #12 · Review approved · alice". Runs: the error, else the event that started it.
+    /// Events: "octo-org/widgets #12 · alice approved · Looks good". Runs: the error, else the event that started it.
     private var detail: String {
         let ref = "\(entry.repo) #\(entry.number)"
-        if entry.kind == .event { return "\(ref) · \(entry.what)" }
-        return (entry.error ?? entry.event?.label).map { "\(ref) · \($0)" } ?? ref
+        guard entry.kind == .event else { return (entry.error ?? entry.event?.label).map { "\(ref) · \($0)" } ?? ref }
+        let actor = entry.actor ?? ""
+        let line = entry.event.map { actor.isEmpty || actor == "CI" ? $0.verb : "\(actor) \($0.verb)" } ?? entry.what
+        return ([ref, line] + (entry.summary.map { [$0] } ?? [])).joined(separator: " · ")
     }
 
     private var symbol: String {
@@ -119,17 +166,25 @@ struct ActivityEntryRow: View {
     }
 
     private var hue: Color {
-        if entry.kind != .event { return entry.ok == false ? Theme.bad : Theme.good }
+        if entry.kind != .event { return entry.ok == false ? Theme.bad : entry.ok == nil ? Theme.needsYou : Theme.good }
         return entry.quiet == nil ? entry.event?.hue ?? Theme.neutral : Theme.neutral
     }
 
-    private var badges: [Chip] {
+    /// Notified (a panel showed), Phone, and a run's outcome.
+    private var chips: [Chip] {
         guard entry.kind == .event else {
-            return [entry.ok == false ? Chip(text: entry.what, symbol: "xmark.octagon", tint: Theme.bad) : Chip(text: entry.what, symbol: "play.circle", tint: Theme.good)]
+            if entry.ok == false { return [Chip(text: entry.what, symbol: "xmark.octagon", tint: Theme.bad)] }
+            return [entry.ok == nil ? Chip(text: entry.what, symbol: "questionmark.circle", tint: Theme.needsYou) : Chip(text: entry.what, symbol: "play.circle", tint: Theme.good)]
         }
-        var chips = [entry.quiet.map { Chip(text: "Not shown: \($0.label)", symbol: "bell.slash") }
-            ?? (entry.panel == .alert ? Chip(text: "Alert", symbol: "bell.badge", tint: Theme.needsYou) : Chip(text: "Banner", symbol: "bell"))]
+        var chips: [Chip] = []
+        if entry.quiet == nil && entry.panel != .notShown { chips.append(Chip(text: "Notified", symbol: "bell.badge", tint: Theme.needsYou)) }
         if entry.phone == true { chips.append(Chip(text: "Phone", symbol: "iphone")) }
         return chips
+    }
+
+    /// Why an event that asked something of me stayed quiet ("muted", "paused"…); nothing for what never notifies.
+    private var quiet: String? {
+        guard let quiet = entry.quiet, ![.own, .activityOnly, .styleOff].contains(quiet) else { return nil }
+        return "Not shown: \(quiet.label)"
     }
 }

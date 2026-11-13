@@ -20,6 +20,8 @@ public struct RunRequest: Sendable {
     public var note = ""
     /// `session resume`: Handle with Agent's Resume Session from the shell.
     public var handoff = false
+    /// `session resume` focused the session open in Ghostex: the run only writes the prompt and types the draft line.
+    public var focused = false
 }
 
 public enum AutomationCLI {
@@ -230,7 +232,8 @@ public enum AutomationCLI {
         resume: Resume Session from the shell. Starts Handle with Agent on the linked session, like the button:
         needs Run Automations and Handle with Agent on, a linked session whose transcript still exists, and
         PullPing tracking the pull request. Refuses a session whose transcript changed in the last 2 minutes (open
-        in another terminal; --force starts it anyway), the calling session itself (even with --force) and a second
+        in another terminal; --force starts it anyway; with Ghostex, one open there is focused instead and a line
+        pointing at the prompt is typed into it), the calling session itself (even with --force) and a second
         hand-off on the pull request within a minute. --prompt replaces the handler's prompt for this run; --by (default
         $CLAUDE_CODE_SESSION_ID) is shown in Recent Runs. After a hand-off, say "handed off to session <id>" and
         stop: never keep editing the same worktree.
@@ -721,8 +724,10 @@ public enum AutomationCLI {
 
     /// `session resume` (args after it): the panel's Resume Session from the shell, as a handler run with the same gates and
     /// ledger, one line each, in this order: Run Automations, Handle with Agent, a link, a tracked pull request, the transcript,
-    /// not open elsewhere (changed < 2 min; `--force`), no hand-off on this pull request in the last minute.
-    public static func prepareHandlerRun(_ args: [String], store: AutomationStore, state: TrackedState, env: [String: String], now: Date) throws -> RunRequest {
+    /// no hand-off on this pull request in the last minute, not open elsewhere (changed < 2 min; `--force`). With Ghostex as the
+    /// handler's app, an open session is focused there (`focusRunning`, true = focused) instead (`RunRequest.focused`).
+    public static func prepareHandlerRun(_ args: [String], store: AutomationStore, state: TrackedState, env: [String: String], now: Date,
+                                         focusRunning: (SessionLink) -> Bool = { _ in false }) throws -> RunRequest {
         let (parsed, flags, positional) = try parse(args, options: ["pr", "prompt", "prompt-file", "by"], flags: ["force", "json"])
         try noArguments(positional)
         var values = parsed
@@ -743,13 +748,17 @@ public enum AutomationCLI {
         let transcript = SessionFinder.transcript(agent: link.agent, sessionID: link.sessionID, env: env)
         if transcript == nil, link.agent == .claude, !ClaudeSessions.projectDirectories(env: env).isEmpty { throw LaunchError.sessionGone(link.sessionID) }
         let changed = transcript.flatMap { try? FileManager.default.attributesOfItem(atPath: $0)[.modificationDate] as? Date }
-        if !flags.contains("force"), let changed, now.timeIntervalSince(changed) < SessionFinder.openWithin {
-            throw Failure(message: "Session \(link.sessionID.prefix(8))… appears to be open in another terminal (changed \(max(0, Int(now.timeIntervalSince(changed)))) s ago); continue there, or add --force")
-        }
         // shortcut: a hand-off is a handler run labelled "(resume …)" (Store and finishRun both write it); a field on RunRecord if that label ever changes.
         if let last = file.runs.last(where: { $0.automationID == Automation.handlerID && $0.prID == pr.id && $0.ok && $0.label.contains(" (resume ") }),
            now.timeIntervalSince(last.at) < 60 {
             throw Failure(message: "Handed off \(max(0, Int(now.timeIntervalSince(last.at)))) s ago")
+        }
+        var focused = false
+        if !flags.contains("force"), let changed, now.timeIntervalSince(changed) < SessionFinder.openWithin {
+            guard file.handler.launcher == .ghostex, focusRunning(link) else {
+                throw Failure(message: "Session \(link.sessionID.prefix(8))… appears to be open in another terminal (changed \(max(0, Int(now.timeIntervalSince(changed)))) s ago); continue there, or add --force")
+            }
+            focused = true
         }
         var handler = file.handler
         handler.sessionID = Automation.linkedSession
@@ -757,7 +766,8 @@ public enum AutomationCLI {
         let resolved = try file.resolved(handler, repo: pr.repo, number: pr.number, headRef: pr.headRef, env: env)
         let by = PromptTemplate.clean(values["by"] ?? env["CLAUDE_CODE_SESSION_ID"] ?? "", max: 64)
         return RunRequest(automation: resolved.automation, pr: pr, eventID: "manual:\(now.ISO8601Format())", dryRun: false, json: flags.contains("json"),
-                          newSessionID: nil, folders: file.repoFolders, hints: [link.cwd], note: resolved.note + (by.isEmpty ? "" : " · by \(by)"), handoff: true)
+                          newSessionID: nil, folders: file.repoFolders, hints: [link.cwd], note: resolved.note + (by.isEmpty ? "" : " · by \(by)"), handoff: true,
+                          focused: focused)
     }
 
     /// Records the run as the app's Run menu does (Recent Runs, runs per pull request and the failure cap count it) and reports it.
@@ -775,7 +785,9 @@ public enum AutomationCLI {
         }
         var object: [String: Any] = ["ok": error == nil, "runID": runID, "automation": a.id.uuidString, "pr": "\(pr.repo)#\(pr.number)", "detail": detail]
         if request.handoff { object["session"] = a.sessionID ?? "" }
-        let started = request.handoff
+        let started = request.note.contains(GhostexSessions.focusedNote)
+            ? "Focused \(agentWord(a)) \((a.sessionID ?? "").prefix(8))… in \(a.launcher.title); its input holds a line pointing at the prompt: press Return there."
+            : request.handoff
             ? "Resumed \(agentWord(a)) \((a.sessionID ?? "").prefix(8))… on \(pr.repo) #\(pr.number) in \(a.launcher.title) (\(tilde(cwd ?? a.workingDirectory, home: NSHomeDirectory())))."
             : "Started \(a.name) on \(pr.repo) #\(pr.number) in \(a.launcher.title)."
         let output = request.json ? json(object) : error == nil ? started : ""
