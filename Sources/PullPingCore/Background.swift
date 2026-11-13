@@ -54,6 +54,9 @@ public struct BackgroundSettings: Codable, Sendable, Equatable {
     public var enabled = false
     /// Background runs per 24 hours, automatic and manual together.
     public var dailyCap = BackgroundSettings.defaultDailyCap
+    /// `pullping background on` turned it on, by this session (`$CLAUDE_CODE_SESSION_ID`, else ""): the app says so once
+    /// (a note and an Activity line), then clears it. nil: nothing to say.
+    public var turnedOnBy: String?
 
     public init() {}
 
@@ -62,6 +65,7 @@ public struct BackgroundSettings: Codable, Sendable, Equatable {
         enabled = (try? c.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
         let cap = (try? c.decodeIfPresent(Int.self, forKey: .dailyCap)) ?? Self.defaultDailyCap
         dailyCap = Self.dailyCapRange.contains(cap) ? cap : Self.defaultDailyCap
+        turnedOnBy = try? c.decodeIfPresent(String.self, forKey: .turnedOnBy)
     }
 }
 
@@ -261,7 +265,9 @@ public enum BackgroundPlanner {
     /// Claude: `--restricted` (no tool that runs commands or code, no WebFetch, file tools confined to the working directories,
     /// settings files ignored so a user allow rule such as `Bash(*)` cannot add anything, bypassPermissions refused) +
     /// `--tools Read,Grep,Glob` (the only built-in tools that exist in the session) + no MCP server (`--strict-mcp-config` with
-    /// an empty config, `--disallowedTools mcp__*`). Session persistence stays on: Open Session resumes it.
+    /// an empty config, `--disallowedTools mcp__*`) + `--safe-mode` (no CLAUDE.md, so the pull request branch's own one can't
+    /// arrive as project instructions; no hooks, skills or plugins; auth works as usual). Session persistence stays on: Open
+    /// Session resumes it.
     /// Codex (unreachable: `plan` refuses it, see `unsupported`) has no flag that removes its shell: `--sandbox read-only` (no
     /// writes, no network), no user config or rules (no MCP servers, no allow rules), web search off; its apps, plugins,
     /// multi-agent, browser and computer use stay on, which is why it is not used.
@@ -273,7 +279,7 @@ public enum BackgroundPlanner {
         switch agent {
         case .claude:
             return "\(exe) -p" + (sessionID.map { " --session-id \(q($0))" } ?? "") + " --output-format json --json-schema \(q(schema))"
-                + " --restricted --tools 'Read,Grep,Glob' --disallowedTools 'mcp__*' --strict-mcp-config --mcp-config '{\"mcpServers\":{}}'"
+                + " --restricted --safe-mode --tools 'Read,Grep,Glob' --disallowedTools 'mcp__*' --strict-mcp-config --mcp-config '{\"mcpServers\":{}}'"
                 + " --add-dir \(q(runDir)) \(io)"
         case .codex:
             return "\(exe) exec --sandbox read-only --ignore-user-config --ignore-rules -c 'web_search=\"disabled\"' --skip-git-repo-check --json"

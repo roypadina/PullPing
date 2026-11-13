@@ -153,6 +153,7 @@ struct ActivityEntryRow: View {
 
     /// Events: "octo-org/widgets #12 · alice approved · Looks good". Runs: the error, else the event that started it.
     private var detail: String {
+        guard entry.prID != nil else { return entry.summary ?? "" }  // a setting the command line changed
         let ref = "\(entry.repo) #\(entry.number)"
         guard entry.kind == .event else { return (entry.error ?? entry.event?.label).map { "\(ref) · \($0)" } ?? ref }
         let actor = entry.actor ?? ""

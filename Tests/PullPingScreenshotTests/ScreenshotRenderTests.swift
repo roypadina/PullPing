@@ -159,7 +159,7 @@ final class ScreenshotRenderTests: XCTestCase {
         try save("activity-tall", ActivityView(store: store, query: .constant(""), selection: .constant(nil)), NSSize(width: 460, height: 1100))
     }
 
-    /// Dev-only review sheets for 0.8 (targets, scenario prompts, the panel's chevron, the handler menu as listed text).
+    /// Dev-only review sheets for 0.7.0 (targets, scenario prompts, the panel's chevron, the handler menu as listed text).
     /// RENDER_REVIEW=<dir> swift test --filter ScreenshotRenderTests/test_renderAgentOptionsReview
     func test_renderAgentOptionsReview() throws {
         guard let dir = ProcessInfo.processInfo.environment["RENDER_REVIEW"] else { throw XCTSkip("set RENDER_REVIEW=<dir> to render") }

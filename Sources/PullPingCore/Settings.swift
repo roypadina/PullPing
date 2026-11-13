@@ -112,7 +112,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         result[.ciFailed] = m(.ciFailed)
         result[.mentioned] = stronger(m(.mentioned), o(.mentioned))
         result[.assigned] = stronger(m(.assigned), o(.assigned))
-        result[.newComments] = stronger(m(.comment), o(.comment))
+        result[.newComments] = stronger(m(.comment), m(.reviewCommented))  // fires on my pull requests only (`Notify.reason`)
         result[.readyToMerge] = stronger(m(.reviewApproved), m(.ciPassed))
         return result
     }
@@ -134,7 +134,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
             && (pr.roles.contains(.author) ? phoneMine : phoneOthers).contains(kind)
     }
 
-    /// `reviewReminder` follows the `reviewRequested` style. Phone push priority; panels use `needStyle` since 0.7.0.
+    /// The 0.6.x per-kind style, kept for a downgrade; `reviewReminder` follows `reviewRequested`. Panels and phone priority
+    /// use `needStyle` since 0.7.0.
     public func style(for kind: EventKind, mine: Bool) -> NotificationStyle {
         let kind = kind == .reviewReminder ? .reviewRequested : kind
         return (mine ? styles : otherStyles)[kind] ?? (mine ? Self.defaultStyles : Self.defaultOtherStyles)[kind] ?? .off

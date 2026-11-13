@@ -66,6 +66,9 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(s.needStyles, [.toReview: .off, .reReview: .off, .teamToReview: .off, .changesRequested: .banner, .ciFailed: .off,
                                       .conflicts: .banner, .mentioned: .banner, .assigned: .banner, .newComments: .alert, .readyToMerge: .off])
         XCTAssertEqual(s.badgeReasons, [.toReview, .ciFailed, .reReview, .conflicts])  // new reasons start counted
+        // New comments fire on my pull requests only: others' comment style doesn't turn it back on.
+        XCTAssertEqual(AppSettings.needStyles(mine: [.comment: .off, .reviewCommented: .off], others: [.comment: .alert])[.newComments], .off)
+        XCTAssertEqual(AppSettings.needStyles(mine: [.comment: .off, .reviewCommented: .alert], others: [:])[.newComments], .alert)
         var later = s
         later.badgeReasons.remove(.reReview)
         later.needStyles[.toReview] = .alert

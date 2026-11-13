@@ -3,7 +3,8 @@ import os
 import PullPingCore
 
 /// One background run's process. Foundation starts it in its own process group, so stopping it (Cancel, the 10-minute
-/// timeout, quitting PullPing) signals the shell, the agent and anything they started: TERM, then KILL after 5 seconds.
+/// timeout, quitting PullPing) signals the shell, the agent and anything they started: TERM, then KILL after 5 seconds
+/// (TERM only at quit: PullPing is gone before the KILL).
 final class BackgroundJob: @unchecked Sendable {
     let runID: String
     private let lock = NSLock()
@@ -70,6 +71,8 @@ enum BackgroundRunner {
             log.error("background run \(input.runID, privacy: .public) failed: \(message, privacy: .public)")
             return Outcome(status: .failed, error: message, sessionID: session, head: head)
         }
+        // The id names a folder: a hand-edited record with `../` must not create one outside `runs/`.
+        guard BackgroundDraft.url(runID: input.runID, runsDir: input.runsDir) != nil else { return failed("Not a plain run id (an edited record)") }
         do {
             try fm.createDirectory(at: input.runsDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             AgentLauncher.removeOldRuns()  // drafts live 7 days, like every run's files

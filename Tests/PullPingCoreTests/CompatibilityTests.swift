@@ -78,15 +78,15 @@ final class CompatibilityTests: XCTestCase {
         XCTAssertEqual(settings.style(for: .comment, mine: false), .off)  // kept for a downgrade and phone priority
     }
 
-    /// A 0.7 automations file shaped like a real one (handler in Ghostex with a wrapper, `{repo_root}`, its own prompt, Look
+    /// A 0.6.1 automations file shaped like a real one (handler in Ghostex with a wrapper, `{repo_root}`, its own prompt, Look
     /// for earlier sessions on, links and runs): it loads unchanged but for the new keys, and saves back the same.
-    func testV07AutomationsFileMigrates() throws {
+    func testV061AutomationsFileMigrates() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let url = dir.appendingPathComponent("automations.json")
-        try fixture("v07-automations").write(to: url)
-        let original = try XCTUnwrap(JSONSerialization.jsonObject(with: fixture("v07-automations")) as? [String: Any])
+        try fixture("v061-automations").write(to: url)
+        let original = try XCTUnwrap(JSONSerialization.jsonObject(with: fixture("v061-automations")) as? [String: Any])
         let store = AutomationStore(url: url)
         let file = store.load()
         XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent("automations.broken.json").path))

@@ -40,8 +40,17 @@ final class BackgroundCLITests: XCTestCase {
         XCTAssertEqual(run(["background", "set", "--daily-cap", "0"]).status, 2)
         XCTAssertEqual(run(["background", "set"]).status, 2)
         XCTAssertEqual(run(["background", "status", "--json"]).output.contains(#""dailyCap" : 5"#), true)
+        XCTAssertEqual(store.load().background.turnedOnBy, "", "the app says once that the command line turned it on")
         XCTAssertEqual(run(["background", "off"]).status, 0)
         XCTAssertFalse(store.load().background.enabled)
+        XCTAssertNil(store.load().background.turnedOnBy)
+        _ = AutomationCLI.run(["background", "on"], store: store, env: env.merging(["CLAUDE_CODE_SESSION_ID": "1a2b3c4d-session"]) { $1 }, now: t0)
+        XCTAssertEqual(store.load().background.turnedOnBy, "1a2b3c4d-session")
+        store.mutate { $0.background.turnedOnBy = nil }  // the app has said so
+        run(["background", "on"])
+        XCTAssertNil(store.load().background.turnedOnBy, "already on: nothing new to say")
+        let line = ActivityEntry(setting: "Background Runs", what: "Turned on", by: "1a2b", at: t0)
+        XCTAssertEqual([line.what, line.outcome, line.summary], ["Turned on", "OK", "From the command line (by 1a2b)"])
     }
 
     func testRunQueuesAndRefuses() throws {
@@ -85,7 +94,7 @@ final class BackgroundCLITests: XCTestCase {
         XCTAssertEqual(result.status, 0, result.error)
         XCTAssertTrue(result.output.contains("(not cloned here: the diff and discussion only)"), result.output)
         XCTAssertTrue(result.output.contains("command      \\claude -p --session-id '"), result.output)
-        XCTAssertTrue(result.output.contains("--restricted --tools 'Read,Grep,Glob' --disallowedTools 'mcp__*' --strict-mcp-config"), result.output)
+        XCTAssertTrue(result.output.contains("--restricted --safe-mode --tools 'Read,Grep,Glob' --disallowedTools 'mcp__*' --strict-mcp-config"), result.output)
         XCTAssertTrue(result.output.contains("  You run unattended on octo-org/widgets #7"), result.output)
         XCTAssertTrue(result.output.contains(Scenario.review.builtIn), result.output)
         XCTAssertEqual(runs.count, 0)

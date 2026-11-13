@@ -422,6 +422,21 @@ final class Store {
         automationFile = automationStore.load()
         now = Date()
         noticeCLIAutomations()
+        noticeCLIBackground()
+    }
+
+    /// `pullping background on` from a shell (an agent session, say): one note and an Activity line, so it never goes unseen.
+    private func noticeCLIBackground() {
+        guard persist, let by = automationFile.background.turnedOnBy else { return }
+        automationStore.mutate { $0.background.turnedOnBy = nil }
+        automationFile = automationStore.load()
+        guard automationFile.background.enabled else { return }
+        let who = by.isEmpty ? "" : by.count > 12 ? String(by.prefix(12)) + "…" : by
+        record([ActivityEntry(setting: "Background Runs", what: "Turned on", by: who, at: Date())])
+        NotificationPanels.shared.show(
+            note: "Turned on from the command line\(who.isEmpty ? "" : " (by \(who))"). Review in Background and Summarize can now start your agent without a terminal; rules with a background action run too. It posts nothing by itself.",
+            title: "Background Runs are on", id: Automation.backgroundID,
+            actions: [PanelAction(id: Automation.backgroundID, title: "Open Settings") { SettingsWindow.shared.show(tab: "Automations") }])
     }
 
     /// One alert per automation a `pullping` write made automatic (`autoNoticeAt` nil), stamped in the file so it shows once,
@@ -502,7 +517,8 @@ final class Store {
         NtfyConfig(server: settings.ntfyServer, topic: settings.ntfyTopic, token: ntfyToken, fallbackURL: ntfyFallbackURL)
     }
 
-    /// One push per opted-in event, independent of the panel style. Alert-style kinds go out at priority 4.
+    /// One push per opted-in event, independent of the panel style. An event whose reason (`Notify.reason`) is Alert in
+    /// Settings > Notifications goes out at priority 4, the rest at 3.
     private func push(_ events: [PREvent], now: Date) {
         let config = ntfyConfig
         for event in events {
@@ -511,7 +527,7 @@ final class Store {
                 title: "\(event.kind.label): \(pr.repo) #\(pr.number)",
                 body: pr.title + "\n" + (event.summary.isEmpty ? event.line : "\(event.actor): \(event.summary)")
                     + (login(for: pr).map { "\nAccount: \($0)" } ?? ""),
-                priority: settings.style(for: event.kind, mine: pr.roles.contains(.author)) == .alert ? 4 : 3,
+                priority: Notify.reason(event, pr: pr).map(settings.needStyle) == .alert ? 4 : 3,
                 tags: [event.kind.rawValue], click: pr.url, flow: "pr-event")
             Task { _ = await Ntfy.send(message, config: config, transport: URLSessionTransport()) }
         }
@@ -1124,7 +1140,8 @@ final class Store {
         }
     }
 
-    /// At quit: running runs stop and stay interrupted (never restarted).
+    /// At quit: running runs stop and stay interrupted (never restarted). TERM only: the app exits before the 5-second KILL,
+    /// so an agent that ignores TERM keeps running without the 10-minute limit, as after a crash or a force quit.
     func interruptBackground() {
         for job in backgroundJobs.values { job.stop(.interrupted) }
         guard !backgroundJobs.isEmpty else { return }
@@ -1174,17 +1191,20 @@ final class Store {
         (UserDefaults.standard.stringArray(forKey: DefaultsKey.postConfirmedLogins) ?? []).contains(login.lowercased())
     }
 
-    func confirmPosting(_ login: String) {
-        guard persist else { return }
+    private func confirmPosting(_ login: String) {
+        guard persist, !postConfirmed(login) else { return }
         UserDefaults.standard.set((UserDefaults.standard.stringArray(forKey: DefaultsKey.postConfirmedLogins) ?? []) + [login.lowercased()],
                                   forKey: DefaultsKey.postConfirmedLogins)
     }
 
     /// The draft window's Post, the only path that writes to GitHub: one review with the account that tracks the pull request,
     /// the edited body and the chosen event, pinned to the draft's commit (`DraftPost.refusal`, checked again against a fresh
-    /// head right before). nil = posted (the draft is used up); else why not, and the draft stays.
-    func postDraft(_ draft: BackgroundDraft, body: String, event: DraftPost.Event) async -> String? {
+    /// head right before). nil = posted (the draft is used up); else why not, and the draft stays. `askedNow`: the user just
+    /// answered the one-time "Post as @login?" question; it is remembered only once the post went through.
+    func postDraft(_ draft: BackgroundDraft, body: String, event: DraftPost.Event, askedNow: Bool = false) async -> String? {
         guard persist else { return "Not in the demo." }
+        guard draft.action == .review else { return "Only a review draft can be posted." }
+        guard askedNow || postConfirmed(draft.login) else { return "PullPing has not posted as @\(draft.login) before: confirm it first." }
         let body = BackgroundPlanner.clean(body)  // what the window showed: draft.json may have been edited since
         guard let account = account(draft.accountID) else { return "@\(draft.login) is no longer an account in PullPing." }
         let pr = tracked.prs[draft.prID]
@@ -1199,6 +1219,7 @@ final class Store {
         } catch {
             return "GitHub didn't take it: \((error as? AccountStatus)?.word ?? error.localizedDescription)"
         }
+        confirmPosting(draft.login)
         automationStore.mutate { file in
             guard let i = file.runs.lastIndex(where: { $0.runID == draft.runID }) else { return }
             (file.runs[i].draft, file.runs[i].detail) = (nil, "Posted: \(event.title) as @\(account.login)")

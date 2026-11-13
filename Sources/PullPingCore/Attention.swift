@@ -46,9 +46,10 @@ public enum Attention {
 
     static func ciOK(_ pr: TrackedPR) -> Bool { pr.ci == .success || pr.ci == .none }
 
-    /// Conflicts with the base branch, or approved and green but behind it under strict protection: the author's move.
+    /// Conflicts with the base branch, or approved and green but behind it under strict protection: the author's move. Not
+    /// behind on auto-merge or in the merge queue: GitHub updates the branch itself.
     public static func conflicted(_ pr: TrackedPR) -> Bool {
-        pr.mergeState == "DIRTY" || (pr.mergeState == "BEHIND" && decision(pr) == "APPROVED" && ciOK(pr))
+        pr.mergeState == "DIRTY" || (pr.mergeState == "BEHIND" && pr.autoMerge != true && decision(pr) == "APPROVED" && ciOK(pr))
     }
 
     /// Whose turn: the first matching rule wins (0.7.0 design §3.3). Reads only stored state, so it is the same everywhere.

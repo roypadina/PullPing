@@ -131,6 +131,8 @@ public enum EventEngine {
         // computes it lazily), or a blocking review went away. Not when this refresh's CI or approval event already says it.
         if let old, Attention.bucket(old) != .merge, Attention.bucket(pr) == .merge,
            !events.contains(where: { [.ciPassed, .reviewApproved].contains($0.kind) && !$0.isOwn }) {
+            // Once per head, by design: GitHub's merge state flickers through UNKNOWN on the same commit, and a second panel
+            // each time would be noise. Mergeable again after a block on the same commit stays in the list, without a panel.
             add("ready:\(s.headOID)", .readyToMerge, "CI", now, "", s.url, silent: false)
         }
         pr.lastSeenAt = ([pr.lastSeenAt, s.updatedAt] + nodes.map(\.at)).max()!

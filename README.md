@@ -471,8 +471,9 @@ An automation lets an event on GitHub start a process on your Mac, so PullPing k
   clone of the repository. Nothing else: Claude Code runs with `-p --restricted --tools Read,Grep,Glob`, no MCP server
   (`--strict-mcp-config` with an empty list, `--disallowedTools 'mcp__*'`) and `--add-dir` for the run's folder.
   `--restricted` also ignores your settings files, so an allow rule such as `Bash(*)` there adds nothing, keeps file
-  reads inside those two folders and refuses a permission bypass. It needs Claude Code 2.1.248 or later; an older one
-  fails the run.
+  reads inside those two folders and refuses a permission bypass. `--safe-mode` loads no `CLAUDE.md` (yours, or the one
+  on the pull request's branch, which its author wrote), hooks, skills or plugins. It needs Claude Code 2.1.248 or
+  later; an older one fails the run.
 - **It cannot** run commands, reach the network, write files or talk to GitHub.
 - **Claude Code only, for now.** Codex has no switch that turns off its shell and its other tools (apps, plugins,
   sub-agents, browser and computer use), so a background run with Codex as the agent is refused; Codex still works for

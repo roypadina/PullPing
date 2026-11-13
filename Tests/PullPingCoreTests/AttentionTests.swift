@@ -193,6 +193,8 @@ final class AttentionTests: XCTestCase {
         XCTAssertEqual(Attention.bucket(minePR { $0.mergeState = "BEHIND" }), .fix)
         XCTAssertEqual(Attention.bucket(minePR { $0.mergeState = "BEHIND"; $0.reviewDecision = "REVIEW_REQUIRED" }), .waitingReview, "unapproved behind waits")
         XCTAssertEqual(Attention.bucket(minePR { $0.autoMerge = true; $0.ci = .failure }), .fix, "rule 4 before 5")
+        XCTAssertEqual(Attention.bucket(minePR { $0.autoMerge = true; $0.mergeState = "BEHIND" }), .waitingMerge, "the queue updates the branch itself")
+        XCTAssertEqual(Attention.bucket(minePR { $0.autoMerge = true; $0.mergeState = "DIRTY" }), .fix, "a conflict is still mine")
         XCTAssertEqual(Attention.bucket(minePR { $0.autoMerge = true; $0.ci = .pending }), .waitingMerge)  // rule 5
         XCTAssertEqual(Attention.bucket(minePR { $0.autoMerge = true }), .waitingMerge, "auto-merge on: nothing for me to do")
         // Rule 7: CI running, approved or no review asked.

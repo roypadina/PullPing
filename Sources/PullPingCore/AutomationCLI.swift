@@ -1079,7 +1079,7 @@ public enum AutomationCLI {
             .filter { e in (since.map { e.at >= $0 } ?? true) && (pr.map { $0.matches(e.repo, e.number) } ?? true) }.prefix(limit))
         if flags.contains("json") { return try encode(entries) }
         guard !entries.isEmpty else { return "No activity." }
-        return entries.map { e in [stamp(e.at), "\(e.repo) #\(e.number)", e.what, "→ \(e.outcome)", e.title].joined(separator: "  ") }.joined(separator: "\n")
+        return entries.map { e in [stamp(e.at), e.prID == nil ? "-" : "\(e.repo) #\(e.number)", e.what, "→ \(e.outcome)", e.title].joined(separator: "  ") }.joined(separator: "\n")
     }
 
     /// `30m`, `1h`, `2d`, `2026-11-01` (local midnight) or a full ISO-8601 date.
@@ -1597,7 +1597,12 @@ extension AutomationCLI {
         switch command {
         case "status", "on", "off":
             try noArguments(positional)
-            return status(command == "status" ? store.load() : store.mutate { $0.background.enabled = command == "on"; return $0 })
+            return status(command == "status" ? store.load() : store.mutate { file in
+                if command == "on" && !file.background.enabled { file.background.turnedOnBy = PromptTemplate.clean(env["CLAUDE_CODE_SESSION_ID"] ?? "", max: 64) }
+                if command == "off" { file.background.turnedOnBy = nil }
+                file.background.enabled = command == "on"
+                return file
+            })
         case "set":
             try noArguments(positional)
             guard let raw = values["daily-cap"] else { throw Usage(message: "set needs --daily-cap <n>") }

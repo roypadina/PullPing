@@ -135,6 +135,16 @@ public struct ActivityEntry: Codable, Sendable, Equatable {
         self.error = error
     }
 
+    /// A switch a `pullping` command flipped, with no pull request: "Background Runs" · "Turned on" · "From the command line".
+    public init(setting: String, what: String, by: String, at: Date) {
+        self.at = at
+        kind = .run
+        title = setting
+        automation = what
+        summary = "From the command line" + (by.isEmpty ? "" : " (by \(by))")
+        ok = true
+    }
+
     /// Lenient: a missing or unreadable field takes its default; only `at` and `kind` are required.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -166,6 +176,7 @@ public struct ActivityEntry: Codable, Sendable, Equatable {
     /// "Review approved · alice", "Ran Fix CI", "Failed: Fix CI", "Asked: Fix CI": the app row and `pullping activity`.
     public var what: String {
         if let stage { return "\(stage.label): \(automation ?? "")" }
+        if prID == nil, kind != .event { return automation ?? "" }  // a setting
         guard kind == .event else { return (ok == false ? "Failed: " : ok == nil ? "Asked: " : "Ran ") + (automation ?? "") }
         let label = event?.label ?? ""
         return actor.map { $0.isEmpty || $0 == "CI" ? label : "\(label) · \($0)" } ?? label

@@ -107,7 +107,7 @@ struct DraftView: View {
                 Button("Open on GitHub") { if draft.url.scheme == "https" { NSWorkspace.shared.open(draft.url) } }
                 Spacer()
                 if draft.action == .review {
-                    Button(postTitle, action: post)
+                    Button(postTitle) { post() }
                         .keyboardShortcut(event == .comment ? .defaultAction : nil)  // Return never approves or requests changes
                         .disabled(posting || refusal != nil)
                         .help(refusal ?? "Posts on GitHub as @\(draft.login), at commit \(draft.head.prefix(7))")
@@ -123,7 +123,7 @@ struct DraftView: View {
         .padding(20)
         .frame(minWidth: 540, minHeight: 420)
         .alert("Post as @\(draft.login)?", isPresented: $askFirstPost) {
-            Button("Post") { store.confirmPosting(draft.login); post() }
+            Button("Post") { post(askedNow: true) }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("PullPing will post this as @\(draft.login). Until now PullPing only read from GitHub.")
@@ -145,12 +145,12 @@ struct DraftView: View {
         }
     }
 
-    private func post() {
-        guard store.postConfirmed(draft.login) else { return askFirstPost = true }
+    private func post(askedNow: Bool = false) {
+        guard askedNow || store.postConfirmed(draft.login) else { return askFirstPost = true }
         posting = true
         error = nil
         Task {
-            let failure = await store.postDraft(draft, body: text, event: event)
+            let failure = await store.postDraft(draft, body: text, event: event, askedNow: askedNow)
             posting = false
             if let failure { error = failure } else { close() }
         }

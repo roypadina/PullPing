@@ -198,6 +198,7 @@ final class LaunchPlannerTests: XCTestCase {
         XCTAssertEqual(GhostexSessions.globalRef(Data(created.utf8)), "S1:P1:G7")
         XCTAssertNil(GhostexSessions.globalRef(Data(#"{"ok":true,"session":{"projectId":"P1","sessionId":"G7"}}"#.utf8)), "no ref: not focused")
         XCTAssertNil(GhostexSessions.globalRef(Data(#"{"session":{"globalRef":"S1;rm -rf ~"}}"#.utf8)), "not a plain ref")
+        XCTAssertNil(GhostexSessions.globalRef(Data(#"{"session":{"globalRef":"--json"}}"#.utf8)), "an option, not a ref")
         XCTAssertNil(GhostexSessions.globalRef(Data(#"{"session":{"globalRef":"\#(String(repeating: "a", count: 65))"}}"#.utf8)))
         XCTAssertNil(GhostexSessions.globalRef(Data("Created session".utf8)))
         XCTAssertEqual(GhostexSessions.focus(globalRef: "S1:P1:G7"), ["focus", "S1:P1:G7"])
@@ -326,7 +327,7 @@ final class LaunchPlannerTests: XCTestCase {
         XCTAssertEqual(try LaunchPlanner.plan(a, pr: p, event: nil, account: "", runID: "R", runsDir: runs, home: home.path).promptText, "on .")
     }
 
-    // MARK: Open With targets, Resume Without Prompt, scenario prompts (0.8)
+    // MARK: Open With targets, Resume Without Prompt, scenario prompts (0.7.0)
 
     func plan(_ a: Automation, target: LaunchTarget? = nil, prompt: Bool = true, scenario: Scenario = .general, task: String? = nil,
               pr: TrackedPR? = nil, event: PREvent? = nil) throws -> LaunchPlan {

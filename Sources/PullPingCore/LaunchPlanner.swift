@@ -49,10 +49,11 @@ public enum GhostexSessions {
     /// `/bin/zsh` arguments running `ghostex <args>` in a login shell (Homebrew on PATH); `args` stay argv.
     public static func shell(_ args: [String]) -> [String] { ["-lc", "ghostex \"$@\"", "zsh"] + args }
 
-    /// `create-session`'s `{ok, session: {globalRef, …}}`: the new session's ref, nil when absent or not a plain ref.
+    /// `create-session`'s `{ok, session: {globalRef, …}}`: the new session's ref, nil when absent or not a plain ref (one that
+    /// starts with `-` would be read as an option by `ghostex focus`).
     public static func globalRef(_ json: Data) -> String? {
         let raw = (try? JSONSerialization.jsonObject(with: json)) as? [String: Any]
-        guard let ref = (raw?["session"] as? [String: Any])?["globalRef"] as? String, ref.wholeMatch(of: #/[A-Za-z0-9:_-]{1,64}/#) != nil else { return nil }
+        guard let ref = (raw?["session"] as? [String: Any])?["globalRef"] as? String, ref.wholeMatch(of: #/[A-Za-z0-9][A-Za-z0-9:_-]{0,63}/#) != nil else { return nil }
         return ref
     }
 

@@ -1082,7 +1082,7 @@ final class AutomationCLITests: XCTestCase {
         XCTAssertTrue(AutomationCLI.help.contains("pullping session set --pr <url> --session"))  // the literal the link helper greps
     }
 
-    // MARK: Open With targets, prompts, setup (0.8)
+    // MARK: Open With targets, prompts, setup (0.7.0)
 
     var targets: [LaunchTarget] { store.load().targets }
 

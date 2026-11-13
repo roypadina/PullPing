@@ -28,7 +28,7 @@ final class BackgroundTests: XCTestCase {
     func testClaudeCommandHasNoToolsButReadAndNoBypass() {
         let line = BackgroundPlanner.command(agent: .claude, agentCommand: "", sessionID: session, runDir: "/r/run 1")
         XCTAssertEqual(line, #"\claude -p --session-id '0f3c1234-5678-4abc-8def-0123456789ab' --output-format json --json-schema '"# + BackgroundPlanner.schema
-                       + #"' --restricted --tools 'Read,Grep,Glob' --disallowedTools 'mcp__*' --strict-mcp-config --mcp-config '{"mcpServers":{}}' --add-dir '/r/run 1' < '/r/run 1/prompt.md' > '/r/run 1/out.json' 2> '/r/run 1/stderr.txt'"#)
+                       + #"' --restricted --safe-mode --tools 'Read,Grep,Glob' --disallowedTools 'mcp__*' --strict-mcp-config --mcp-config '{"mcpServers":{}}' --add-dir '/r/run 1' < '/r/run 1/prompt.md' > '/r/run 1/out.json' 2> '/r/run 1/stderr.txt'"#)
         let wrapped = BackgroundPlanner.command(agent: .claude, agentCommand: "  my-wrapper  ", sessionID: session, runDir: "/r")
         XCTAssertTrue(wrapped.hasPrefix("my-wrapper -p --session-id "), wrapped)
         for line in [line, wrapped, BackgroundPlanner.command(agent: .codex, agentCommand: "", sessionID: nil, runDir: "/r")] {
@@ -69,7 +69,7 @@ final class BackgroundTests: XCTestCase {
             switch agent {
             case .claude:
                 XCTAssertEqual(args, ["-p", "--session-id", session, "--output-format", "json", "--json-schema", BackgroundPlanner.schema, "--restricted",
-                                      "--tools", "Read,Grep,Glob", "--disallowedTools", "mcp__*", "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#,
+                                      "--safe-mode", "--tools", "Read,Grep,Glob", "--disallowedTools", "mcp__*", "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#,
                                       "--add-dir", runDir.path])
             case .codex:
                 XCTAssertEqual(args, ["exec", "--sandbox", "read-only", "--ignore-user-config", "--ignore-rules", "-c", #"web_search="disabled""#,
@@ -454,7 +454,7 @@ final class BackgroundTests: XCTestCase {
         XCTAssertNil(unknown.background)
         XCTAssertNil(unknown.status)
         XCTAssertEqual(unknown.runID, "r1")
-        // Encoding a run without background fields writes none of them: 0.8 reads it as before.
+        // Encoding a run without background fields writes none of them: 0.6.x reads it as before.
         let encoded = String(decoding: try AutomationStore.encoder.encode(record), as: UTF8.self)
         XCTAssertFalse(encoded.contains("background") || encoded.contains("status"), encoded)
         let file = try StateStore.decoder.decode(AutomationFile.self, from: Data(#"{"background":{"enabled":true,"dailyCap":5000}}"#.utf8))

@@ -51,7 +51,7 @@ final class AutomationStoreTests: XCTestCase {
         XCTAssertEqual(AutomationStore(url: url).load(), file)
     }
 
-    // MARK: Open With targets (0.8)
+    // MARK: Open With targets (0.7.0)
 
     /// A rule or hook as 0.7 wrote it: `launcher` and `customCommand` on the automation itself.
     func old(_ name: String, _ launcher: Launcher, _ custom: String = "", hook: Bool = false) -> Automation {
