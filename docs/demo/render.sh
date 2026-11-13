@@ -15,10 +15,12 @@ swiftc -swift-version 5 -O -emit-library -static -module-name PullPingCore -emit
   -o "$BUILD/libPullPingCore.a" "$APP"/Sources/PullPingCore/*.swift
 UI=()
 for f in "$APP"/Sources/PullPing/*.swift; do [ "$(basename "$f")" = main.swift ] || UI+=("$f"); done
+# Sparkle (Updates.swift): the binary framework SwiftPM fetched (`swift build` once first); never started by the demo.
+SPARKLE="${SPARKLE:-$APP/.build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64}"
 swiftc -swift-version 5 -O -parse-as-library -enable-testing -emit-library -static -module-name PullPing -emit-module -emit-module-path "$BUILD/PullPing.swiftmodule" \
-  -I "$BUILD" -suppress-warnings -o "$BUILD/libPullPing.a" "${UI[@]}"
-swiftc -swift-version 5 -parse-as-library -O -suppress-warnings -I "$BUILD" -L "$BUILD" -lPullPing -lPullPingCore -o "$BUILD/demo" \
-  "$KIT/DemoKit.swift" "$HERE/scene.swift"
+  -I "$BUILD" -F "$SPARKLE" -suppress-warnings -o "$BUILD/libPullPing.a" "${UI[@]}"
+swiftc -swift-version 5 -parse-as-library -O -suppress-warnings -I "$BUILD" -L "$BUILD" -F "$SPARKLE" -framework Sparkle -Xlinker -rpath -Xlinker "$SPARKLE" \
+  -lPullPing -lPullPingCore -o "$BUILD/demo" "$KIT/DemoKit.swift" "$HERE/scene.swift"
 rm -rf "$BUILD/frames"
 PULLPING_ASSETS="$APP/Assets/icons" \
   "$BUILD/demo" "$BUILD/frames" 30 -AppleLocale en_US -AppleLanguages "(en)"      # en_US: "2 min. ago", "9:41 AM"-style text

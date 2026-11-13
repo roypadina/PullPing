@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Planned as 0.7.0.
+
+> **Before you update:** going back to 0.6.1 afterwards resets PullPing's settings to their defaults and makes it sync your pull requests again from scratch (silently, without notifications). Accounts, automations and the activity log are kept.
+
+### Changed
+- **Lists sort by whose turn it is.** The sidebar (and the menu-bar panel's filter) now has **Needs Me**, **My Pull Requests**, **Reviews**, **Issues**, **Watching**, **Closed** and **Muted & Hidden**, plus Activity. My Pull Requests splits into **Your Turn** (changes requested, CI failed, conflicts, or approved and ready to merge), **Waiting on Others** (reviewers, CI, auto-merge) and **Drafts**; Reviews into **Needs Your Review**, **Team Requests** and **Reviewed**. Needs Me gathers everything waiting on you in one list, oldest first, and is what the menu-bar number counts. Search covers every row. The Done group is gone: merged and closed items are under Closed, open ones stay where they belong.
+- **Notifications only when something needs you.** A panel now appears only for a review or re-review asked of you, changes requested, CI failed or conflicts on your pull request, a mention, an assignment, new comments on your pull requests and issues, or your pull request becoming ready to merge. Merges, CI passing (unless it makes your pull request ready to merge), new commits, labels and the rest go to **Activity** without a notification. The panel's title says what is asked of you ("Re-review needed", "Ready to merge").
+- **Settings → Notifications** has one row per reason (Off, Banner or Alert) instead of two 19-row tables. Your earlier choices carry over: each reason takes the stronger of the old styles behind it, and anything you had turned off stays off. Phone pushes are unchanged and still chosen per event.
+- **Activity** is a read-only log: filters (All, Needs Me, My PRs, Reviews, Runs), a **New** section for entries since your last visit (and a dot on the sidebar row), chips for Notified, Phone and runs, and Copy Link in the row menu.
+- Rows show one status chip that says whose turn it is: "Review requested by @carol", "Re-review · 2 pushes since your review", "Changes requested by @carol", "Approved · Ready to merge", "Waiting on @alice, @bob", "You approved · updated since"…
+- Review reminders also cover re-reviews, and team requests while their notification is on.
+- Ghostex: a session PullPing starts there comes to the front. Resuming a session that is already open in Ghostex focuses it instead of starting a second copy, and types one line into its input (without pressing Return) that points at the prompt; `pullping session resume` does the same instead of refusing. An automatic run never types into an open session: it asks with a **Go to Session** button instead.
+
+### Added
+- **Re-reviews.** A pull request you reviewed is back in Needs Me when you are asked again, or when you requested changes (or your approval was dismissed) and the author pushed since, even without a new request.
+- New reasons **to re-review** and **with conflicts** in Settings → General → Count in the Menu Bar, and a **Conflicts** event (`pullping kinds`) when your pull request starts conflicting with its base branch.
+- **Ready to merge** event (`pullping kinds`) when your pull request becomes mergeable after GitHub finishes checking it, so the notification no longer goes missing when CI passed before the merge check was done.
+- A one-time note after the update explains the new lists and notifications.
+
 ### Fixed
 - Ghostex shows up under **Open in** again: Ghostex 11.5 changed its app id, so PullPing thought it was not installed and every Ghostex run failed.
 - Runs in Ghostex start for real: since Ghostex 11.5 `ghostex terminal` only added a session that never started, so Resume Session and Handle with Agent looked successful and nothing ran. PullPing now uses `ghostex create-session --start` in the Ghostex project that holds the folder.

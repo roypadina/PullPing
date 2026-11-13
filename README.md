@@ -21,7 +21,7 @@ check, a request for your review.
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-support-F16061?logo=ko-fi&logoColor=white)](https://ko-fi.com/roypadina)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-<img src="docs/demo.gif" alt="PullPing in action: the menu bar counts the pull requests that need you, a review request arrives as a panel that stays until you close it, and the status panel lists Mine, To Review and Involved, then just the Work account." width="720">
+<img src="docs/demo.gif" alt="PullPing in action: the menu bar counts the pull requests that need you, a review request arrives as a panel that stays until you close it, and the status panel lists what needs you (to review, your pull requests, mentions), then just the Work account." width="720">
 
 <br>
 
@@ -31,10 +31,10 @@ brew install --cask roypadina/tap/pullping
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/status-panel-dark.png">
-<img src="docs/screenshots/status-panel.png" alt="PullPing status panel: pull requests grouped into Mine, To Review and Involved, with CI and review chips" width="320">
+<img src="docs/screenshots/status-panel.png" alt="PullPing status panel: what needs you, in To Review, Your Pull Requests and Mentions and Assigned, each row with a status chip such as Re-review, Changes requested or Ready to merge" width="320">
 </picture>
 &nbsp;
-<img src="docs/screenshots/main-window.png" alt="PullPing main window: a sidebar of filters and accounts, the list of pull requests, and the details of the selected one" width="620">
+<img src="docs/screenshots/main-window.png" alt="PullPing main window: a sidebar with Needs Me, My Pull Requests, Reviews, Issues, Watching, Closed and Activity per account, the Needs Me list, and the details of the selected pull request" width="620">
 
 </div>
 
@@ -43,16 +43,18 @@ brew install --cask roypadina/tap/pullping
 ## Features
 
 - **Every pull request you are involved in, in one place.** Ones you opened, ones assigned to you, ones where your review is requested (directly or through a team), and ones where you commented, reviewed or were mentioned. Merged and closed ones stay listed for a few days.
-- **Issues too.** Open issues you opened, are assigned to, are mentioned in or commented on appear in the same lists with an **Issue** chip. Comments, mentions, assignments, label changes, renames, reopening and closing (shown as completed or not planned) notify like pull request events. Label changes on pull requests notify too. Settings → General → Track Issues turns issues off.
+- **Issues too.** Open issues you opened, are assigned to, are mentioned in or commented on appear in the same lists with an **Issue** chip. Comments, mentions, assignments, label changes, renames, reopening and closing (shown as completed or not planned) are tracked like pull request events: mentions, assignments and comments on your issues notify, the rest is listed in Activity. Settings → General → Track Issues turns issues off.
 - **Several GitHub accounts at once.** Personal and work, each with its own token and a label you choose.
-- **Menu-bar panel.** Your pull requests in three groups (Mine, To Review, Involved), with CI status, review state, an unread dot and the latest activity on each row. What needs you comes first, then unread, then the most recently active; pull requests with nothing left for you (merged, closed, or read with no review asked of you) wait in a collapsed Done group at the bottom. Switch between All accounts and each account, and filter (Inbox, All, Mine, To Review, Involved, Recently Closed, Muted, Hidden). Right-click the icon for Refresh, Mark All as Read, Pause Notifications, Settings and Quit.
-- **A count that means something.** By default the menu-bar number counts only pull requests that need you: review requests, unread assignments and mentions, your own pull requests with changes requested, failed CI, new comments, or ready to merge, and new comments on issues you opened or are assigned to. The panel header spells it out ("2 to review · 1 ready to merge"). Settings → General → Count in the Menu Bar picks which of these count (team review requests have their own switch), or count everything unread, or show no number.
-- **Main window.** Mail-style sidebar: the same filters for All Accounts and for each account, with counts, then the same order with a collapsible Done section at the bottom of the list, search and a detail view with reviewers, checks and the recent activity of the selected pull request. Prefer one inbox per account? Settings → General → Inbox → Per account.
+- **Sorted by whose turn it is.** **Needs Me** lists what waits on you, oldest first: reviews and re-reviews asked of you, your pull requests to fix (changes requested, CI failed, conflicts) or to merge, mentions, assignments and new comments. **My Pull Requests** splits into Your Turn, Waiting on Others (reviewers, CI, auto-merge) and Drafts; **Reviews** into Needs Your Review, Team Requests and Reviewed; then **Issues**, **Watching**, **Closed** and **Muted & Hidden**. Each row has one status chip that says why it is there ("Re-review · 2 pushes since your review", "Changes requested by @carol", "Approved · Ready to merge", "Waiting on @alice, @bob"), plus CI, an unread dot and the latest activity.
+- **Re-reviews you would miss.** A pull request you reviewed comes back to Needs Me when you are asked again, or when you requested changes and the author pushed since, even if they forgot to ask.
+- **Menu-bar panel.** Needs Me by default, with what waits on others and what you reviewed one click away; the filter picks any other row. Switch between All accounts and each account. Right-click the icon for Refresh, Mark All as Read, Pause Notifications, Settings and Quit.
+- **A count that means something.** By default the menu-bar number is the Needs Me list: review and re-review requests, unread assignments and mentions, your own pull requests with changes requested, failed CI, conflicts, new comments, or ready to merge, and new comments on issues you opened or are assigned to. The panel header spells it out ("2 to review · 1 ready to merge"). Settings → General → Count in the Menu Bar picks which of these count (team review requests have their own switch), or count everything unread, or show no number.
+- **Main window.** Mail-style sidebar: the same rows for All Accounts and for each account, with counts of what is your turn, search across every row, and a detail view with whose turn it is, reviewers (and the commit each reviewed), checks and the recent activity of the selected pull request. Prefer one inbox per account? Settings → General → Inbox → Per account.
 - **Phone notifications** through [ntfy](https://ntfy.sh), chosen per kind of event, separately from the desktop panels.
 - **Agent automations.** Start Claude Code or Codex in a terminal when a pull request event arrives: rules you write in Settings, or hooks an agent attaches from the command line ("resume this session when the pull request is approved"). Asks first by default.
-- **Notifications that stay out of your way.** A small panel appears at the top right, never takes keyboard focus, and is grouped per pull request. Pick Off, Banner (hides itself) or Alert (stays) for each kind of event.
-- **Activity.** Everything PullPing saw and did, in one list: every event, whether it showed a banner or an alert, went to your phone, or was not shown and why, plus every automation run.
-- **Review reminders.** While your review is requested, PullPing nudges you again every so often until you review, the request is removed, or the pull request is merged or closed.
+- **Notifications only when something needs you.** A small panel appears at the top right when a review is asked of you, your pull request needs a fix or is ready to merge, or you are mentioned or assigned. It never takes keyboard focus and is grouped per pull request. Merges, passing CI, new commits and the rest go to Activity without a notification. Pick Off, Banner (hides itself) or Alert (stays) for each reason.
+- **Activity.** Everything PullPing saw and did, in one list: every event, whether it notified you or went to your phone, plus every automation run. Filter it, and see what is new since your last look.
+- **Review reminders.** While a review or re-review waits on you, PullPing nudges you again every so often until you review, the request is removed, or the pull request is merged or closed.
 - **Snooze, mute, hide, mark as read, stop tracking.** All of them from the panel, the menu bar and the main window, with Undo for Hide and Stop Tracking. Hidden pull requests leave every list and count but still notify you.
 - **Keyboard friendly.** Arrow keys and Return in the panel, menu commands with shortcuts, VoiceOver announcements for new notifications.
 - **`pullping://` links** for Shortcuts and Raycast.
@@ -146,33 +148,36 @@ owner approves PullPing. Use a personal access token if a repository stays invis
 
 ## Notifications
 
-When something happens on a pull request you are tracking, PullPing shows a small panel at the
+When something on a pull request you are tracking needs you, PullPing shows a small panel at the
 top right of the screen your mouse is on. It never takes keyboard focus, so typing in another
-app is never interrupted.
+app is never interrupted. Everything else is listed in [Activity](#activity) without a panel.
 
-- **Styles, per kind of event:** Off, Banner (hides after 5, 8, 12 or 20 seconds; hovering pauses it) or Alert (stays until you act). Set separately for your own pull requests and for the ones you review or follow, in **Settings → Notifications**.
-- **Defaults:** on your own pull requests every event shows a banner, and changes requested, CI failed and merged show an alert. On other pull requests, review requests, assignments and mentions show an alert; comments, reviews, merged and closed show a banner; the rest stay off.
+- **What notifies:** a review requested from you or your team, a re-review (requested again, or the author pushed after you requested changes), and on your own pull requests changes requested, CI failed, conflicts with the base branch, new comments, and ready to merge (approved, checks green, mergeable); plus mentions and assignments anywhere. Merges, closes, CI passed (unless it makes your pull request ready to merge), new commits, labels, title changes and comments on other people's pull requests are **Activity only**.
+- **Styles, per reason:** Off, Banner (hides after 5, 8, 12 or 20 seconds; hovering pauses it) or Alert (stays until you act), in **Settings → Notifications**.
+- **Defaults:** Alert for review requested, re-review, changes requested, CI failed, mentioned and assigned; Banner for team review, conflicts, new comments and ready to merge.
+- **The panel's title says what is asked of you:** "Review requested", "Re-review needed", "Changes requested", "CI failed", "Ready to merge"…
 - **One panel per pull request.** Several events on the same pull request merge into one panel; up to four panels are shown, the rest collapse into "+N more".
 - **On each panel:** **Open** (opens the pull request and marks it read), **Snooze** (15 minutes, 1 hour, 3 hours, tomorrow 9:00), **Mute PR** (**Mute Issue** on an issue), and a close button.
-- **Review reminders:** while your review is requested on an open, non-draft pull request, the "Review requested" panel shows again every 15, 30, 60 (default), 120 or 240 minutes, or never. It stops when you review, the request is removed, the pull request is merged or closed, or you mute or snooze it.
+- **Review reminders:** while a review or re-review waits on you (a team request too, while its notification is on), the panel shows again every 15, 30, 60 (default), 120 or 240 minutes, or never. It stops when you review, the request is removed, the pull request is merged or closed, or you mute or snooze it.
 - **Mute** keeps a pull request listed but silences its panels and reminders and leaves it out of the menu-bar count. **Snooze** silences them for a while. **Stop Tracking** removes the pull request and ignores it from then on (Edit → Undo brings it back).
 - **Pause:** right-click the menu-bar icon → **Pause Notifications** for 1 hour, 3 hours or until tomorrow 9:00. Panels, phone notifications and reminders stay quiet until then.
-- **Phone (ntfy):** in **Settings → Phone**, enter a server (default `https://ntfy.sh`) and a topic, subscribe to the same topic in the ntfy phone app, then tick the kinds of event to send, for your own pull requests and for others. Nothing is sent until you tick one. Sends follow the same rules as panels (never your own actions, never muted, snoozed or paused pull requests) but ignore the desktop style, so a kind can go to the phone only. An optional access token (for a protected server) and a fallback topic URL (used when the server fails) are kept in your login keychain. **Send Test Notification** checks the setup.
+- **Phone (ntfy):** in **Settings → Phone**, enter a server (default `https://ntfy.sh`) and a topic, subscribe to the same topic in the ntfy phone app, then tick the kinds of event to send, for your own pull requests and for others. Nothing is sent until you tick one. Sends follow the same rules as panels (never your own actions, never muted, snoozed or paused pull requests) but are chosen per kind of event, not per reason, so a merge can still go to your phone. An optional access token (for a protected server) and a fallback topic URL (used when the server fails) are kept in your login keychain. **Send Test Notification** checks the setup.
 - Your own actions never notify you. An optional sound plays once when panels appear. Every action on a panel also exists in the menu-bar panel and the menus, for keyboard and VoiceOver use.
 
 ### Activity
 
-**Activity**, in the main window's sidebar for All Accounts and for each account (also in the menu-bar icon's menu),
-keeps everything that happened, whether or not it showed a panel: every event on a tracked pull request or issue with
-what PullPing did with it (**Banner**, **Alert**, **Phone**, or **Not shown** and why: your own, notifications off,
-paused, muted, snoozed, or off in Settings), review reminders, and every automation run and Handle with Agent launch.
-Newest first, by day, with search. Select a row to see its pull request; double-click opens it in the browser, also
-once PullPing no longer tracks it. A newly tracked pull request's earlier history is not listed. Entries are kept for 30
-days (**Settings → General → Keep activity for**: 7, 30 or 90 days), at most 5000, in
-`~/Library/Application Support/PullPing/activity.jsonl`. `pullping activity [--since 2d] [--pr <ref>] [--json]` prints
-them, also while PullPing is not running.
+**Activity**, in the main window's sidebar for All Accounts and for each account (also in the menu-bar icon's menu and
+the panel's **Activity** button), is a read-only log of everything that happened, whether or not it showed a panel: every
+event on a tracked pull request or issue with chips for what PullPing did (**Notified**, **Phone**, and why a needed one
+stayed quiet: muted, snoozed, paused or notifications off), review reminders, and every automation run and Handle with
+Agent launch. Filter it by **All**, **Needs Me** (events that asked something of you), **My PRs**, **Reviews** or **Runs**.
+Entries since your last visit are under **New**, and the sidebar row shows a dot while there are any. Select a row to see
+its pull request; double-click opens it in the browser, also once PullPing no longer tracks it; right-click for **Copy
+Link**. A newly tracked pull request's earlier history is not listed. Entries are kept for 30 days (**Settings → General
+→ Keep activity for**: 7, 30 or 90 days), at most 5000, in `~/Library/Application Support/PullPing/activity.jsonl`.
+`pullping activity [--since 2d] [--pr <ref>] [--json]` prints them, also while PullPing is not running.
 
-<img src="docs/screenshots/activity.png" alt="The Activity list: today's events newest first, each with its pull request, the event and who did it, and badges such as Alert, Phone, Banner, Not shown: muted, Not shown: off in Settings and Ran Fix failing CI" width="380">
+<img src="docs/screenshots/activity.png" alt="The Activity list: filters All, Needs Me, My PRs, Reviews and Runs; a New section, then today; each entry with its pull request, who did what, and chips such as Notified, Phone and Ran Fix failing CI" width="380">
 
 ## Agent automations
 
@@ -209,7 +214,7 @@ command, where it opens and the working directory (`{repo_dir}`). When the pull 
 the button becomes **Resume Session** and **New Session**. It never runs on its own and has no run limit; a second click
 while the terminal opens does nothing.
 
-<img src="docs/screenshots/notification-agent.png" alt="Two notifications: Changes requested with Resume Session and New Session buttons (the pull request has a linked session), and Comment added with a Handle with Agent button" width="460">
+<img src="docs/screenshots/notification-agent.png" alt="Two notifications: Changes requested with Resume Session and New Session buttons (the pull request has a linked session), and Re-review needed with a Handle with Agent button" width="460">
 
 **Repositories.** `{repo_dir}`, the default working directory, is where the repository is checked out. PullPing looks in
 **Settings → Automations → Repository Folders** (default `~/Code`; add `~/Code/Work`, `~/src`, …), up to 3 levels deep
@@ -225,7 +230,11 @@ repository folder that holds the clone. PullPing reads git's own files to find t
 the list.
 
 **Where it opens.** Terminal and iTerm2 open the run's script file; Ghostty gets a new window through its AppleScript
-dictionary (macOS asks once to let PullPing control Ghostty); Ghostex through `ghostex create-session --start` in the Ghostex project that holds the folder. Only installed apps are
+dictionary (macOS asks once to let PullPing control Ghostty); Ghostex through `ghostex create-session --start` in the Ghostex project that holds the folder, and the new session comes to the front.
+Resuming a session that is already open in Ghostex focuses it instead of starting a second copy and types one line into
+its input, `Read <prompt file> and act on it.`, without pressing Return; an automatic run never does that, it asks with
+**Go to Session**. Terminal, iTerm2, Ghostty and custom commands can't find the window that holds a session, so a resume
+there always opens a new one. Only installed apps are
 offered; a rule whose app is gone shows "(not installed)" and its runs fail with that message. For any other terminal
 (WezTerm, kitty, Alacritty, cmux, …) choose **Custom command** and write the launch line with `{script}`, `{cwd}` and
 `{title}`; `pullping launchers` lists the built-in ones.
@@ -278,7 +287,7 @@ pullping session resume --pr <url>          # Resume Session from the shell, the
 `session find` runs whatever the setting says and links only a session that created the pull request or worked on its
 branch (one that merely mentions it is printed, not linked). `session resume` has the button's gates and one more pair:
 it refuses a session whose transcript changed in the last 2 minutes (probably open in another terminal; `--force`
-starts it anyway), the calling session itself (even with `--force`) and a second hand-off on the same pull request
+starts it anyway; with Ghostex as the app, one open there is focused instead, with the prompt line typed in), the calling session itself (even with `--force`) and a second hand-off on the same pull request
 within a minute. Recent Runs shows who handed off (`--by`, default the calling session).
 
 ### From the command line
