@@ -107,13 +107,31 @@ public struct BackgroundDraft: Codable, Sendable, Equatable, Identifiable {
     public var verdict: Verdict
     /// Markdown, inline comments folded in (`BackgroundPlanner.output`).
     public var body: String
+    /// What PullPing cut from the agent's input (`BackgroundPlanner.capped`); nil = it had all of it. The author orders the
+    /// diff, so the part the agent saw can be the harmless part.
+    public var diffCut: Cut?
+    public var discussionCut: Cut?
+
+    /// Bytes kept of the total.
+    public struct Cut: Codable, Sendable, Equatable {
+        public var kept: Int
+        public var total: Int
+        public init(kept: Int, total: Int) { self.kept = kept; self.total = total }
+    }
 
     public init(runID: String, action: BackgroundAction, prID: String, repo: String, number: Int, url: URL, title: String, accountID: UUID,
                 login: String, head: String, agent: AgentKind, sessionID: String, cwd: String, notCloned: Bool, createdAt: Date,
-                summary: String, verdict: Verdict, body: String) {
+                summary: String, verdict: Verdict, body: String, diffCut: Cut? = nil, discussionCut: Cut? = nil) {
         self.runID = runID; self.action = action; self.prID = prID; self.repo = repo; self.number = number; self.url = url; self.title = title
         self.accountID = accountID; self.login = login; self.head = head; self.agent = agent; self.sessionID = sessionID; self.cwd = cwd
         self.notCloned = notCloned; self.createdAt = createdAt; self.summary = summary; self.verdict = verdict; self.body = body
+        self.diffCut = diffCut; self.discussionCut = discussionCut
+    }
+
+    /// The draft window's preselected event at the pull request's current `head`: the agent's verdict, but a comment once the
+    /// pull request moved past the draft's commit (only a comment can post) or when the diff was cut (the agent didn't see all).
+    public func initialEvent(head: String) -> DraftPost.Event {
+        head == self.head && diffCut == nil ? DraftPost.Event(verdict) : .comment
     }
 
     /// The pull request as the draft saw it, for an Activity line when it is no longer tracked.
@@ -358,12 +376,13 @@ public enum BackgroundPlanner {
         return String(scalars)
     }
 
-    /// At most `cap` bytes, cut at a line end, with a marker line saying how much is missing.
-    public static func capped(_ data: Data, cap: Int, what: String) -> String {
-        guard data.count > cap else { return String(decoding: data, as: UTF8.self) }
+    /// At most `cap` bytes, cut at a line end, with a marker line saying how much is missing; `cut` nil when it is whole.
+    public static func capped(_ data: Data, cap: Int, what: String) -> (text: String, cut: BackgroundDraft.Cut?) {
+        guard data.count > cap else { return (String(decoding: data, as: UTF8.self), nil) }
         let head = data.prefix(cap)
         let cut = head.lastIndex(of: UInt8(ascii: "\n")).map { head[..<$0] } ?? head
-        return String(decoding: cut, as: UTF8.self) + "\n[PullPing: the \(what) is cut at \(cap / 1000) KB; \((data.count - cut.count) / 1000) KB more not shown]\n"
+        return (String(decoding: cut, as: UTF8.self) + "\n[PullPing: the \(what) is cut at \(cap / 1000) KB; \((data.count - cut.count) / 1000) KB more not shown]\n",
+                BackgroundDraft.Cut(kept: cut.count, total: data.count))
     }
 }
 

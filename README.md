@@ -344,7 +344,8 @@ and the verdict it suggests, and **Review Draft…**, **Open Session** and **Dis
 <p align="center"><img src="docs/screenshots/notification-draft-ready.png" width="440" alt="A Review draft ready notification with Review Draft, Open Session and Discard"></p>
 
 **Review Draft…** opens the draft in a window: you edit the text, pick **Comment**, **Request changes** or
-**Approve** (the agent's suggestion is preselected), and click Post. PullPing posts it as one review with the account
+**Approve** (the agent's suggestion is preselected; when the diff was cut at 400 KB the window says how much the agent
+saw and preselects Comment), and click Post. PullPing posts it as one review with the account
 that tracks the pull request, pinned to the commit the agent reviewed. Return only ever posts a comment; Approve and
 Request changes are refused once the pull request moved past that commit (**Run Again** drafts a new review). The
 first post per account asks once, since until then PullPing only read from GitHub. **Open Session** resumes the

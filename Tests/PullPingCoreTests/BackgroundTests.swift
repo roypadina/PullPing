@@ -241,9 +241,11 @@ final class BackgroundTests: XCTestCase {
     func testDiffLinesAndCaps() {
         XCTAssertEqual(DiffLines.parse(diff), ["Sources/Cache.swift": [10...15]])
         let big = Data((String(repeating: "line\n", count: 30)).utf8)
-        let cut = BackgroundPlanner.capped(big, cap: 22, what: "diff")
+        let (cut, info) = BackgroundPlanner.capped(big, cap: 22, what: "diff")
+        XCTAssertEqual(info, BackgroundDraft.Cut(kept: 19, total: 150))  // four lines, without the last newline
         XCTAssertTrue(cut.hasPrefix("line\nline\nline\nline\n[PullPing: the diff is cut at 0 KB;"), cut)
-        XCTAssertEqual(BackgroundPlanner.capped(Data("small".utf8), cap: 22, what: "diff"), "small")
+        XCTAssertEqual(BackgroundPlanner.capped(Data("small".utf8), cap: 22, what: "diff").text, "small")
+        XCTAssertNil(BackgroundPlanner.capped(Data("small".utf8), cap: 22, what: "diff").cut)
     }
 
     // MARK: Queue and caps
@@ -325,6 +327,31 @@ final class BackgroundTests: XCTestCase {
         XCTAssertEqual(DraftPost.Event(BackgroundDraft.Verdict.none), .comment)
     }
 
+    /// The draft window preselects the agent's verdict only when the pull request is still at the draft's commit and the agent
+    /// saw the whole diff; else a comment, never an approval.
+    func testInitialEventAfterMoveOrCutDiff() throws {
+        var draft = BackgroundDraft(runID: "0f3c1234-aaaa", action: .review, prID: "PR_7", repo: "octo-org/widgets", number: 7,
+                                    url: URL(string: "https://github.com/octo-org/widgets/pull/7")!, title: "Add cache", accountID: UUID(), login: "dana",
+                                    head: "abc1234", agent: .claude, sessionID: session, cwd: "/tmp", notCloned: false, createdAt: t0,
+                                    summary: "s", verdict: .approve, body: "b")
+        XCTAssertEqual(draft.initialEvent(head: "abc1234"), .approve)
+        XCTAssertEqual(draft.initialEvent(head: "def5678"), .comment)
+        draft.discussionCut = BackgroundDraft.Cut(kept: 200_000, total: 300_000)
+        XCTAssertEqual(draft.initialEvent(head: "abc1234"), .approve, "a cut discussion alone keeps the verdict")
+        draft.diffCut = BackgroundDraft.Cut(kept: 399_990, total: 2_000_000)
+        XCTAssertEqual(draft.initialEvent(head: "abc1234"), .comment)
+        draft.verdict = .requestChanges
+        XCTAssertEqual(draft.initialEvent(head: "abc1234"), .comment)
+        // Stored on the draft; a draft.json without the fields reads as whole.
+        let data = try AutomationStore.encoder.encode(draft)
+        XCTAssertEqual(try StateStore.decoder.decode(BackgroundDraft.self, from: data), draft)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        (object["diffCut"], object["discussionCut"]) = (nil, nil)
+        let old = try StateStore.decoder.decode(BackgroundDraft.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertNil(old.diffCut)
+        XCTAssertEqual(old.initialEvent(head: "abc1234"), .requestChanges)
+    }
+
     /// The one write: built and sent through the fake transport only. Never a real request in tests.
     func testPostReviewRequest() async throws {
         let transport = FakeTransport { _ in (200, [:], Data(#"{"data":{"addPullRequestReview":{"pullRequestReview":{"url":"https://github.com/octo-org/widgets/pull/7#pullrequestreview-1","state":"COMMENTED"}}}}"#.utf8)) }
@@ -400,8 +427,10 @@ final class BackgroundTests: XCTestCase {
             Ping.
 
             """)
+        XCTAssertNil(context.discussionCut)
         let diff = try await client.diff(repo: "octo-org/widgets", number: 7)
-        XCTAssertEqual(diff, "diff --git a/x b/x\n")
+        XCTAssertEqual(diff.text, "diff --git a/x b/x\n")
+        XCTAssertNil(diff.cut)
         let diffRequest = try XCTUnwrap(transport.requests.last)
         XCTAssertEqual(diffRequest.url?.absoluteString, "https://api.github.com/repos/octo-org/widgets/pulls/7")
         XCTAssertEqual(diffRequest.httpMethod ?? "GET", "GET")

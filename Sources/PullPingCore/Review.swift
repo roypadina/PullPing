@@ -8,6 +8,7 @@ public struct BackgroundContext: Sendable, Equatable {
     public var isDraft: Bool
     /// `discussion.md`: description, reviews with their line comments, comments; capped (`BackgroundPlanner.discussionCap`).
     public var discussion: String
+    public var discussionCut: BackgroundDraft.Cut?
 }
 
 extension GitHubClient {
@@ -38,12 +39,12 @@ extension GitHubClient {
     public func backgroundContext(prID: String) async throws -> BackgroundContext {
         let data: DiscussionData = try await run(Self.discussionQuery, ["id": prID])
         guard let pr = data.node, let head = pr.headRefOid else { throw AccountStatus.failed("Not a pull request, or no access") }
-        return BackgroundContext(head: head, open: pr.state == "OPEN", isDraft: pr.isDraft ?? false,
-                                 discussion: BackgroundPlanner.capped(Data(Self.markdown(pr).utf8), cap: BackgroundPlanner.discussionCap, what: "discussion"))
+        let discussion = BackgroundPlanner.capped(Data(Self.markdown(pr).utf8), cap: BackgroundPlanner.discussionCap, what: "discussion")
+        return BackgroundContext(head: head, open: pr.state == "OPEN", isDraft: pr.isDraft ?? false, discussion: discussion.text, discussionCut: discussion.cut)
     }
 
     /// `diff.patch`: the pull request's diff (REST, `application/vnd.github.diff`), capped (`BackgroundPlanner.diffCap`).
-    public func diff(repo: String, number: Int) async throws -> String {
+    public func diff(repo: String, number: Int) async throws -> (text: String, cut: BackgroundDraft.Cut?) {
         guard LaunchPlanner.isValidRepo(repo), let url = URL(string: "https://api.github.com/repos/\(repo)/pulls/\(number)") else {
             throw AccountStatus.failed("Unexpected repository name: \(repo)")
         }

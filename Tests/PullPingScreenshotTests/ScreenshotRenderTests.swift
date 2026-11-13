@@ -250,6 +250,10 @@ final class ScreenshotRenderTests: XCTestCase {
         moved.verdict = .approve
         moved.notCloned = true
         try save("draft-moved", DraftView(store: store, draft: moved) {}, NSSize(width: 620, height: 560))
+        var cut = Self.sampleDraft(store)
+        cut.head = "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d"
+        (cut.verdict, cut.diffCut, cut.discussionCut) = (.approve, BackgroundDraft.Cut(kept: 399_870, total: 1_234_567), BackgroundDraft.Cut(kept: 199_990, total: 250_000))
+        try save("draft-cut", DraftView(store: store, draft: cut) {}, NSSize(width: 620, height: 560))
         var summary = Self.sampleDraft(store)
         (summary.action, summary.verdict, summary.body) = (.summarize, .none, "Bumps the build tools to 2.4.\nStill open: the lockfile.\nNeeds you: a review.")
         try save("draft-summary", DraftView(store: store, draft: summary) {}, NSSize(width: 620, height: 420))
@@ -259,6 +263,8 @@ final class ScreenshotRenderTests: XCTestCase {
         store.mutateAutomationFile { $0.background.enabled = true; $0.automations = [rule] }
         try save("settings-automations-background", AutomationsTab(store: store), NSSize(width: 520, height: 1800))
         try save("rule-editor-background", RuleEditorSheet(store: store, rule: rule), NSSize(width: 560, height: 672), scrollToEnd: true)
+        rule.agent = .codex
+        try save("rule-editor-background-codex", RuleEditorSheet(store: store, rule: rule), NSSize(width: 560, height: 672), scrollToEnd: true)
     }
 
     /// A review draft on the fixture's review request (generic data only).

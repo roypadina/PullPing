@@ -50,7 +50,7 @@ struct DraftView: View {
         self.close = close
         _text = State(initialValue: draft.body)
         let head = store.tracked.prs[draft.prID].map { $0.headOID.isEmpty ? draft.head : $0.headOID } ?? draft.head
-        _event = State(initialValue: head == draft.head ? DraftPost.Event(draft.verdict) : .comment)  // moved: only a comment can post
+        _event = State(initialValue: draft.initialEvent(head: head))  // moved or cut diff: a comment
     }
 
     private var pr: TrackedPR? { store.tracked.prs[draft.prID] }
@@ -65,6 +65,13 @@ struct DraftView: View {
                     .font(.callout).foregroundStyle(.secondary)
                 if draft.notCloned {
                     Text("Not cloned on this Mac: drafted from the diff and the discussion only.").font(.callout).foregroundStyle(.secondary)
+                }
+                if let cut = draft.diffCut {
+                    Label("The diff was cut: the agent saw \(kb(cut.kept)) of \(kb(cut.total)). Read the rest on GitHub before you approve.", systemImage: "exclamationmark.triangle")
+                        .font(.callout).foregroundStyle(Theme.needsYou)
+                }
+                if let cut = draft.discussionCut {
+                    Text("The discussion was cut: the agent saw \(kb(cut.kept)) of \(kb(cut.total)).").font(.callout).foregroundStyle(.secondary)
                 }
             }
             if draft.action == .review {
@@ -127,6 +134,8 @@ struct DraftView: View {
             Text("The agent's \(draft.action.result) is deleted. Its session stays and Open Session in Recent Runs still finds it.")
         }
     }
+
+    private func kb(_ bytes: Int) -> String { ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file) }
 
     private var postTitle: String {
         switch event {

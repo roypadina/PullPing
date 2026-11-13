@@ -79,10 +79,10 @@ enum BackgroundRunner {
         }
         // 1. The input, fetched by PullPing.
         let client = GitHubClient(transport: URLSessionTransport(), token: input.token)
-        let context: BackgroundContext, diff: String
+        let context: BackgroundContext, diff: String, diffCut: BackgroundDraft.Cut?
         do {
             context = try await client.backgroundContext(prID: input.pr.id)
-            diff = try await client.diff(repo: input.pr.repo, number: input.pr.number)
+            (diff, diffCut) = try await client.diff(repo: input.pr.repo, number: input.pr.number)
         } catch {
             return failed("Couldn't fetch the pull request: \((error as? AccountStatus)?.word ?? error.localizedDescription)")
         }
@@ -126,7 +126,7 @@ enum BackgroundRunner {
         let draft = BackgroundDraft(runID: input.runID, action: input.action, prID: pr.id, repo: pr.repo, number: pr.number, url: pr.url,
                                     title: PromptTemplate.clean(pr.title, max: 200), accountID: pr.accountID, login: input.login, head: context.head,
                                     agent: agent, sessionID: output.sessionID, cwd: plan.cwd, notCloned: plan.notCloned, createdAt: Date(),
-                                    summary: output.summary, verdict: output.verdict, body: output.body)
+                                    summary: output.summary, verdict: output.verdict, body: output.body, diffCut: diffCut, discussionCut: context.discussionCut)
         do {
             try write(String(decoding: try AutomationStore.encoder.encode(draft), as: UTF8.self), to: dir.appendingPathComponent("draft.json").path, mode: 0o600)
         } catch {
