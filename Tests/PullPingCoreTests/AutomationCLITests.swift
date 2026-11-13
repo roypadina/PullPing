@@ -328,6 +328,7 @@ final class AutomationCLITests: XCTestCase {
         XCTAssertEqual(result.output, "Updated rule \(id): Renamed — comment on others → codex in Ghostex, ask, 1 run per pull request.")
         var expected = before
         expected.name = "Renamed"; expected.repos = []; expected.actors = []; expected.agentCommand = ""; expected.launcher = .ghostex
+        expected.target = "ghostex"  // --launcher: the Ghostex target, created (the custom one stays)
         expected.customCommand = ""; expected.scope = .others; expected.kinds = [.comment]; expected.prompt = "New {pr_url}"
         expected.maxRunsPerPR = 1; expected.agent = .codex; expected.workingDirectory = "/tmp"; expected.by = "agent-2"
         XCTAssertEqual(last, expected)  // only the given options changed; id and createdAt kept
@@ -382,7 +383,7 @@ final class AutomationCLITests: XCTestCase {
     func testShowJSONRoundTripsThroughFlags() throws {
         var rule = AutomationStoreTests.everyField()
         rule.pr = nil; rule.sessionID = nil; rule.expiresAt = nil
-        store.mutate { $0.automations = [rule] }
+        store.mutate { $0.automations = [rule]; $0.targets.append(AutomationStoreTests.customTarget) }
         let json = Data(run(["rule", "show", short(rule), "--json"]).output.utf8)
         let shown = try StateStore.decoder.decode(Automation.self, from: json)
         XCTAssertEqual(shown, rule)
@@ -392,12 +393,12 @@ final class AutomationCLITests: XCTestCase {
             "scope": { ["--scope", $0.scope.rawValue] }, "repos": { ["--repos", $0.repos.joined(separator: ",")] },
             "actors": { ["--actors", $0.actors.joined(separator: ",")] }, "mode": { [$0.mode == .auto ? "--auto" : "--ask"] },
             "agent": { ["--agent", $0.agent.rawValue] }, "agentCommand": { ["--command", $0.agentCommand] },
-            "launcher": { ["--launcher", $0.launcher.rawValue] }, "customCommand": { ["--custom-command", $0.customCommand] },
+            "target": { ["--target", $0.target ?? "default"] },
             "maxRunsPerPR": { ["--repeat", "\($0.maxRunsPerPR)"] }, "enabled": { [$0.enabled ? "--enable" : "--disable"] },
             "by": { ["--by", $0.by] },
         ]
         let hookFlags = ["pr", "sessionID", "expiresAt"]  // --pr, --session, --expires
-        let setByPullPing: Set = ["id", "createdAt", "source", "autoNoticeAt"]
+        let setByPullPing: Set = ["id", "createdAt", "source", "autoNoticeAt", "launcher", "customCommand"]  // the last two mirror the target
         let keys = { (data: Data) in Set((try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]).keys) }
         XCTAssertEqual(try keys(json), Set(flags.keys).union(setByPullPing))
         XCTAssertEqual(try keys(AutomationStore.encoder.encode(AutomationStoreTests.everyField())), Set(flags.keys).union(hookFlags).union(setByPullPing))
@@ -974,7 +975,7 @@ final class AutomationCLITests: XCTestCase {
         XCTAssertEqual(resumeError(), "pullping: Session 1a2b3c4d… appears to be open in another terminal (changed 40 s ago); continue there, or add --force")
         XCTAssertNoThrow(try resume(["--force"]).get())
         // Open in Ghostex: focused there instead of refused (the closure focuses); not running there: refused as before.
-        store.mutate { $0.handler.launcher = .ghostex }
+        run(["targets", "add", "ghostex", "--launcher", "ghostex", "--first"])
         var focusedIDs: [String] = []
         let pr12 = ["--pr", "https://github.com/octo-org/widgets/pull/12"]
         let focused = try AutomationCLI.prepareHandlerRun(pr12, store: store, state: tracked, env: env, now: t0) { focusedIDs.append($0.sessionID); return true }
@@ -985,7 +986,8 @@ final class AutomationCLITests: XCTestCase {
         done.note += GhostexSessions.focusedNote
         XCTAssertEqual(AutomationCLI.finishRun(done, runID: "R1", error: nil, store: store, now: t0).output,
                        "Focused claude 1a2b3c4d… in Ghostex; its input holds a line pointing at the prompt: press Return there.")
-        store.mutate { $0.handler.launcher = .terminal; $0.runs = [] }
+        run(["targets", "rm", "ghostex"])
+        store.mutate { $0.runs = [] }
         // the caller's own session: never, not even with --force
         XCTAssertEqual(resumeError(["--force"], env: ["CLAUDE_CODE_SESSION_ID": sid]), "pullping: Session 1a2b3c4d… is this session; continue here")
         try transcript(sid, [#"{"cwd":"/x"}"#], age: 600)
@@ -1017,7 +1019,7 @@ final class AutomationCLITests: XCTestCase {
         var request = try resume([], env: ["CLAUDE_CODE_SESSION_ID": "caller-1"]).get()
         let started = AutomationCLI.finishRun(request, runID: "R1", error: nil, store: store, now: t0, cwd: dir.appendingPathComponent("work").path)
         XCTAssertEqual(started.output, "Resumed claude 1a2b3c4d… on octo-org/widgets #12 in Terminal (\(dir.appendingPathComponent("work").path)).")
-        XCTAssertEqual(store.load().runs.last?.label, "Handle with Agent (resume 1a2b…) · octo-org/widgets #12")
+        XCTAssertEqual(store.load().runs.last?.label, "Handle with Agent (resume 1a2b… · Anything else) · octo-org/widgets #12")
         XCTAssertEqual(store.load().runs.last?.detail, "Terminal · by caller-1")  // who handed off (spec 3.2)
         request.json = true
         request.note = " (folder gone, resumed in /x)"
@@ -1078,6 +1080,243 @@ final class AutomationCLITests: XCTestCase {
         }
         XCTAssertTrue(Automation.defaultHandlerPrompt.contains("Work in {worktree_dir} (branch {branch})."))
         XCTAssertTrue(AutomationCLI.help.contains("pullping session set --pr <url> --session"))  // the literal the link helper greps
+    }
+
+    // MARK: Open With targets, prompts, setup (0.8)
+
+    var targets: [LaunchTarget] { store.load().targets }
+
+    func testTargets() throws {
+        XCTAssertEqual(run(["targets", "list"]).output, "terminal      Terminal  Terminal  default")
+        let add = run(["targets", "add", "ghostex", "--launcher", "ghostex", "--reuse", "off", "--by", "agent-1"])
+        XCTAssertEqual(add.status, 0, add.error)
+        XCTAssertEqual(add.output, "Added target ghostex: Ghostex · Ghostex · always a new session.")
+        XCTAssertEqual(run(["targets", "add", "iterm", "--launcher", "custom", "--custom-command", "open -a iTerm {script}", "--name", "iTerm\n2", "--first"]).output,
+                       "Added target iterm: iTerm 2 · Custom command · open -a iTerm {script} (default).")
+        XCTAssertEqual(targets.map(\.id), ["iterm", "terminal", "ghostex"])
+        XCTAssertEqual([targets[2].source, targets[2].by, targets[0].by], ["cli", "agent-1", ""])
+        XCTAssertFalse(targets[2].reuseRunning)
+        XCTAssertEqual(run(["targets", "edit", "ghostex", "--reuse", "on", "--name", "Ghostex (focus)"]).output,
+                       "Updated target ghostex: Ghostex (focus) · Ghostex · focuses a running session.")
+        XCTAssertEqual(run(["targets", "default", "ghostex"]).output,
+                       "Ghostex (focus) is the default: notification buttons, pullping session resume and rules without --target open there.")
+        XCTAssertEqual(targets.map(\.id), ["ghostex", "iterm", "terminal"])
+        XCTAssertEqual(store.load().handler.launcher, .ghostex, "the handler mirrors the default")
+        // rm: rules on it fall back to the default; never the last one.
+        addRule(["--target", "iterm"])
+        XCTAssertEqual(last.target, "iterm")
+        XCTAssertEqual(last.launcher, .custom)
+        XCTAssertEqual(run(["targets", "rm", "iterm"]).output, "Removed target iterm; 1 rule uses the default (Ghostex (focus)) now.")
+        XCTAssertNil(last.target)
+        XCTAssertEqual(last.launcher, .ghostex)
+        XCTAssertEqual(run(["targets", "rm", "terminal"]).output, "Removed target terminal.")
+        let only = run(["targets", "rm", "ghostex"])
+        XCTAssertEqual([only.status], [1])
+        XCTAssertEqual(only.error, "pullping: ghostex is the only target; add another first")
+        XCTAssertEqual(run(["targets", "rm", "nope"]).status, 1)
+        XCTAssertEqual(run(["targets", "default", "nope"]).status, 1)
+        XCTAssertEqual(run(["targets", "edit", "nope", "--name", "x"]).status, 1)
+    }
+
+    func testTargetLimitsAndUsageErrors() {
+        for id in ["a", "b", "c", "d"] { XCTAssertEqual(run(["targets", "add", id, "--launcher", "terminal"]).status, 0) }
+        let full = run(["targets", "add", "e", "--launcher", "terminal"])
+        XCTAssertEqual([full.status], [2])
+        XCTAssertTrue(full.error.hasPrefix("pullping: at most 5 targets"), full.error)
+        run(["targets", "rm", "d"])
+        let bad: [[String]] = [
+            ["targets", "add", "Bad Id", "--launcher", "terminal"], ["targets", "add", "default", "--launcher", "terminal"],
+            ["targets", "add", String(repeating: "x", count: 33), "--launcher", "terminal"], ["targets", "add", "x"],  // no --launcher
+            ["targets", "add", "a", "--launcher", "terminal"],  // exists
+            ["targets", "add", "x", "--launcher", "custom"], ["targets", "add", "x", "--launcher", "terminal", "--custom-command", "y"],
+            ["targets", "add", "x", "--launcher", "warp"], ["targets", "add", "x", "--launcher", "terminal", "--reuse", "maybe"],
+            ["targets", "add", "x", "y", "--launcher", "terminal"], ["targets", "edit", "a"], ["targets", "edit", "a", "--first"],
+            ["targets", "rm"], ["targets", "bogus"],
+        ]
+        for line in bad { XCTAssertEqual(run(line).status, 2, "\(line)") }
+        XCTAssertEqual(AutomationCLI.run(["targets", "add", "x", "--launcher", "iterm2"], store: store, env: env, now: t0, installed: { $0 != .iterm2 }).status, 2)
+        XCTAssertEqual(targets.map(\.id), ["terminal", "a", "b", "c"], "a refused write changes nothing")
+        XCTAssertTrue(run(["targets", "--help"]).output.hasPrefix("Usage: pullping targets list"))
+    }
+
+    /// `targets list --json` prints what the file stores; every field has a flag (`id` and the provenance set by the CLI).
+    func testTargetJSONRoundTripsThroughFlags() throws {
+        run(["targets", "add", "iterm", "--launcher", "custom", "--custom-command", "open -a iTerm {script}", "--name", "iTerm", "--reuse", "off", "--by", "a1"])
+        let json = Data(run(["targets", "list", "--json"]).output.utf8)
+        let listed = try StateStore.decoder.decode([LaunchTarget].self, from: json)
+        XCTAssertEqual(listed, targets)
+        let t = try XCTUnwrap(listed.last)
+        let keys = Set((try JSONSerialization.jsonObject(with: json) as? [[String: Any]])?.last?.keys ?? [:].keys)
+        XCTAssertEqual(keys, ["id", "name", "launcher", "customCommand", "reuseRunning", "source", "by"])
+        run(["targets", "rm", "iterm"])
+        let again = run(["targets", "add", t.id, "--launcher", t.launcher.rawValue, "--custom-command", t.customCommand, "--name", t.name,
+                         "--reuse", t.reuseRunning ? "on" : "off", "--by", t.by, "--json"])
+        XCTAssertEqual(try StateStore.decoder.decode(LaunchTarget.self, from: Data(again.output.utf8)), t)
+        XCTAssertEqual(targets.last, t)
+    }
+
+    /// `--launcher` on rules, hooks and the handler is the older form of `--target`: it selects or creates the target.
+    func testLauncherAliasSelectsOrCreatesATarget() throws {
+        addRule(["--launcher", "terminal"])
+        XCTAssertEqual(last.target, "terminal", "the existing Terminal target")
+        XCTAssertEqual(targets.count, 1)
+        addRule(["--launcher", "custom", "--custom-command", "run {script}"])
+        XCTAssertEqual(last.target, "custom")
+        addRule(["--launcher", "custom", "--custom-command", "run {script}"])
+        XCTAssertEqual(last.target, "custom", "the same line: the same target")
+        addRule(["--launcher", "custom", "--custom-command", "other {script}"])
+        XCTAssertEqual(last.target, "custom-2")
+        XCTAssertEqual(targets.map(\.name), ["Terminal", "Custom command", "Custom command 2"])
+        XCTAssertEqual(targets.last?.source, "cli")
+        let id = short(last)
+        XCTAssertEqual(run(["rule", "edit", id, "--target", "default"]).status, 0)
+        XCTAssertNil(last.target)
+        XCTAssertEqual(last.launcher, .terminal)
+        XCTAssertEqual(run(["rule", "edit", id, "--target", "nope"]).status, 2)
+        XCTAssertEqual(run(["rule", "edit", id, "--target", "custom", "--launcher", "terminal"]).status, 2)
+        XCTAssertTrue(run(["rule", "show", id]).output.contains("target          default"))
+        // The handler: --launcher makes that target the default.
+        XCTAssertEqual(run(["handler", "set", "--launcher", "ghostex"]).status, 0)
+        XCTAssertEqual(targets.map(\.id), ["ghostex", "terminal", "custom", "custom-2"])
+        XCTAssertEqual(run(["handler", "set", "--launcher", "custom", "--custom-command", "run {script}"]).status, 0)
+        XCTAssertEqual(targets.first?.id, "custom")
+        XCTAssertEqual(store.load().handler.customCommand, "run {script}")
+        // No room for a new one: a usage error, nothing written.
+        run(["targets", "add", "e", "--launcher", "terminal"])
+        let before = store.load()
+        XCTAssertEqual(run(["rule", "edit", id, "--launcher", "custom", "--custom-command", "third {script}"]).status, 2)
+        XCTAssertEqual(store.load(), before)
+    }
+
+    func testPrompts() throws {
+        let list = run(["prompts", "list"]).output.split(separator: "\n").map(String.init)
+        XCTAssertEqual(list.count, Scenario.allCases.count)
+        XCTAssertTrue(list[0].hasPrefix("review            Review requested          built-in  I was asked to review"), list[0])
+        try Data("Review it with my checklist.\nThen wait.".utf8).write(to: dir.appendingPathComponent("review.md"))
+        XCTAssertEqual(run(["prompts", "set", "review", "--file", "review.md"]).output, "Set the Review requested prompt.")
+        XCTAssertEqual(run(["prompts", "set", "ciFailed", "--text", "Fix {pr_url}"]).output, "Set the CI failed prompt.")
+        XCTAssertEqual(store.load().scenarioPrompts, ["review": "Review it with my checklist.\nThen wait.", "ciFailed": "Fix {pr_url}"])
+        XCTAssertTrue(run(["prompts", "list"]).output.contains("review            Review requested          custom    Review it with my checklist."))
+        XCTAssertEqual(run(["prompts", "show", "ciFailed"]).output, "ciFailed — CI failed (custom)\nFix {pr_url}\n\nBuilt-in:\n\(Scenario.ciFailed.builtIn)")
+        let shown = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(run(["prompts", "show", "ciFailed", "--json"]).output.utf8)) as? [String: Any])
+        XCTAssertEqual(shown["text"] as? String, "Fix {pr_url}")
+        XCTAssertEqual(shown["custom"] as? Bool, true)
+        // --json round trip: list → set → the same file.
+        let listed = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(run(["prompts", "list", "--json"]).output.utf8)) as? [[String: Any]])
+        let saved = store.load().scenarioPrompts
+        for row in listed where row["custom"] as? Bool == true { run(["prompts", "reset", row["scenario"] as! String]) }
+        XCTAssertEqual(store.load().scenarioPrompts, [:])
+        for row in listed where row["custom"] as? Bool == true { run(["prompts", "set", row["scenario"] as! String, "--text", row["text"] as! String]) }
+        XCTAssertEqual(store.load().scenarioPrompts, saved)
+        XCTAssertEqual(run(["prompts", "reset", "review"]).output, "Reset the Review requested prompt to the built-in.")
+        XCTAssertEqual(run(["prompts", "reset", "review"]).output, "The Review requested prompt is already the built-in.")
+        let bad: [[String]] = [["prompts", "show", "nope"], ["prompts", "set", "review"], ["prompts", "set", "review", "--text", " \n"],
+                               ["prompts", "set", "review", "--text", String(repeating: "x", count: 4001)], ["prompts", "set", "review", "--text", "a", "--file", "b"],
+                               ["prompts", "show"], ["prompts", "reset", "nope"], ["prompts", "bogus"]]
+        for line in bad { XCTAssertEqual(run(line).status, 2, "\(line)") }
+        XCTAssertEqual(run(["prompts", "set", "review", "--text", String(repeating: "x", count: 4000)]).status, 0)
+        XCTAssertTrue(run(["prompts", "--help"]).output.contains("readyToMerge      Ready to merge"))
+    }
+
+    func testSetupAndVersion() throws {
+        XCTAssertEqual(run(["setup", "guide"]).output, AgentSetup.guide)
+        XCTAssertEqual(run(["setup", "prompt"]).output, AgentSetup.prompt)
+        XCTAssertTrue(AgentSetup.prompt.contains("pullping setup guide"))
+        run(["targets", "add", "ghostex", "--launcher", "ghostex", "--first"])
+        run(["prompts", "set", "review", "--text", "Mine"])
+        addRule(["--auto"])
+        let status = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(AutomationCLI.run(["setup", "status", "--json"], store: store, env: env, now: t0,
+                                                                                              installed: { $0 != .iterm2 }, version: "9.9.9").output.utf8)) as? [String: Any])
+        XCTAssertEqual(status["version"] as? String, "9.9.9")
+        XCTAssertEqual(status["automations"] as? Bool, true)
+        XCTAssertEqual((status["targets"] as? [[String: Any]])?.map { $0["id"] as? String }, ["ghostex", "terminal"])
+        XCTAssertEqual(status["launchers"] as? [String], ["terminal", "ghostty", "ghostex", "custom"])
+        XCTAssertEqual(status["customPrompts"] as? [String], ["review"])
+        XCTAssertEqual((status["handler"] as? [String: Any])?["prompt"] as? String, "default")
+        XCTAssertEqual((status["automaticRules"] as? [[String: Any]])?.map { $0["name"] as? String }, ["Fix failing CI"])
+        XCTAssertEqual(status["rules"] as? Int, 1)
+        run(["handler", "set", "--prompt", "Mine {pr_url}"])
+        XCTAssertTrue(run(["setup", "status"]).output.contains("prompt custom, no {task}"))
+        XCTAssertEqual(AutomationCLI.run(["--version"], store: store, env: env, now: t0, version: "9.9.9").output, "9.9.9")
+        XCTAssertTrue(AutomationCLI.isCLIInvocation(["--version"], program: "/Applications/PullPing.app/Contents/MacOS/PullPing"))
+        XCTAssertEqual(run(["setup", "bogus"]).status, 2)
+    }
+
+    func testHandlerDryRun() throws {
+        func dry(_ args: [String]) -> Result<RunRequest, Error> {
+            Result { try AutomationCLI.prepareHandlerDryRun(["--pr", "octo-org/widgets#12"] + args, store: store, state: tracked, env: env, now: t0) }
+        }
+        func error(_ args: [String]) -> String {
+            guard case .failure(let e) = dry(args) else { return "" }
+            return AutomationCLI.outcome(e, group: "handler").error
+        }
+        XCTAssertTrue(error([]).hasPrefix("pullping: handler run needs --dry-run"))
+        XCTAssertEqual(error(["--dry-run"]), "pullping: Handle with Agent is off (pullping handler on)")
+        run(["handler", "on"])
+        XCTAssertEqual(error(["--dry-run", "--new", "--resume"]).components(separatedBy: "\n").first, "pullping: use --new or --resume, not both")
+        XCTAssertEqual(error(["--dry-run", "--scenario", "nope"]).components(separatedBy: "\n").first, "pullping: unknown scenario nope (pullping prompts list)")
+        XCTAssertEqual(error(["--dry-run", "--target", "nope"]).components(separatedBy: "\n").first, "pullping: --target nope: no such target (pullping targets list)")
+        XCTAssertEqual(error(["--dry-run", "--no-prompt"]), "pullping: No session linked to octo-org/widgets #12: --no-prompt resumes one")
+        let new = try dry(["--dry-run", "--scenario", "ciFailed"]).get()
+        XCTAssertTrue(new.dryRun)
+        XCTAssertNil(new.automation.sessionID)
+        XCTAssertEqual([new.scenario], [.ciFailed])
+        XCTAssertEqual(new.task, Scenario.ciFailed.builtIn)
+        XCTAssertEqual(new.target?.id, "terminal")
+        run(["targets", "add", "ghostex", "--launcher", "ghostex"])
+        run(["session", "set", "--pr", "octo-org/widgets#12", "--session", sid, "--cwd", "work", "--quiet"])
+        let resume = try dry(["--dry-run", "--no-prompt", "--target", "ghostex"]).get()
+        XCTAssertEqual(resume.automation.sessionID, sid)
+        XCTAssertEqual([resume.prompt], [false])
+        XCTAssertEqual(resume.automation.launcher, .ghostex)
+        XCTAssertEqual(try dry(["--dry-run", "--new"]).get().automation.sessionID, nil)
+        // The printed plan names the target and the scenario.
+        let plan = try LaunchPlanner.plan(resume.automation, pr: resume.pr, event: nil, account: "dana", runID: "R", runsDir: dir, home: dir.path,
+                                          target: resume.target, prompt: resume.prompt, scenario: resume.scenario, task: resume.task)
+        let text = AutomationCLI.dryRun(plan, json: false, request: resume)
+        XCTAssertTrue(text.contains("target       ghostex (Ghostex)\nscenario     general (Anything else)"), text)
+        XCTAssertTrue(text.hasSuffix("prompt       none (resume without prompt)"), text)
+    }
+
+    func testSessionResumeOptions() throws {
+        run(["handler", "on"])
+        run(["targets", "add", "ghostex", "--launcher", "ghostex", "--reuse", "off"])
+        run(["session", "set", "--pr", "octo-org/widgets#12", "--session", sid, "--cwd", "work", "--quiet"])
+        let request = try resume(["--no-prompt", "--target", "ghostex", "--scenario", "conflicts"]).get()
+        XCTAssertEqual([request.prompt], [false])
+        XCTAssertEqual(request.target?.id, "ghostex")
+        XCTAssertEqual(request.automation.launcher, .ghostex)
+        XCTAssertEqual([request.scenario], [.conflicts])
+        XCTAssertEqual(resumeError(["--no-prompt", "--prompt", "x"]), "pullping: use --prompt or --no-prompt, not both (see pullping session --help)")
+        XCTAssertEqual(resumeError(["--target", "nope"]), "pullping: --target nope: no such target (pullping targets list) (see pullping session --help)")
+        XCTAssertEqual(resumeError(["--scenario", "nope"]), "pullping: unknown scenario nope (pullping prompts list) (see pullping session --help)")
+        // Open in Ghostex but reuse off: refused like any other terminal, never focused.
+        try transcript(sid, [#"{"cwd":"/x"}"#], age: 40)
+        var asked = false
+        XCTAssertThrowsError(try AutomationCLI.prepareHandlerRun(["--pr", "octo-org/widgets#12", "--target", "ghostex"], store: store, state: tracked, env: env, now: t0) { _ in
+            asked = true
+            return true
+        })
+        XCTAssertFalse(asked)
+        // Recorded as "(resume …, no prompt)": still a hand-off for the brake.
+        var done = request
+        done.note += GhostexSessions.focusedNote
+        XCTAssertEqual(AutomationCLI.finishRun(done, runID: "R1", error: nil, store: store, now: t0).output, "Focused claude 1a2b3c4d… in Ghostex.")
+        XCTAssertEqual(store.load().runs.last?.label, "Handle with Agent (resume 1a2b…, no prompt) · octo-org/widgets #12")
+        try transcript(sid, [#"{"cwd":"/x"}"#], age: 600)
+        XCTAssertEqual(resumeError(), "pullping: Handed off 0 s ago")
+    }
+
+    func testRunScenario() throws {
+        addRule(["--prompt", "{task}"])
+        XCTAssertEqual(try AutomationCLI.prepareRun([short(last), "--pr", "octo-org/widgets#12", "--scenario", "readyToMerge"], store: store, state: tracked,
+                                                    env: env, now: t0).task, Scenario.readyToMerge.builtIn)
+        let request = try AutomationCLI.prepareRun([short(last), "--pr", "octo-org/widgets#12"], store: store, state: tracked, env: env, now: t0)
+        XCTAssertEqual([request.scenario], [.general])
+        XCTAssertEqual(request.target?.id, "terminal")
+        XCTAssertEqual(AutomationCLI.outcome(try XCTUnwrap(Result { try AutomationCLI.prepareRun([short(last), "--pr", "octo-org/widgets#12", "--scenario", "x"],
+                                                                                                  store: self.store, state: self.tracked, env: self.env, now: t0) }.failureValue),
+                                             group: "run").status, 2)
     }
 }
 

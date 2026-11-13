@@ -317,6 +317,7 @@ struct PRMenuItems: View {
                 }
             }
             if ids.count == 1, let pr = ids.first.flatMap({ store.tracked.prs[$0] }) {
+                if store.handlerShown { Menu("Handle with Agent") { HandlerMenu(store: store, pr: pr) } }
                 RunAutomationMenu(store: store, pr: pr)
             }
             Divider()
@@ -325,8 +326,8 @@ struct PRMenuItems: View {
     }
 }
 
-/// Handle with Agent, then the rules that fit the pull request plus its hooks, run now (a manual run). Dimmed when there is
-/// nothing to run or Automations are off.
+/// The rules that fit the pull request plus its hooks, run now (a manual run); the detail toolbar's (`compact`) also has
+/// Handle with Agent ▸ first. Dimmed when there is nothing to run or Automations are off.
 struct RunAutomationMenu: View {
     let store: Store
     let pr: TrackedPR
@@ -335,23 +336,10 @@ struct RunAutomationMenu: View {
 
     var body: some View {
         let automations = store.automations(for: pr)
+        let handler = compact && store.handlerShown
         Menu {
-            if store.handlerShown {
-                if let link = store.link(for: pr) {
-                    Button("Resume Session (\(link.sessionID.prefix(4))…)") { store.runHandler(prID: pr.id, mode: .resume, event: nil) }
-                    Button("New Session") { store.runHandler(prID: pr.id, mode: .new, event: nil) }
-                } else {
-                    if let found = store.foundSession(for: pr) {
-                        Button("Resume Earlier Session (\(found.sessionID.prefix(4))…, \(relativeAge(found.modifiedAt, now: store.now)))") {
-                            store.resumeFound(found, prID: pr.id, event: nil)
-                        }
-                        .help(PRDetailView.help(found))
-                        Button("New Session") { store.runHandler(prID: pr.id, mode: .new, event: nil) }
-                    } else {
-                        Button("Handle with Agent") { store.runHandler(prID: pr.id, mode: .handle, event: nil) }
-                    }
-                    Button("Find Earlier Session…") { store.findEarlierSession(prID: pr.id) }
-                }
+            if handler {
+                Menu("Handle with Agent") { HandlerMenu(store: store, pr: pr) }
                 if !automations.isEmpty { Divider() }
             }
             ForEach(automations) { automation in
@@ -363,7 +351,50 @@ struct RunAutomationMenu: View {
             if compact { Label("Run Automation", systemImage: "play.circle").labelStyle(.iconOnly) } else { Text("Run Automation") }
         }
         .help("Run Automation")
-        .disabled((automations.isEmpty && !store.handlerShown) || !store.automationsEnabled)
+        .disabled((automations.isEmpty && !handler) || !store.automationsEnabled)
+    }
+}
+
+/// Handle with Agent's choices for one pull request, a section per Open With target (`HandlerMenuModel`): the row's
+/// Handle with Agent ▸ submenu, the detail toolbar and the Pull Request menu; `nsMenu` for the panel's chevron.
+struct HandlerMenu: View {
+    let store: Store
+    let pr: TrackedPR
+
+    var body: some View {
+        ForEach(Array(store.handlerSections(pr).enumerated()), id: \.offset) { _, section in
+            Section {
+                ForEach(Array(section.items.enumerated()), id: \.offset) { _, item in
+                    Button(item.title) { store.perform(item.choice, prID: pr.id, event: nil) }
+                        .help(Self.help(item, store: store, pr: pr))
+                }
+            } header: {
+                if let title = section.title { Text(verbatim: title) }
+            }
+        }
+    }
+
+    /// A found session's title and folder on Resume Earlier Session.
+    static func help(_ item: HandlerMenuItem, store: Store, pr: TrackedPR) -> String {
+        guard case .resumeEarlier = item.choice, let found = store.foundSession(for: pr) else { return "" }
+        return PRDetailView.help(found)
+    }
+
+    /// The same choices as an AppKit menu (a panel is never key, so a SwiftUI `Menu` doesn't open reliably there).
+    static func nsMenu(store: Store, pr: TrackedPR, event: PREvent?, scenario: Scenario?) -> NSMenu {
+        let menu = NSMenu()
+        for (i, section) in store.handlerSections(pr).enumerated() {
+            if i > 0 { menu.addItem(.separator()) }
+            if let title = section.title { menu.addItem(.sectionHeader(title: title)) }
+            for item in section.items {
+                let entry = ClosureMenuItem(title: item.title) {
+                    MainActor.assumeIsolated { store.perform(item.choice, prID: pr.id, event: event, scenario: scenario) }
+                }
+                entry.toolTip = help(item, store: store, pr: pr).isEmpty ? nil : help(item, store: store, pr: pr)
+                menu.addItem(entry)
+            }
+        }
+        return menu
     }
 }
 

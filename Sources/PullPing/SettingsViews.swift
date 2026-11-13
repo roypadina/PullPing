@@ -500,6 +500,10 @@ struct AutomationsTab: View {
     @Bindable var store: Store
     @State private var editing: Automation?
     @State private var newOverride = ""
+    @State private var editingTarget: LaunchTarget?
+    @State private var removingTarget: LaunchTarget?
+    @State private var editingScenario: Scenario?
+    @State private var copied = false
 
     /// Homebrew links `pullping` itself; from source the user makes the link.
     private var installLine: String {
@@ -510,6 +514,19 @@ struct AutomationsTab: View {
     var body: some View {
         Form {
             Section {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    (Text("Easiest: let your agent set this up.").bold()
+                     + Text(" Copy the prompt, paste it into Claude Code or Codex, and it walks you through every option below."))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    Button(copied ? "Copied" : "Copy Setup Prompt") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(AgentSetup.prompt, forType: .string)
+                        copied = true
+                        Task { try? await Task.sleep(for: .seconds(2)); copied = false }
+                    }
+                    .help("Copies the text of `pullping setup prompt`")
+                }
                 Toggle("Run Automations", isOn: Binding(get: { store.automationsEnabled }, set: { store.setAutomationsEnabled($0) }))  // master: regular switch (SET-7)
             } header: {
                 Text("Automations")
@@ -520,7 +537,7 @@ struct AutomationsTab: View {
                 HStack(spacing: 10) {  // RuleRow's layout
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Handle with Agent").fontWeight(.semibold)
-                        Text(verbatim: "\(AutomationCLI.agentWord(store.handler)) in \(store.handler.launcher.title) · \(store.handler.workingDirectory)"
+                        Text(verbatim: "\(AutomationCLI.agentWord(store.handler)) in \(store.automationFile.defaultTarget.name) · \(store.handler.workingDirectory)"
                              + (store.handler.source == "cli" ? " · CLI" : ""))
                             .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             .help(store.handler.source == "cli" ? "Written from the command line" + (store.handler.by.isEmpty ? "" : " by \(store.handler.by)") : "")
@@ -537,11 +554,13 @@ struct AutomationsTab: View {
                 Text("Handle with Agent")
             } footer: {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Adds a Handle with Agent button to the notifications you pick in Edit… and to the pull request's menu. When an agent has linked its session to the pull request (`pullping session set`, or one PullPing started), the button becomes Resume Session and New Session. In Ghostex, Resume Session focuses the session when it is already open there; other apps always open a new window.").formFooter()
+                    Text("Adds a Handle with Agent button to the notifications you pick in Edit… and to the pull request's menu. When an agent has linked its session to the pull request (`pullping session set`, or one PullPing started), the button becomes Resume Session and New Session. The buttons open with the first app under Open With; the pull request's menu and the notification's chevron offer the others and Resume Without Prompt.").formFooter()
                     Text("When a pull request has no linked session, PullPing searches your local Claude Code and Codex transcripts (`~/.claude/projects`, `~/.codex/sessions`) for the pull request's URL or branch. Only file names and folders are read into PullPing; nothing leaves your Mac.").formFooter()
                 }
             }
             .disabled(!store.automationsEnabled)
+            openWith
+            prompts
             Section {
                 if store.rules.isEmpty { Text("No rules yet.").foregroundStyle(.secondary) }
                 ForEach(store.rules) { rule in
@@ -668,7 +687,77 @@ struct AutomationsTab: View {
         }
         .formStyle(.grouped)
         .sheet(item: $editing) { RuleEditorSheet(store: store, rule: $0, handler: $0.id == Automation.handlerID).frame(width: 560, height: 640) }
+        .sheet(item: $editingTarget) { TargetEditorSheet(store: store, target: $0).frame(width: 460) }
+        .sheet(item: $editingScenario) { ScenarioPromptSheet(store: store, scenario: $0).frame(width: 560, height: 600) }
+        .alert(removingTarget.map { "Remove \($0.name)?" } ?? "", isPresented: Binding(get: { removingTarget != nil }, set: { if !$0 { removingTarget = nil } })) {
+            Button("Remove", role: .destructive) { if let t = removingTarget { store.mutateAutomationFile { $0.removeTarget(t.id) } } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(removingTarget.map { Self.users($0, in: store) }.map { "\($0) \($0 == 1 ? "rule uses" : "rules use") it and will use the default." } ?? "")
+        }
     }
+
+    /// Settings → Automations → Open With: where agent sessions open; the first is the default.
+    private var openWith: some View {
+        Section {
+            let targets = store.automationFile.targets
+            ForEach(Array(targets.enumerated()), id: \.element.id) { i, t in
+                HStack(spacing: 10) {
+                    Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary).accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(verbatim: t.name).fontWeight(.semibold).lineLimit(1)
+                        Text(verbatim: t.summary + (t.source == "cli" ? " · CLI" : "")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            .help(t.source == "cli" ? "Written from the command line" + (t.by.isEmpty ? "" : " by \(t.by)") : "")
+                    }
+                    Spacer(minLength: 8)
+                    if i == 0 { Text("Default").font(.caption).foregroundStyle(.secondary) }
+                    Button("Edit…") { editingTarget = t }
+                    Button("Remove", role: .destructive) { if Self.users(t, in: store) > 0 { removingTarget = t } else { store.mutateAutomationFile { $0.removeTarget(t.id) } } }
+                        .disabled(targets.count == 1)
+                }
+                .contextMenu {  // the keyboard and VoiceOver way to reorder (A11Y-8)
+                    Button("Move Up") { store.mutateAutomationFile { $0.targets.swapAt(i, i - 1) } }.disabled(i == 0)
+                    Button("Move Down") { store.mutateAutomationFile { $0.targets.swapAt(i, i + 1) } }.disabled(i == targets.count - 1)
+                    Button("Make Default") { store.mutateAutomationFile { $0.makeDefault(t.id) } }.disabled(i == 0)
+                }
+            }
+            .onMove { from, to in store.mutateAutomationFile { $0.targets.move(fromOffsets: from, toOffset: to) } }
+        } header: {
+            Text("Open With")
+        } footer: {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Notification buttons use the first one. Drag to reorder, or right-click a row. Terminal, iTerm2 and Ghostty always open a new window.").formFooter()
+                Button("Add…") {
+                    let file = store.automationFile
+                    editingTarget = file.newTarget(Launcher.allCases.first { $0.isInstalled && !file.targets.map(\.launcher).contains($0) } ?? .terminal)
+                }
+                .disabled(store.automationFile.targets.count >= LaunchTarget.maxCount)
+            }
+        }
+        .disabled(!store.automationsEnabled)
+    }
+
+    /// Settings → Automations → Prompts: each scenario's task text, built-in or the user's.
+    private var prompts: some View {
+        Section {
+            ForEach(Scenario.allCases, id: \.self) { s in
+                HStack {
+                    Text(s.label)
+                    Spacer(minLength: 8)
+                    Text(store.automationFile.task(s) == s.builtIn ? "Built-in" : "Custom").font(.caption).foregroundStyle(.secondary)
+                    Button("Edit…") { editingScenario = s }
+                }
+            }
+        } header: {
+            Text("Prompts")
+        } footer: {
+            Text("`{task}` in the Handle with Agent prompt (and in a rule's) becomes the task of the run's scenario: what the pull request needs from you. The built-in tasks explain and propose, then wait for your OK.").formFooter()
+        }
+        .disabled(!store.automationsEnabled)
+    }
+
+    /// Rules and hooks that open with `t` (they fall back to the default when it goes).
+    static func users(_ t: LaunchTarget, in store: Store) -> Int { store.automationFile.automations.filter { $0.target == t.id }.count }
 
     /// A folder from an open panel, `~` abbreviated; nil on Cancel.
     static func chooseFolder() -> String? {
@@ -722,7 +811,7 @@ private struct RuleRow: View {
     private var summary: String {
         let scope = switch rule.scope { case .any: "Any"; case .mine: "Mine"; case .others: "Others" }
         return "\(rule.kinds.count) \(rule.kinds.count == 1 ? "event" : "events") · \(scope) · \(rule.mode == .auto ? "Automatic" : "Ask") · "
-            + "\(rule.agent.title) in \(rule.launcher.title)" + (rule.source == "cli" ? " · CLI" : "")
+            + "\(rule.agent.title) in \(store.automationFile.target(for: rule).target.name)" + (rule.source == "cli" ? " · CLI" : "")
     }
 }
 
@@ -786,7 +875,18 @@ struct RuleEditorSheet: View {
         let rule = edited
         func blank(_ s: String) -> Bool { s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         return (handler || !blank(rule.name)) && !rule.kinds.isEmpty && !blank(rule.prompt) && !blank(rule.workingDirectory)
-            && !(rule.launcher == .custom && blank(rule.customCommand))
+    }
+
+    /// The "Use the scenario's prompt" checkbox: a `{task}` line before the safety line (else at the end), or none.
+    static func withTask(_ prompt: String, _ on: Bool) -> String {
+        guard on else {
+            return prompt.components(separatedBy: "\n").filter { $0.trimmingCharacters(in: .whitespaces) != "{task}" }.joined(separator: "\n")
+                .replacingOccurrences(of: "{task}", with: "")
+        }
+        guard !prompt.contains("{task}") else { return prompt }
+        var lines = prompt.components(separatedBy: "\n")
+        lines.insert("{task}", at: lines.lastIndex { $0.hasPrefix("Text quoted from GitHub") } ?? lines.count)
+        return lines.joined(separator: "\n")
     }
 
     var body: some View {
@@ -840,14 +940,15 @@ struct RuleEditorSheet: View {
                         ForEach(AgentKind.allCases, id: \.self) { Text($0.title).tag($0) }
                     }
                     TextField("Command", text: $rule.agentCommand, prompt: Text(verbatim: rule.agent.rawValue))
-                    Picker("Open in", selection: $rule.launcher) {
-                        // Installed apps and Custom; a saved app that's gone stays listed so the picker shows it.
-                        ForEach(Launcher.allCases.filter { $0.isInstalled || $0 == rule.launcher }, id: \.self) { launcher in
-                            Text(verbatim: launcher.isInstalled ? launcher.title : "\(launcher.title) (not installed)").tag(launcher)
+                    if !handler {  // the handler opens with the default
+                        let targets = store.automationFile.targets
+                        Picker("Open in", selection: $rule.target) {
+                            Text(verbatim: "Default (\(store.automationFile.defaultTarget.name))").tag(String?.none)
+                            ForEach(targets) { Text(verbatim: $0.name).tag(String?.some($0.id)) }
+                            if let gone = rule.target, !targets.contains(where: { $0.id == gone }) {
+                                Text(verbatim: "\(gone) (removed: opens with the default)").tag(String?.some(gone))
+                            }
                         }
-                    }
-                    if rule.launcher == .custom {
-                        TextField("Custom command", text: $rule.customCommand, prompt: Text(verbatim: "open -a iTerm {script}"))
                     }
                     TextField("Working directory", text: $rule.workingDirectory, prompt: Text(verbatim: Automation.defaultDirectory))
                     if !handler {
@@ -860,17 +961,24 @@ struct RuleEditorSheet: View {
                     if rule.usesLinkedSession {
                         Text("Runs only on pull requests with a linked session, in that session's agent and folder; Command still applies. Pull requests without a link are skipped.").formFooter()
                     }
-                    Text(rule.launcher == .custom
-                         ? "Command replaces `\(rule.agent.rawValue)`, for example a wrapper function. Custom command placeholders, inserted already quoted: {script} {cwd} {title} {prompt_file} {agent_command}. iTerm: `open -a iTerm {script}`."
-                         : "Command replaces `\(rule.agent.rawValue)`, for example a wrapper function. The working directory must exist when \(handler ? "it" : "the rule") runs; {repo_dir} is the repository's clone under Repository Folders (found by its git remote), else the fallback folder; {repo_root} the folder holding it; {main_dir} its main worktree; {worktree_dir} the worktree with the pull request's branch.").formFooter()
+                    Text("Command replaces `\(rule.agent.rawValue)`, for example a wrapper function. \(handler ? "Opens with the default in Open With. " : "")The working directory must exist when \(handler ? "it" : "the rule") runs; {repo_dir} is the repository's clone under Repository Folders (found by its git remote), else the fallback folder; {repo_root} the folder holding it; {main_dir} its main worktree; {worktree_dir} the worktree with the pull request's branch.").formFooter()
                 }
                 Section {
                     TextEditor(text: $rule.prompt).font(.body.monospaced()).frame(height: 110)
-                    if !handler { Stepper("Runs per pull request: \(rule.maxRunsPerPR)", value: $rule.maxRunsPerPR, in: 1...10) }
+                    if handler {
+                        if !rule.prompt.contains("{task}") {
+                            Text("This prompt does not use scenario prompts. Add `{task}` where the task belongs.").font(.callout).foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Toggle("Use the scenario's prompt", isOn: Binding(get: { rule.prompt.contains("{task}") }, set: { rule.prompt = Self.withTask(rule.prompt, $0) }))
+                            .toggleStyle(.checkbox)
+                            .help("Adds or removes the {task} line: the task of the scenario (Settings → Automations → Prompts)")
+                        Stepper("Runs per pull request: \(rule.maxRunsPerPR)", value: $rule.maxRunsPerPR, in: 1...10)
+                    }
                 } header: {
                     Text("Prompt")
                 } footer: {
-                    Text("Placeholders: {pr_url} {pr_number} {repo} {repo_owner} {repo_name} {repo_dir} {repo_root} {main_dir} {worktree_dir} {is_issue} {head_sha} {event} {event_label} {account} {cwd} {automation}. Text written by others on GitHub: {title} {author} {actor} {summary} {branch}. PullPing starts the agent exactly as you would in a terminal; permission prompts are the agent's own.").formFooter()
+                    Text("`{task}` is replaced by the prompt of the scenario (Prompts section). Placeholders: {pr_url} {pr_number} {repo} {repo_owner} {repo_name} {repo_dir} {repo_root} {main_dir} {worktree_dir} {is_issue} {head_sha} {event} {event_label} {account} {cwd} {automation} {scenario} {scenario_label} {resume_note} {event_url} {reviewed_sha}. Text written by others on GitHub: {title} {author} {actor} {summary} {branch}. PullPing starts the agent exactly as you would in a terminal; permission prompts are the agent's own.").formFooter()
                 }
             }
             .formStyle(.grouped)
@@ -906,6 +1014,144 @@ struct RuleEditorSheet: View {
                 .keyboardShortcut(.defaultAction).disabled(!valid)
             }
             .padding(16)
+        }
+    }
+}
+
+/// Open With › Add… / Edit…: a target's name, app, custom line and Ghostex reuse. A new target gets an id from its app.
+struct TargetEditorSheet: View {
+    let store: Store
+    @State private var target: LaunchTarget
+    @Environment(\.dismiss) private var dismiss
+
+    init(store: Store, target: LaunchTarget) {
+        self.store = store
+        _target = State(initialValue: target)
+    }
+
+    private var isNew: Bool { !store.automationFile.targets.contains { $0.id == target.id } }
+    private var valid: Bool { target.launcher != .custom || !target.customCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    TextField("Name", text: $target.name, prompt: Text(verbatim: target.launcher.title))
+                    Picker("Open in", selection: $target.launcher) {
+                        // Installed apps and Custom; a saved app that's gone stays listed so the picker shows it.
+                        ForEach(Launcher.allCases.filter { $0.isInstalled || $0 == target.launcher }, id: \.self) { launcher in
+                            Text(verbatim: launcher.isInstalled ? launcher.title : "\(launcher.title) (not installed)").tag(launcher)
+                        }
+                    }
+                    if target.launcher == .custom {
+                        TextField("Custom command", text: $target.customCommand, prompt: Text(verbatim: "open -a iTerm {script}"))
+                    }
+                    if target.launcher == .ghostex {
+                        Toggle("Focus the session if it is already running", isOn: $target.reuseRunning)
+                    }
+                } footer: {
+                    Text(target.launcher == .custom
+                         ? "The launch line for any other terminal. Placeholders, inserted already quoted: {script} {cwd} {title} {prompt_file} {agent_command}."
+                         : target.launcher == .ghostex
+                         ? "Resume Session then focuses the session when it already runs in Ghostex and types a line pointing at the prompt, without pressing Return."
+                         : "Opens a new window for every run.").formFooter()
+                }
+            }
+            .formStyle(.grouped)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(isNew ? "Add" : "Save") { save() }.keyboardShortcut(.defaultAction).disabled(!valid)
+            }
+            .padding(16)
+        }
+    }
+
+    private func save() {
+        var t = target
+        t.name = PromptTemplate.clean(t.name, max: 40)
+        if t.name.isEmpty { t.name = t.launcher.title }
+        if t.launcher != .custom { t.customCommand = "" }
+        (t.source, t.by) = ("ui", "")
+        store.mutateAutomationFile { file in
+            if let i = file.targets.firstIndex(where: { $0.id == t.id }) {
+                file.targets[i] = t
+            } else if file.targets.count < LaunchTarget.maxCount {
+                t.id = file.newTargetID(t.launcher.rawValue)  // from the app it ended up with
+                file.targets.append(t)
+            }
+        }
+        dismiss()
+    }
+}
+
+/// Prompts › Edit…: one scenario's task text, the placeholders, Reset to Built-in, and the whole prompt it makes.
+struct ScenarioPromptSheet: View {
+    let store: Store
+    let scenario: Scenario
+    @State private var text: String
+    @Environment(\.dismiss) private var dismiss
+
+    init(store: Store, scenario: Scenario) {
+        self.store = store
+        self.scenario = scenario
+        _text = State(initialValue: store.automationFile.task(scenario))
+    }
+
+    private var blank: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    TextEditor(text: $text).font(.body.monospaced()).frame(height: 130)
+                } header: {
+                    Text(scenario.label)
+                } footer: {
+                    Text("Placeholders as in the prompt, for example {pr_url} {head_sha} {event_url} (the comment or review) {reviewed_sha} (the commit of your last review). At most \(Scenario.maxTaskLength) characters\(text.count > Scenario.maxTaskLength ? " (now \(text.count))" : "").").formFooter()
+                }
+                Section {
+                    Text(verbatim: preview).font(.caption.monospaced()).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                } header: {
+                    Text("Preview")
+                } footer: {
+                    if !store.handler.prompt.contains("{task}") {
+                        Text("The Handle with Agent prompt has no `{task}`, so it doesn't use this text yet.").formFooter()
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            HStack {
+                Button("Reset to Built-in") { text = scenario.builtIn }.disabled(text == scenario.builtIn)
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Save") {
+                    store.mutateAutomationFile { $0.scenarioPrompts[scenario.rawValue] = text == scenario.builtIn ? nil : text }
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction).disabled(blank || text.count > Scenario.maxTaskLength)
+            }
+            .padding(16)
+        }
+    }
+
+    /// The Handle with Agent prompt with this text, on the latest pull request (a placeholder one without any). Writes nothing.
+    private var preview: String {
+        let file = store.automationFile
+        var handler = file.handler
+        handler.workingDirectory = "~"  // the preview is about the prompt; the folder is checked when it runs
+        let pr = store.prs.first ?? {
+            var pr = TrackedPR(id: "PREVIEW", accountID: UUID(), firstTrackedAt: Date())
+            (pr.repo, pr.number, pr.title, pr.url) = ("octo-org/widgets", 12, "Add a widget cache", URL(string: "https://github.com/octo-org/widgets/pull/12")!)
+            return pr
+        }()
+        do {
+            return try LaunchPlanner.plan(handler, pr: pr, event: nil, account: store.account(pr.accountID)?.login ?? "", runID: "preview",
+                                          runsDir: FileManager.default.temporaryDirectory, home: NSHomeDirectory(), folders: file.repoFolders,
+                                          index: store.index(file.repoFolders), scenario: scenario, task: blank ? nil : text).promptText
+                .trimmingCharacters(in: .newlines)
+        } catch {
+            return error.localizedDescription
         }
     }
 }

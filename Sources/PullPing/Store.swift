@@ -483,7 +483,7 @@ final class Store {
                 PanelAction(id: match.automation.id, title: live.contains(match) ? "Go to Session" : "Run \(match.automation.name)") { [weak self] in
                     self?.run(match.automation, prID: match.pr.id, event: match.event)
                 }
-            } + (handler.handlerEvent(in: styled.map(\.0)).map { handlerActions(pr, event: $0) } ?? [])
+            } + (handler.handlerEvent(in: styled.map(\.0)).map { handlerActions(pr, event: $0, scenario: Scenario.derive(events: styled.map(\.0), pr: pr)) } ?? [])
             NotificationPanels.shared.show(pr: pr, events: styled.map(\.0), alert: alert,
                                            account: login(for: pr), autoHide: settings.autoHideSeconds, actions: actions)
             shown = true
@@ -690,7 +690,8 @@ final class Store {
 
     /// Equal but for provenance and the auto-run notice: what a conflict check compares.
     private static func same(_ a: Automation?, _ b: Automation?) -> Bool {
-        func plain(_ a: Automation?) -> Automation? { a.map { var a = $0; a.source = ""; a.by = ""; a.autoNoticeAt = nil; return a } }
+        // launcher / customCommand mirror the target: a change of the default is not an edit of this automation.
+        func plain(_ a: Automation?) -> Automation? { a.map { var a = $0; a.source = ""; a.by = ""; a.autoNoticeAt = nil; a.launcher = .terminal; a.customCommand = ""; return a } }
         return plain(a) == plain(b)
     }
 
@@ -714,6 +715,12 @@ final class Store {
         reload()
     }
 
+    /// Settings → Automations → Open With and Prompts, changed on the stored value.
+    func mutateAutomationFile(_ body: (inout AutomationFile) -> Void) {
+        automationStore.mutate(body)
+        reload()
+    }
+
     /// Handle with Agent › Look for earlier sessions.
     func setFindSessions(_ on: Bool) {
         automationStore.mutate { $0.findSessions = on }
@@ -721,7 +728,7 @@ final class Store {
     }
 
     /// `repoIndex`, rescanned when older than a minute or the roots changed.
-    private func index(_ folders: RepoFolders) -> RepoIndex {
+    func index(_ folders: RepoFolders) -> RepoIndex {
         let t = Date()
         if let index = repoIndex, index.roots == folders.roots, t.timeIntervalSince(index.scannedAt) < 60 { return index }
         let index = RepoIndex.scan(roots: folders.roots, home: NSHomeDirectory(), now: t)
@@ -760,7 +767,9 @@ final class Store {
                               done: (@MainActor (SessionCandidate?, Int) -> Void)?) {
         finding.remove(prID)
         found[prID] = (candidate, scanned, Date())
-        if candidate != nil, let pr = tracked.prs[prID] { NotificationPanels.shared.replaceHandlerActions(prID: prID, handlerActions(pr, event: event)) }
+        if candidate != nil, let pr = tracked.prs[prID] {
+            NotificationPanels.shared.replaceHandlerActions(prID: prID, handlerActions(pr, event: event, scenario: nil))
+        }
         done?(candidate, scanned)
     }
 
@@ -784,7 +793,7 @@ final class Store {
     }
 
     /// Resume Earlier Session: links the candidate (source "found"), then Resume Session. Nothing is linked without this click.
-    func resumeFound(_ c: SessionCandidate, prID: String, event: PREvent?) {
+    func resumeFound(_ c: SessionCandidate, prID: String, event: PREvent?, target: String? = nil, scenario: Scenario? = nil) {
         guard let pr = tracked.prs[prID] else { return }
         guard let link = c.link(pr: PRRef(repo: pr.repo, number: pr.number), now: Date(), by: "") else {
             NotificationPanels.shared.show(note: "Not resumed: its folders are gone.", title: "Earlier session · \(pr.repo) #\(pr.number)",
@@ -793,7 +802,7 @@ final class Store {
         }
         automationStore.mutate { $0.setLink(link) }
         reload()
-        runHandler(prID: prID, mode: .resume, event: event)
+        runHandler(prID: prID, mode: .resume, event: event, target: target, scenario: scenario)
     }
 
     func removeLink(_ link: SessionLink) {
@@ -801,28 +810,55 @@ final class Store {
         reload()
     }
 
-    /// Handle with Agent on a panel: one button, or Resume Session + New Session when the pull request has a linked session.
-    private func handlerActions(_ pr: TrackedPR, event: PREvent?) -> [PanelAction] {
+    /// Handle with Agent on a panel: one button, or Resume Session + New Session when the pull request has a linked session,
+    /// all on the default target; then a chevron with every choice (`HandlerMenu`) when there is more than the buttons hold.
+    /// `scenario`: from the panel's events (nil: the handler's event and the pull request).
+    private func handlerActions(_ pr: TrackedPR, event: PREvent?, scenario: Scenario?) -> [PanelAction] {
         guard handlerShown else { return [] }
         let id = pr.id
-        guard link(for: pr) != nil else {
+        let linked = link(for: pr) != nil
+        let more = linked || automationFile.targets.count > 1
+            ? [PanelAction(id: Automation.handlerMenuActionID, title: "More agent options", run: {}) { [weak self] in
+                self.map { HandlerMenu.nsMenu(store: $0, pr: pr, event: event, scenario: scenario) } ?? NSMenu()
+            }] : []
+        guard linked else {
             if let found = foundSession(for: pr) {
-                return [PanelAction(id: Automation.handlerResumeActionID, title: "Resume Earlier") { [weak self] in self?.resumeFound(found, prID: id, event: event) },
-                        PanelAction(id: Automation.handlerID, title: "New Session") { [weak self] in self?.runHandler(prID: id, mode: .new, event: event) }]
+                return [PanelAction(id: Automation.handlerResumeActionID, title: "Resume Earlier") { [weak self] in self?.resumeFound(found, prID: id, event: event, scenario: scenario) },
+                        PanelAction(id: Automation.handlerID, title: "New Session") { [weak self] in self?.runHandler(prID: id, mode: .new, event: event, scenario: scenario) }] + more
             }
             findSession(prID: id, event: event)
-            return [PanelAction(id: Automation.handlerID, title: "Handle with Agent") { [weak self] in self?.runHandler(prID: id, mode: .handle, event: event) }]
+            return [PanelAction(id: Automation.handlerID, title: "Handle with Agent") { [weak self] in self?.runHandler(prID: id, mode: .handle, event: event, scenario: scenario) }] + more
         }
-        return [PanelAction(id: Automation.handlerResumeActionID, title: "Resume Session") { [weak self] in self?.runHandler(prID: id, mode: .resume, event: event) },
-                PanelAction(id: Automation.handlerID, title: "New Session") { [weak self] in self?.runHandler(prID: id, mode: .new, event: event) }]
+        return [PanelAction(id: Automation.handlerResumeActionID, title: "Resume Session") { [weak self] in self?.runHandler(prID: id, mode: .resume, event: event, scenario: scenario) },
+                PanelAction(id: Automation.handlerID, title: "New Session") { [weak self] in self?.runHandler(prID: id, mode: .new, event: event, scenario: scenario) }] + more
+    }
+
+    /// Handle with Agent's choices for a pull request, by target (`HandlerMenuModel`).
+    func handlerSections(_ pr: TrackedPR) -> [HandlerMenuSection] {
+        HandlerMenuModel.sections(targets: automationFile.targets, linked: link(for: pr)?.sessionID,
+                                  earlier: foundSession(for: pr).map { "\($0.sessionID.prefix(4))…, \(relativeAge($0.modifiedAt, now: now))" })
+    }
+
+    /// A menu choice (`HandlerChoice`) on a pull request.
+    func perform(_ choice: HandlerChoice, prID: String, event: PREvent?, scenario: Scenario? = nil) {
+        switch choice {
+        case .handle(let target): runHandler(prID: prID, mode: .handle, event: event, target: target, scenario: scenario)
+        case .resume(let target, let prompt): runHandler(prID: prID, mode: .resume, event: event, target: target, prompt: prompt, scenario: scenario)
+        case .new(let target): runHandler(prID: prID, mode: .new, event: event, target: target, scenario: scenario)
+        case .resumeEarlier(let target):
+            if let pr = tracked.prs[prID], let found = foundSession(for: pr) { resumeFound(found, prID: prID, event: event, target: target, scenario: scenario) }
+        case .findEarlier: findEarlierSession(prID: prID)
+        }
     }
 
     /// `handle`: resume the linked session when there is one, else a new session.
     enum HandlerMode { case handle, resume, new }
 
     /// A click on Handle with Agent, Resume Session or New Session (`edited`: the editor's Try, unsaved). Needs Run Automations
-    /// and the handler on; no caps but a double-click guard.
-    func runHandler(prID: String, mode: HandlerMode, event: PREvent?, edited: Automation? = nil) {
+    /// and the handler on; no caps but a double-click guard. `target`: an Open With choice (nil: the default); `prompt` false:
+    /// Resume Without Prompt; `scenario` nil: from `event` and the pull request.
+    func runHandler(prID: String, mode: HandlerMode, event: PREvent?, edited: Automation? = nil, target: String? = nil, prompt: Bool = true,
+                    scenario: Scenario? = nil) {
         let t = Date()
         guard let pr = tracked.prs[prID], let account = account(pr.accountID) else { return }
         let file = automationStore.load()
@@ -834,7 +870,8 @@ final class Store {
         var handler = edited ?? file.handler
         let resume = mode == .resume || (mode == .handle && file.link(for: pr.repo, number: pr.number) != nil)
         handler.sessionID = resume ? Automation.linkedSession : nil
-        launch(handler, pr: pr, login: account.login, event: event, eventID: "manual:\(t.ISO8601Format())", key: "handler|\(prID)", file: file, at: t)
+        launch(handler, pr: pr, login: account.login, event: event, eventID: "manual:\(t.ISO8601Format())", key: "handler|\(prID)", file: file, at: t,
+               target: target, prompt: prompt || !resume, scenario: scenario)
     }
 
     /// A run that didn't start: a beep alone went unnoticed, so a note panel says why (Recent Runs and the log keep it too).
@@ -872,10 +909,10 @@ final class Store {
         launch(automation, pr: pr, login: account.login, event: event, eventID: eventID, key: key, file: file, at: t, auto: auto)
     }
 
-    /// Resolves a linked session, plans, launches and records one run. A new Claude session starts with an id PullPing picks
-    /// and, once launched, is the pull request's linked session.
+    /// Resolves a linked session and the target, plans, launches and records one run. A new Claude session starts with an id
+    /// PullPing picks and, once launched, is the pull request's linked session. `scenario` nil: from `event` and the pull request.
     private func launch(_ automation: Automation, pr: TrackedPR, login: String, event: PREvent?, eventID: String, key: String,
-                        file: AutomationFile, at t: Date, auto: Bool = false) {
+                        file: AutomationFile, at t: Date, auto: Bool = false, target: String? = nil, prompt: Bool = true, scenario: Scenario? = nil) {
         if launching.contains(key) { return }
         if automation.usesLinkedSession && file.link(for: pr.repo, number: pr.number) == nil {
             AgentLauncher.log.info("run skipped: \(LaunchError.noLinkedSession.localizedDescription, privacy: .public)")
@@ -883,23 +920,24 @@ final class Store {
             return
         }
         launching.insert(key)
+        let scenario = scenario ?? Scenario.derive(events: event.map { [$0] } ?? [], pr: pr)
         let record = { [weak self] (a: Automation, error: String?, link: SessionLink?, note: String) in
             guard let self else { return }
-            let name = a.id == Automation.handlerID ? "\(a.name) (\(AutomationCLI.sessionWord(a)))" : a.name
+            let name = AutomationCLI.runName(a, scenario: scenario, prompt: prompt)
             self.automationStore.mutate {
                 $0.runs.append(RunRecord(automationID: a.id, prID: pr.id, eventID: eventID, at: t, ok: error == nil, detail: error ?? a.launcher.title + note,
                                          label: "\(name) · \(pr.repo) #\(pr.number)"))
                 if error == nil, let link { $0.setLink(link) }
             }
-            self.record([ActivityEntry(run: a, pr: pr, account: login, event: event?.kind, error: error, at: t)])
+            self.record([ActivityEntry(run: a, pr: pr, account: login, event: event?.kind, error: error, at: t, scenario: scenario, prompt: prompt)])
             if let error { self.runFailed("Couldn't start \(name)", "\(pr.repo) #\(pr.number): \(error)", id: a.id) }
             self.launching.remove(key)
             self.reload()
         }
         do {
             let index = index(file.repoFolders)
-            let (a, relinked, note) = try file.resolved(automation, repo: pr.repo, number: pr.number, headRef: pr.headRef,
-                                                        env: ProcessInfo.processInfo.environment, index: index)
+            let (a, relinked, note, opens) = try file.resolved(automation, target: target, repo: pr.repo, number: pr.number, headRef: pr.headRef,
+                                                               env: ProcessInfo.processInfo.environment, index: index)
             if let relinked { automationStore.mutate { $0.setLink(relinked) } }
             let newID = LaunchPlanner.newSessionID(for: a)
             // Where the pull request's code is: its linked session's folder, else a found session's (`RepoLocator` hints).
@@ -907,7 +945,8 @@ final class Store {
             let hints = [file.link(for: pr.repo, number: pr.number)?.cwd, candidate?.workDir, candidate?.launchDir].compactMap { $0 }
             var plan = try LaunchPlanner.plan(a, pr: pr, event: event, account: login, runID: UUID().uuidString,
                                               runsDir: AgentLauncher.runsDir, home: NSHomeDirectory(), newSessionID: newID,
-                                              folders: file.repoFolders, index: index, hints: hints, installed: { $0.isInstalled })
+                                              folders: file.repoFolders, index: index, hints: hints, installed: { $0.isInstalled }, target: opens,
+                                              prompt: prompt, scenario: scenario, task: file.task(scenario))
             if auto { plan.focusRunning = nil }  // the user may be typing in it: `handle` turned a live one into an ask already
             let link = newID.map { SessionLink(pr: PRRef(repo: pr.repo, number: pr.number), agent: .claude, sessionID: $0, cwd: plan.cwd, setAt: t, source: "app", by: "") }
             Task {

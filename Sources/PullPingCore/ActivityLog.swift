@@ -94,11 +94,13 @@ public struct ActivityEntry: Codable, Sendable, Equatable {
     }
 
     /// A launch PullPing started (app or `pullping run`); `error` nil = it started.
-    public init(run a: Automation, pr: TrackedPR, account: String, event: EventKind?, error: String?, at: Date) {
+    /// `scenario` / `prompt`: the handler's run name (`AutomationCLI.runName`).
+    public init(run a: Automation, pr: TrackedPR, account: String, event: EventKind?, error: String?, at: Date, scenario: Scenario? = nil,
+                prompt: Bool = true) {
         let handler = a.id == Automation.handlerID
         self.init(at: at, kind: handler ? .handler : .run, pr: pr, account: account)
         self.event = event
-        automation = handler ? "\(a.name) (\(AutomationCLI.sessionWord(a)))" : a.name
+        automation = AutomationCLI.runName(a, scenario: scenario, prompt: prompt)
         ok = error == nil
         self.error = error
     }

@@ -4,9 +4,11 @@ import SwiftUI
 
 /// A Run button on a panel: an automation in ask mode, or Handle with Agent.
 struct PanelAction {
-    let id: UUID  // the automation (Handle with Agent: `Automation.handlerID` / `handlerResumeActionID`)
+    let id: UUID  // the automation (Handle with Agent: `Automation.handlerID` / `handlerResumeActionID` / `handlerMenuActionID`)
     let title: String
     let run: @MainActor () -> Void
+    /// Set: an icon-only chevron that pops this menu up (Handle with Agent's other choices); `title` is its label.
+    var menu: (@MainActor () -> NSMenu)? = nil
 }
 
 /// What one panel shows; coalescing updates it in place.
@@ -64,7 +66,7 @@ final class NotificationPanels {
             model.pr = pr
             model.events += events.filter { new in !model.events.contains { $0.id == new.id } }
             // Handle with Agent's buttons are replaced as a set (a link may have appeared) and stay after the offers.
-            let handlerIDs: Set<UUID> = [Automation.handlerID, Automation.handlerResumeActionID]
+            let handlerIDs: Set<UUID> = [Automation.handlerID, Automation.handlerResumeActionID, Automation.handlerMenuActionID]
             if actions.contains(where: { handlerIDs.contains($0.id) }) { model.actions.removeAll { handlerIDs.contains($0.id) } }
             for new in actions {  // a newer offer of the same automation replaces the older one (its event)
                 if let i = model.actions.firstIndex(where: { $0.id == new.id }) { model.actions[i] = new } else { model.actions.append(new) }
@@ -105,7 +107,7 @@ final class NotificationPanels {
     func replaceHandlerActions(prID: String, _ actions: [PanelAction]) {
         // Only on a panel whose events show the handler (its kinds), as `Store.show` decides.
         guard let model = active.first(where: { $0.prID == prID })?.model, store?.handler.handlerEvent(in: model.events) != nil else { return }
-        let handlerIDs: Set<UUID> = [Automation.handlerID, Automation.handlerResumeActionID]
+        let handlerIDs: Set<UUID> = [Automation.handlerID, Automation.handlerResumeActionID, Automation.handlerMenuActionID]
         model.actions = model.actions.filter { !handlerIDs.contains($0.id) } + actions
     }
 
@@ -340,32 +342,45 @@ struct NotificationContent: View {
                     Label(model.moreCount == nil ? "Open" : "Open Window", systemImage: "arrow.up.right.square")
                 }
                 .labelStyle(CompactLabelStyle(compact: compact))
-                .buttonStyle(SignalButtonStyle(signal: hue, prominent: !compact))
+                .buttonStyle(SignalButtonStyle(signal: hue, prominent: !compact, padding: compact ? 7 : 10))
                 .help(model.moreCount == nil ? "Open the \(noun) in the browser" : "Open the PullPing window")
                 if model.moreCount == nil {
-                    ForEach(Array(model.actions.prefix(2).enumerated()), id: \.offset) { index, action in
+                    let buttons = model.actions.filter { $0.menu == nil }
+                    ForEach(Array(buttons.prefix(2).enumerated()), id: \.offset) { index, action in
                         Button { action.run(); onDismiss() } label: {
                             Label(action.title, systemImage: "play.fill").lineLimit(1)
                         }
                         .buttonStyle(SignalButtonStyle(signal: hue, prominent: index == 0))
                         .help("\(action.title): start the agent in a terminal")
+                        .layoutPriority(1)  // room first, so they truncate only when the row is really full
                     }
-                    if model.actions.count > 2 {
-                        Text(verbatim: "+\(model.actions.count - 2)").font(.callout).foregroundStyle(.secondary)
+                    if buttons.count > 2 {
+                        Text(verbatim: "+\(buttons.count - 2)").font(.callout).foregroundStyle(.secondary).fixedSize()
                             .help("More in the pull request's menu")
-                            .accessibilityLabel("\(model.actions.count - 2) more in the pull request's menu")
+                            .accessibilityLabel("\(buttons.count - 2) more in the pull request's menu")
+                    }
+                    if let more = model.actions.first(where: { $0.menu != nil }) {
+                        // An AppKit menu at the mouse (a SwiftUI Menu doesn't open reliably in a panel that is never key).
+                        Button { if more.menu?().popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil) == true { onDismiss() } } label: {
+                            Label(more.title, systemImage: "chevron.down")
+                        }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(SignalButtonStyle(signal: hue, padding: 4))  // a narrow chevron: the titled buttons keep their room
+                        .help(more.title)
                     }
                     Button(action: onSnooze) { Label("Snooze…", systemImage: "moon.zzz") }
                         .labelStyle(CompactLabelStyle(compact: compact, icon: false))
-                        .buttonStyle(SignalButtonStyle(signal: hue))
+                        .buttonStyle(SignalButtonStyle(signal: hue, padding: compact ? 7 : 10))
                         .help("Snooze this \(noun)")
                     Button(action: onMute) { Label(model.pr.isIssue ? "Mute Issue" : "Mute PR", systemImage: "bell.slash") }
                         .labelStyle(CompactLabelStyle(compact: compact, icon: false))
-                        .buttonStyle(SignalButtonStyle(signal: hue))
+                        .buttonStyle(SignalButtonStyle(signal: hue, padding: compact ? 7 : 10))
                         .help("Stop notifications and reminders for this \(noun)")
                 }
-                Spacer(minLength: 4)
-                if let account = model.account, !compact { Chip(text: account, symbol: "person.crop.circle").fixedSize() }
+                if !compact {  // compact: the buttons get every point
+                    Spacer(minLength: 4)
+                    if let account = model.account { Chip(text: account, symbol: "person.crop.circle").fixedSize() }
+                }
             }
         }
         .padding(.vertical, 10)
@@ -423,22 +438,25 @@ private struct CompactLabelStyle: LabelStyle {
 private struct SignalButtonStyle: ButtonStyle {
     var signal: Color
     var prominent = false
+    /// Horizontal; icon-only buttons next to agent buttons go narrower.
+    var padding: CGFloat = 10
 
     func makeBody(configuration: Configuration) -> some View {
-        SignalButtonBody(cfg: configuration, signal: signal, prominent: prominent)
+        SignalButtonBody(cfg: configuration, signal: signal, prominent: prominent, padding: padding)
     }
 
     private struct SignalButtonBody: View {
         let cfg: Configuration
         let signal: Color
         let prominent: Bool
+        let padding: CGFloat
         @State private var hover = false
         @Environment(\.colorSchemeContrast) private var contrast
 
         var body: some View {
             cfg.label
                 .font(.callout.weight(.semibold))
-                .padding(.horizontal, 10)
+                .padding(.horizontal, padding)
                 .padding(.vertical, 4)
                 .foregroundStyle(prominent ? AnyShapeStyle(Theme.onSignal) : AnyShapeStyle(.primary))
                 .background(

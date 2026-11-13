@@ -43,7 +43,7 @@ enum AgentLauncher {
         }
         do {
             removeOldRuns()
-            try write(plan.promptText, to: plan.promptPath, mode: 0o600)
+            if !plan.promptPath.isEmpty { try write(plan.promptText, to: plan.promptPath, mode: 0o600) }
             try write(plan.script, to: plan.scriptPath, mode: 0o700)
         } catch {
             return ("Couldn't write the run files: \(error.localizedDescription)", "")
@@ -90,9 +90,11 @@ enum AgentLauncher {
         return (nil, ref.flatMap { ghostex(GhostexSessions.focus(globalRef: $0), environment: environment) } != nil ? "" : " (not focused)")
     }
 
-    /// The running session was focused: writes the prompt (0600) and types the draft line into it, without Enter.
+    /// The running session was focused: writes the prompt (0600) and types the draft line into it, without Enter. Resume
+    /// Without Prompt (no prompt path): nothing more.
     static func draft(_ plan: LaunchPlan, environment: [String: String] = LaunchPlanner.launchEnvironment(ProcessInfo.processInfo.environment))
         -> (error: String?, note: String) {
+        guard !plan.promptPath.isEmpty else { return (nil, GhostexSessions.focusedNote) }
         do {
             try FileManager.default.createDirectory(at: runsDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             removeOldRuns()

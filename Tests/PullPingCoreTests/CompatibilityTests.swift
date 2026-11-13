@@ -78,6 +78,47 @@ final class CompatibilityTests: XCTestCase {
         XCTAssertEqual(settings.style(for: .comment, mine: false), .off)  // kept for a downgrade and phone priority
     }
 
+    /// A 0.7 automations file shaped like a real one (handler in Ghostex with a wrapper, `{repo_root}`, its own prompt, Look
+    /// for earlier sessions on, links and runs): it loads unchanged but for the new keys, and saves back the same.
+    func testV07AutomationsFileMigrates() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("automations.json")
+        try fixture("v07-automations").write(to: url)
+        let original = try XCTUnwrap(JSONSerialization.jsonObject(with: fixture("v07-automations")) as? [String: Any])
+        let store = AutomationStore(url: url)
+        let file = store.load()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent("automations.broken.json").path))
+        XCTAssertEqual(file.targets, [LaunchTarget(id: "ghostex", name: "Ghostex", launcher: .ghostex)])
+        XCTAssertTrue(file.targets[0].reuseRunning, "Ghostex keeps focusing a running session")
+        let h = file.handler
+        XCTAssertEqual([h.agentCommand, h.workingDirectory, h.launcher.rawValue], ["wrapper", "{repo_root}", "ghostex"])
+        XCTAssertEqual(h.prompt, (original["handler"] as? [String: Any])?["prompt"] as? String, "a custom prompt is untouched")
+        XCTAssertFalse(h.prompt.contains("{task}"))
+        XCTAssertTrue(h.enabled && file.findSessions && file.enabled)
+        XCTAssertEqual(h.kinds.count, 11)
+        XCTAssertEqual(file.sessions.map(\.sessionID), ["0f3c2a1e-5b7d-4c9e-8a10-2b4d6f8e1c3a"])
+        XCTAssertEqual(file.runs.count, 1)
+        XCTAssertEqual(file.repoFolders.overrides, ["octo-org/widgets": "~/src/widgets-main"])
+        XCTAssertEqual(file.scenarioPrompts, [:])
+        XCTAssertEqual(file.target(for: h).target.id, "ghostex")
+        // The first save writes the targets and keeps every old key as it was.
+        store.mutate { $0.findSessions = false; $0.findSessions = true; $0.runs.append($0.runs[0]) }
+        let saved = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        XCTAssertEqual((saved["targets"] as? [[String: Any]])?.map { $0["id"] as? String }, ["ghostex"])
+        func handler(_ json: [String: Any]) -> (NSDictionary, Set<String>) {  // kinds: a set, written in any order
+            var h = json["handler"] as? [String: Any] ?? [:]
+            let kinds = Set(h.removeValue(forKey: "kinds") as? [String] ?? [])
+            return (h as NSDictionary, kinds)
+        }
+        XCTAssertEqual(handler(saved).0, handler(original).0, "0.7 reads the same handler")
+        XCTAssertEqual(handler(saved).1, handler(original).1)
+        XCTAssertEqual(saved["sessions"] as? NSArray, original["sessions"] as? NSArray)
+        XCTAssertEqual(saved["repoFolders"] as? NSDictionary, original["repoFolders"] as? NSDictionary)
+        XCTAssertEqual(AutomationStore(url: url).load().targets, file.targets)
+    }
+
     func testOldAccountsLoad() throws {
         let accounts = try JSONDecoder().decode([Account].self, from: fixture("old-format-accounts"))
         XCTAssertEqual(accounts.map(\.login), ["dana"])

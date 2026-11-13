@@ -131,11 +131,16 @@ public enum LaunchPlanner {
     /// `event` nil = a manual run (Run menu, Try). `home` expands a leading `~`. `newSessionID` (a UUID): a new Claude session
     /// starts with this id; ignored for Codex and resumes. `folders`, `index`, `hints`: `RepoLocator.locate`, only when a template
     /// uses one of its placeholders (nil `index`: scanned here). `installed`: the app checks the launcher's app.
+    /// `target`: where it opens (app, custom line, Ghostex reuse); nil = the automation's own `launcher` / `customCommand`.
+    /// `prompt` false (Resume Without Prompt): no prompt file and no prompt argument; Ghostex reuse focuses only.
+    /// `scenario` and `task` (nil = its built-in text) fill `{task}` first, then the values fill everything in one pass.
     public static func plan(_ a: Automation, pr: TrackedPR, event: PREvent?, account: String, runID: String, runsDir: URL,
                             home: String, newSessionID: String? = nil, folders: RepoFolders = RepoFolders(), index: RepoIndex? = nil,
-                            hints: [String] = [], installed: (Launcher) -> Bool = { _ in true }) throws -> LaunchPlan {
+                            hints: [String] = [], installed: (Launcher) -> Bool = { _ in true }, target: LaunchTarget? = nil,
+                            prompt: Bool = true, scenario: Scenario = .general, task: String? = nil) throws -> LaunchPlan {
+        let launcher = target?.launcher ?? a.launcher, customCommand = target?.customCommand ?? a.customCommand
         guard isValidRepo(pr.repo) else { throw LaunchError.badRepository(pr.repo) }
-        guard installed(a.launcher) else { throw LaunchError.notInstalled(a.launcher.title) }
+        guard installed(launcher) else { throw LaunchError.notInstalled(launcher.title) }
         let session = a.sessionID.flatMap { $0.isEmpty ? nil : $0 }
         if let session, !isValidSessionID(session) { throw LaunchError.badSessionID }
         let newSession = session == nil && a.agent == .claude ? newSessionID : nil
@@ -149,21 +154,25 @@ public enum LaunchPlanner {
             "title": PromptTemplate.clean(pr.title, max: 200), "author": PromptTemplate.clean(pr.authorLogin, max: 64),
             "actor": PromptTemplate.clean(event?.actor ?? account, max: 64), "summary": PromptTemplate.clean(event?.summary ?? "", max: 120),
             "branch": pr.isIssue ? "" : PromptTemplate.clean(pr.headRef ?? "", max: 255),
+            "scenario": scenario.rawValue, "scenario_label": scenario.label, "resume_note": session == nil ? "" : Scenario.resumeNote,
+            "event_url": eventURL(event, pr: pr), "reviewed_sha": pr.myReview?.commitOID.flatMap { $0.wholeMatch(of: #/[0-9a-f]{40}/#) == nil ? nil : $0 } ?? "",
         ]
+        // Config into config first: GitHub values below are inserted once and never expanded again.
+        let template = PromptTemplate.render(a.prompt, ["task": task ?? scenario.builtIn])
         let folderKeys = ["repo_dir", "repo_root", "main_dir", "worktree_dir"]
         var location: RepoLocation?
-        if folderKeys.contains(where: { a.workingDirectory.contains("{\($0)}") || a.prompt.contains("{\($0)}") }) {
+        if folderKeys.contains(where: { a.workingDirectory.contains("{\($0)}") || template.contains("{\($0)}") }) {
             let at = RepoLocator.locate(repo: pr.repo, headRef: pr.isIssue ? nil : pr.headRef, hints: hints, folders: folders,
                                         index: index ?? RepoIndex.scan(roots: folders.roots, home: home, now: Date()), home: home)
             for (key, value) in zip(folderKeys, [at.repoDir, at.repoRoot, at.mainDir, at.worktreeDir]) { values[key] = value }
             location = at
         }
         // GitHub text never picks the folder the agent runs in.
-        let cwd = try directory(PromptTemplate.render(a.workingDirectory, values.filter { !["title", "author", "actor", "summary", "branch"].contains($0.key) }),
-                                home: home)
+        let promptOnly = ["title", "author", "actor", "summary", "branch", "scenario", "scenario_label", "resume_note", "event_url", "reviewed_sha"]
+        let cwd = try directory(PromptTemplate.render(a.workingDirectory, values.filter { !promptOnly.contains($0.key) }), home: home)
         values["cwd"] = cwd
         let title = PromptTemplate.clean("PullPing: \(pr.repo) #\(pr.number)", max: 200)
-        let promptPath = runsDir.appendingPathComponent("\(runID).prompt.md").path
+        let promptPath = prompt ? runsDir.appendingPathComponent("\(runID).prompt.md").path : ""
         let scriptPath = runsDir.appendingPathComponent("\(runID).command").path
         let command = agentCommand(a, session: session, newSession: newSession, promptPath: promptPath)
         // -il: interactive login shell, so the user's PATH, functions and aliases apply; the exec keeps the window open.
@@ -177,7 +186,7 @@ public enum LaunchPlanner {
             """
         let q = shellQuote
         let line: String
-        switch a.launcher {
+        switch launcher {
         case .terminal: line = "open -a Terminal \(q(scriptPath))"
         // iTerm2 runs a script file it is asked to open, in a new window (or tab: its OpenFileInNewWindows setting).
         case .iterm2: line = "open -b com.googlecode.iterm2 \(q(scriptPath))"
@@ -191,33 +200,43 @@ public enum LaunchPlanner {
         // --input (the quoted script path, submitted). The project id comes from the launcher at run time.
         case .ghostex: line = "ghostex create-session \(q(title)) --start --project-id \"$PULLPING_GHOSTEX_PROJECT\" --cwd \(q(cwd)) --input \(q(q(scriptPath)))"
         case .custom:
-            let template = a.customCommand.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !template.isEmpty else { throw LaunchError.emptyCustomCommand }
-            line = PromptTemplate.render(template, ["script": q(scriptPath), "cwd": q(cwd), "title": q(title), "prompt_file": q(promptPath),
-                                                    "agent_command": q(command)])
+            let custom = customCommand.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !custom.isEmpty else { throw LaunchError.emptyCustomCommand }
+            line = PromptTemplate.render(custom, ["script": q(scriptPath), "cwd": q(cwd), "title": q(title), "prompt_file": q(promptPath),
+                                                  "agent_command": q(command)])
         }
-        var promptText = PromptTemplate.render(a.prompt, values)
+        var promptText = prompt ? PromptTemplate.render(template, values) : ""
         // The prompt is the agent's positional argument: starting with "-" it would be an option (`{summary}` = "--settings=…"),
         // and a bare placeholder could be a subcommand (`logout`). A leading newline makes it plain text for claude and codex alike.
-        if promptText.first == "-" || a.prompt.first == "{" { promptText = "\n" + promptText }
-        let reuse = a.launcher == .ghostex ? session : nil  // only Ghostex can find the window of an agent session
+        if prompt, promptText.first == "-" || template.first == "{" { promptText = "\n" + promptText }
+        // Only Ghostex can find the window of an agent session; the target can turn that off.
+        let reuse = launcher == .ghostex && target?.reuseRunning != false ? session : nil
         return LaunchPlan(cwd: cwd, title: title, promptText: promptText, promptPath: promptPath,
-                          scriptPath: scriptPath, script: script, launchLine: line, repo: location, needsGhostexProject: a.launcher == .ghostex,
+                          scriptPath: scriptPath, script: script, launchLine: line, repo: location, needsGhostexProject: launcher == .ghostex,
                           focusRunning: reuse.map { GhostexSessions.focusRunning(sessionID: $0, agent: a.agent) },
-                          draftLine: reuse.map { GhostexSessions.draft(sessionID: $0, promptPath: promptPath) })
+                          draftLine: prompt ? reuse.map { GhostexSessions.draft(sessionID: $0, promptPath: promptPath) } : nil)
+    }
+
+    /// `{event_url}`: the triggering comment's or review's URL when it is `https` on the pull request's own host, else the
+    /// pull request's URL.
+    static func eventURL(_ event: PREvent?, pr: TrackedPR) -> String {
+        guard let url = event?.url, url.scheme?.lowercased() == "https", let host = url.host?.lowercased(), host == pr.url.host?.lowercased()
+        else { return pr.url.absoluteString }
+        return url.absoluteString
     }
 
     /// Interactive sessions: the user watches and steers. The command override replaces the leading word; no permission flags ever.
+    /// `promptPath` empty: no prompt argument (Resume Without Prompt).
     static func agentCommand(_ a: Automation, session: String?, newSession: String?, promptPath: String) -> String {
         let override = a.agentCommand.trimmingCharacters(in: .whitespacesAndNewlines)
         // `\claude` skips shell aliases (e.g. one adding a permission-bypass flag) but keeps functions; the override is the user's own.
         let exe = override.isEmpty ? "\\" + a.agent.rawValue : override
-        let prompt = "\"$(< \(shellQuote(promptPath)))\""
-        if let newSession { return "\(exe) --session-id \(shellQuote(newSession)) \(prompt)" }
-        guard let session else { return "\(exe) \(prompt)" }
+        let prompt = promptPath.isEmpty ? "" : " \"$(< \(shellQuote(promptPath)))\""
+        if let newSession { return "\(exe) --session-id \(shellQuote(newSession))\(prompt)" }
+        guard let session else { return "\(exe)\(prompt)" }
         switch a.agent {
-        case .claude: return "\(exe) --resume \(shellQuote(session)) \(prompt)"
-        case .codex: return "\(exe) resume \(shellQuote(session)) \(prompt)"
+        case .claude: return "\(exe) --resume \(shellQuote(session))\(prompt)"
+        case .codex: return "\(exe) resume \(shellQuote(session))\(prompt)"
         }
     }
 

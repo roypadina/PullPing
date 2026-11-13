@@ -22,6 +22,13 @@ public struct RunRequest: Sendable {
     public var handoff = false
     /// `session resume` focused the session open in Ghostex: the run only writes the prompt and types the draft line.
     public var focused = false
+    /// Where it opens (`AutomationFile.target(for:picked:)`); nil = the automation's own app.
+    public var target: LaunchTarget? = nil
+    /// false: Resume Without Prompt (`--no-prompt`).
+    public var prompt = true
+    /// Fills `{task}` (`Scenario.derive`, `--scenario`) with `task`, the text in use.
+    public var scenario = Scenario.general
+    public var task: String? = nil
 }
 
 public enum AutomationCLI {
@@ -37,16 +44,20 @@ public enum AutomationCLI {
         within 30 seconds.
 
         Commands:
+          setup guide|prompt|status                   Let your agent set all of this up with you: setup guide.
           rule add|edit|show|list|enable|disable|rm   Rules: act on events across your pull requests.
           hook add|edit|show|list|enable|disable|rm   Hooks: follow up on one pull request or issue.
           session set|show|list|rm|find|resume        The agent session linked to a pull request (Resume Session).
-          handler show|set|on|off                     The Handle with Agent button on notifications.
+          handler show|set|on|off|run                 The Handle with Agent button on notifications.
+          targets list|add|edit|default|rm            Open With: where agent sessions open; the first is the default.
+          prompts list|show|set|reset                 The task text of each scenario (review, CI failed, …).
           run <id> [--pr <ref>] [--dry-run]           Run a rule or hook now, like the Run Automation menu.
           runs [--limit <n> | --all]                  Recent runs, newest first.
           activity [--since <time>] [--pr <ref>]      What PullPing saw and did: every event, notification and run.
           automations status|on|off|folders|repos     The Run Automations switch, and where {repo_dir} looks.
           kinds                                       The event kinds --on accepts.
           launchers                                   The terminal apps --launcher accepts.
+          --version                                   PullPing's version.
 
         From inside a Claude Code session, whenever it creates, reviews or touches a pull request:
           pullping session set --pr <url> --session "$CLAUDE_CODE_SESSION_ID" --agent claude --quiet
@@ -74,10 +85,12 @@ public enum AutomationCLI {
           --ask | --auto                      ask first (a Run button; default) or start at once
           --agent claude|codex                default claude
           --command <exe>                     runs instead of claude/codex (a wrapper or shell function)
-          --launcher <id>                     default terminal; an installed app (pullping launchers) or custom, which
-                                              needs --custom-command
-          --custom-command <line>             the launch line; placeholders, inserted already quoted: {script} {cwd} {title}
-                                              {prompt_file} {agent_command}
+          --target <id> | default             where it opens (pullping targets); default: the first target, also after
+                                              you change it
+          --launcher <id>                     older form of --target: the target with that id or app, created when
+                                              there is room (custom: with --custom-command, the target with that exact
+                                              line; placeholders {script} {cwd} {title} {prompt_file} {agent_command})
+          --custom-command <line>
           --repeat <n>                        successful runs per pull request, 1 to 10; rules default 3, hooks 1
           --pr <url | owner/repo#n>           hooks only; required on add
           --session <id> | linked             hooks: resume this session (Claude Code: $CLAUDE_CODE_SESSION_ID; Codex: the
@@ -92,6 +105,9 @@ public enum AutomationCLI {
         Prompt placeholders: {pr_url} {pr_number} {repo} {repo_owner} {repo_name} {repo_dir} {repo_root} {main_dir}
         {worktree_dir} {is_issue} {head_sha} {event} {event_label} {account} {session_id} {cwd} {automation}. Text
         written by others on GitHub (cleaned, shortened; never in --cwd): {title} {author} {actor} {summary} {branch}.
+        Prompt only: {task} the scenario's task text (pullping prompts; a prompt without it is used exactly as
+        written), {scenario} {scenario_label}, {resume_note} (a sentence on a resume, else empty), {event_url} (the
+        comment or review, else {pr_url}), {reviewed_sha} (the commit of your last review).
         {repo_dir}: the clone of the repository, found by its git remote under the repository folders (pullping
         automations folders, 3 levels deep; pullping automations repos overrides it), else the first <folder>/<repo
         name>, else the fallback folder. {repo_root}: the repository folder holding it. {main_dir}: its main worktree.
@@ -148,13 +164,14 @@ public enum AutomationCLI {
         """
 
     public static let runHelp = """
-        Usage: pullping run <id> [--pr <url | owner/repo#n>] [--dry-run] [--json]
+        Usage: pullping run <id> [--pr <url | owner/repo#n>] [--scenario <id>] [--dry-run] [--json]
 
         Runs a rule or hook now on a pull request PullPing tracks, like Run Automation in its menus: Run Automations
         must be on, the automation enabled, and its runs per pull request not used up. A rule needs --pr; a hook runs
         on its own pull request. The run shows in Recent Runs (pullping runs). --dry-run prints the working directory,
         the repository folder and how it was found (override, hint, remote, name or fallback; when a folder
-        placeholder is used), terminal title, launch line and prompt, and starts and records nothing.
+        placeholder is used), terminal title, launch line and prompt, and starts and records nothing. --scenario picks
+        the task text for {task} (pullping prompts); default: what the pull request needs from you now.
         """
 
     public static let runsHelp = """
@@ -208,7 +225,8 @@ public enum AutomationCLI {
           list    [--json]
           rm      --pr <ref>
           find    --pr <ref> [--link] [--days <n>] [--exclude <id>] [--json]
-          resume  --pr <ref> [--prompt <text> | --prompt-file <path | ->] [--force] [--by <text>] [--json]
+          resume  --pr <ref> [--prompt <text> | --prompt-file <path | -> | --no-prompt] [--target <id>]
+                  [--scenario <id>] [--force] [--by <text>] [--json]
 
         Options for set:
           --session <id>     Claude Code: $CLAUDE_CODE_SESSION_ID; Codex: the thread id
@@ -234,9 +252,11 @@ public enum AutomationCLI {
         PullPing tracking the pull request. Refuses a session whose transcript changed in the last 2 minutes (open
         in another terminal; --force starts it anyway; with Ghostex, one open there is focused instead and a line
         pointing at the prompt is typed into it), the calling session itself (even with --force) and a second
-        hand-off on the pull request within a minute. --prompt replaces the handler's prompt for this run; --by (default
-        $CLAUDE_CODE_SESSION_ID) is shown in Recent Runs. After a hand-off, say "handed off to session <id>" and
-        stop: never keep editing the same worktree.
+        hand-off on the pull request within a minute. --prompt replaces the handler's prompt for this run;
+        --no-prompt resumes it with no prompt at all (Resume Without Prompt); --target opens it with another Open
+        With target than the default (pullping targets); --scenario picks the task text (pullping prompts; default:
+        what the pull request needs from you now); --by (default $CLAUDE_CODE_SESSION_ID) is shown in Recent Runs.
+        After a hand-off, say "handed off to session <id>" and stop: never keep editing the same worktree.
 
         Example, from inside a Claude Code session:
           pullping session set --pr "$(gh pr view --json url -q .url)" --session "$CLAUDE_CODE_SESSION_ID" --agent claude --quiet
@@ -245,10 +265,17 @@ public enum AutomationCLI {
 
     public static let handlerHelp = """
         Usage: pullping handler show | set [options] | on | off [--json]
+               pullping handler run --pr <ref> --dry-run [--new | --resume] [--no-prompt] [--target <id>] [--scenario <id>] [--json]
 
         Handle with Agent: a button on the notifications you pick (--on) and an item in the pull request's menu that
         starts your agent on it when you click. With a linked session (pullping session) it becomes Resume Session and New
-        Session. Off by default; never runs on its own.
+        Session. It opens with the default Open With target (pullping targets); the pull request's menu offers the others
+        and Resume Without Prompt. Off by default; never runs on its own.
+
+        run --dry-run: what a click would start on a pull request PullPing tracks (working directory, launch line, the
+        whole prompt), with the same gates; writes and starts nothing. --new / --resume: New Session / Resume Session
+        (default: resume when the pull request has a linked session). Without --dry-run it is refused: start real runs
+        from the app or with pullping session resume.
 
         Options for set (only the given ones change; "" clears --command and --custom-command):
           --on <kind,…|all>                   the notifications that show the buttons (pullping kinds; reviewRequested
@@ -256,7 +283,9 @@ public enum AutomationCLI {
                                               convertedToDraft, merged, closed, retitled, labeled
           --agent claude|codex
           --command <exe>                     runs instead of claude/codex (a wrapper or shell function)
-          --launcher <id>                     an installed app (pullping launchers) or custom
+          --launcher <id>                     older form of pullping targets default: makes the target with that id or
+                                              app (custom: with --custom-command, that exact line) the default, created
+                                              when there is room
           --custom-command <line>
           --cwd <dir>                         default {repo_dir}; ~ and placeholders stay as typed
           --prompt <text> | --prompt-file <path | ->
@@ -264,13 +293,65 @@ public enum AutomationCLI {
                                               for a notification or the pull request's details; default off
           --by <text>                         who wrote it, shown in Settings; default $CLAUDE_CODE_SESSION_ID
 
-        The default prompt:
+        The default prompt ({task}: the scenario's task text, pullping prompts):
 
         \(Automation.defaultHandlerPrompt.split(separator: "\n").map { "  " + $0 }.joined(separator: "\n"))
         """
 
+    public static let targetsHelp = """
+        Usage: pullping targets list [--json]
+               pullping targets add <id> --launcher <id> [--name <text>] [--custom-command <line>] [--reuse on|off] [--first] [--json]
+               pullping targets edit <id> [--name <text>] [--launcher <id>] [--custom-command <line>] [--reuse on|off] [--json]
+               pullping targets default <id>
+               pullping targets rm <id>
+
+        Open With (Settings → Automations): where agent sessions open, at most \(LaunchTarget.maxCount). The first one is the
+        default: notification buttons, pullping session resume and rules without --target use it; the pull request's
+        menu offers every one. Terminal, iTerm2 and Ghostty always open a new window; Ghostex can focus a session that
+        already runs there instead of starting a second copy.
+
+        Options:
+          <id>                       a-z, 0-9 and -, at most 32 characters; what rules (--target) and menus refer to
+          --launcher <id>            an installed app (pullping launchers) or custom
+          --name <text>              the menu title, at most 40 characters; default the app's name
+          --custom-command <line>    custom only: the launch line; placeholders, inserted already quoted: {script} {cwd}
+                                     {title} {prompt_file} {agent_command}
+          --reuse on|off             Ghostex only: focus the session when it already runs there; default on
+          --first                    add it as the default
+          --by <text>                who wrote it, shown in Settings; default $CLAUDE_CODE_SESSION_ID
+
+        default moves a target to the front. rm refuses the last one; rules using it fall back to the default.
+        """
+
+    public static let promptsHelp = """
+        Usage: pullping prompts list [--json]
+               pullping prompts show <scenario> [--json]
+               pullping prompts set <scenario> (--text <text> | --file <path | ->)
+               pullping prompts reset <scenario>
+
+        Every agent prompt is a frame (the handler's or a rule's prompt) with a {task} line; {task} becomes the task text
+        of the run's scenario: what the pull request needs from you (a review, changes requested, CI failed, …). The
+        built-in texts explain and propose, then wait for your OK; set replaces one with yours (at most
+        \(Scenario.maxTaskLength) characters; the frame keeps the safety line), reset goes back to the built-in. Task texts
+        take the prompt placeholders too.
+
+        Scenarios:
+        \(Scenario.allCases.map { "  " + $0.rawValue.padding(toLength: 18, withPad: " ", startingAt: 0) + $0.label }.joined(separator: "\n"))
+        """
+
+    public static let setupHelp = """
+        Usage: pullping setup guide | prompt | status [--json]
+
+        guide: the setup guide for an agent (Claude Code, Codex) that configures PullPing's agent automations with you:
+        the questions to ask, the pullping commands for each answer, and how to verify. The copy that matches this
+        version of PullPing (also docs/agent-setup.md on GitHub).
+        prompt: the text to paste into your agent to start it (Settings → Automations → Copy Setup Prompt).
+        status: what is set today, in one snapshot.
+        """
+
     private static let helps = ["rule": ruleHelp, "hook": hookHelp, "run": runHelp, "runs": runsHelp, "automations": automationsHelp,
-                                "session": sessionHelp, "handler": handlerHelp, "activity": activityHelp]
+                                "session": sessionHelp, "handler": handlerHelp, "activity": activityHelp, "targets": targetsHelp,
+                                "prompts": promptsHelp, "setup": setupHelp]
 
     private struct Usage: Error { let message: String }
     private struct Failure: Error { let message: String }
@@ -280,26 +361,27 @@ public enum AutomationCLI {
     /// is a command, never a second app instance; no arguments and `-psn_…` / `-NSDocumentRevisionsDebugMode YES` launch the app.
     public static func isCLIInvocation(_ args: [String], program: String) -> Bool {
         guard let first = args.first else { return URL(fileURLWithPath: program).lastPathComponent == "pullping" }
-        return !first.hasPrefix("-") || first == "--help" || first == "-h"
+        return !first.hasPrefix("-") || ["--help", "-h", "--version"].contains(first)
     }
 
     private static let writeOptions: Set<String> = ["name", "on", "prompt", "prompt-file", "cwd", "scope", "repos", "actors", "agent", "command",
-                                                    "launcher", "custom-command", "repeat", "pr", "session", "expires", "by"]
+                                                    "launcher", "custom-command", "repeat", "pr", "session", "expires", "by", "target"]
     private static let writeFlags: Set<String> = ["ask", "auto", "enable", "disable", "json"]
 
     /// `args` without the program name: `["rule", "add", …]`, `["runs"]` or `["--help"]`. `run` is `prepareRun` (the app launches).
     /// An unreadable file or a failed save is one stderr line and exit 1 whatever the command printed, also with `--quiet`.
     /// `installed`: whether a launcher's app is installed (the app asks NSWorkspace); `--launcher` takes only those.
-    /// `state`: the tracked pull requests, read only when a command needs them (`session find`).
+    /// `state`: the tracked pull requests, read only when a command needs them (`session find`). `version`: the app's
+    /// (`--version`, `setup status`).
     public static func run(_ args: [String], store: AutomationStore, env: [String: String], now: Date,
                            installed: (Launcher) -> Bool = { _ in true },
-                           state: () -> TrackedState = { TrackedState() }) -> (output: String, error: String, status: Int32) {
-        let result = dispatch(args, store: store, env: env, now: now, installed: installed, state: state)
+                           state: () -> TrackedState = { TrackedState() }, version: String = "") -> (output: String, error: String, status: Int32) {
+        let result = dispatch(args, store: store, env: env, now: now, installed: installed, state: state, version: version)
         return store.failure.map { ("", "pullping: \($0)", 1) } ?? result
     }
 
     private static func dispatch(_ args: [String], store: AutomationStore, env: [String: String], now: Date,
-                                 installed: (Launcher) -> Bool, state: () -> TrackedState) -> (output: String, error: String, status: Int32) {
+                                 installed: (Launcher) -> Bool, state: () -> TrackedState, version: String) -> (output: String, error: String, status: Int32) {
         let group = args.first ?? "--help"
         do {
             let command = args.dropFirst().first ?? "--help"
@@ -313,6 +395,10 @@ public enum AutomationCLI {
             case "automations": return (try master(command, rest, store: store, env: env), "", 0)
             case "kinds": return (try kindList(Array(args.dropFirst())), "", 0)
             case "launchers": return (try launcherList(Array(args.dropFirst()), installed: installed), "", 0)
+            case "targets": return (try targets(command, rest, store: store, env: env, installed: installed), "", 0)
+            case "prompts": return (try prompts(command, rest, store: store, env: env), "", 0)
+            case "setup": return (try setup(command, rest, store: store, env: env, installed: installed, version: version), "", 0)
+            case "--version", "version": return (version.isEmpty ? "unknown (a development build)" : version, "", 0)
             case "--help", "help", "-h": return (help, "", 0)
             default: throw Usage(message: "unknown command '\(group)'")
             }
@@ -408,11 +494,14 @@ public enum AutomationCLI {
                 try noArguments(positional)
                 var a = try defaults(values, hook: hook, env: env, now: now)
                 try apply(values, flags, to: &a, hook: hook, env: env, now: now, installed: installed)
-                store.mutate { file in
-                    file.automations.append(a)
-                    if let link = sessionLink(a, values, now: now) { file.setLink(link) }
-                }
-                saved = a
+                saved = try store.mutate { file in
+                    Result {
+                        try selectTarget(values, for: &a, in: &file)
+                        file.automations.append(a)
+                        if let link = sessionLink(a, values, now: now) { file.setLink(link) }
+                        return a
+                    }
+                }.get()
             } else {
                 guard positional.count == 1 else { throw Usage(message: "\(command) takes one id prefix") }
                 guard !values.isEmpty || !flags.subtracting(["json"]).isEmpty else { throw Usage(message: "edit needs an option to change") }
@@ -420,6 +509,7 @@ public enum AutomationCLI {
                     Result {
                         var a = try resolve(positional[0], in: file.automations, hook: hook)
                         try apply(values, flags, to: &a, hook: hook, env: env, now: now, installed: installed)  // on a copy: a failed check changes nothing
+                        try selectTarget(values, for: &a, in: &file)
                         file.automations[file.automations.firstIndex { $0.id == a.id }!] = a
                         if let link = sessionLink(a, values, now: now) { file.setLink(link) }
                         return a
@@ -462,9 +552,46 @@ public enum AutomationCLI {
     private static func readPromptFile(_ values: inout [String: String], env: [String: String]) throws {
         guard let file = values.removeValue(forKey: "prompt-file") else { return }
         guard values["prompt"] == nil else { throw Usage(message: "use --prompt or --prompt-file, not both") }
+        values["prompt"] = try contents(file, option: "--prompt-file", env: env)
+    }
+
+    /// A file's text, relative to `$PWD`; `-` reads stdin.
+    private static func contents(_ file: String, option: String, env: [String: String]) throws -> String {
         let data = file == "-" ? FileHandle.standardInput.readDataToEndOfFile() : FileManager.default.contents(atPath: path(file, env: env))
-        guard let data, let text = String(data: data, encoding: .utf8) else { throw Usage(message: "can't read --prompt-file \(file)") }
-        values["prompt"] = text
+        guard let data, let text = String(data: data, encoding: .utf8) else { throw Usage(message: "can't read \(option) \(file)") }
+        return text
+    }
+
+    /// `--target <id | default>`, or the older `--launcher` (`--custom-command` alone on a custom one): the target with that id
+    /// or app (custom: that exact line), created when there is room. `handler`: that target becomes the default instead.
+    /// Checks everything before it changes `file`; then sets the target's app on `a`, as a save mirrors it.
+    static func selectTarget(_ values: [String: String], for a: inout Automation, in file: inout AutomationFile, handler: Bool = false) throws {
+        if let id = values["target"] {
+            guard values["launcher"] == nil else { throw Usage(message: "use --target or --launcher, not both") }
+            guard id == "default" || file.targets.contains(where: { $0.id == id }) else {
+                throw Usage(message: "--target \(id): no such target (pullping targets list)")
+            }
+            a.target = id == "default" ? nil : id
+        } else if values["launcher"] != nil || (values["custom-command"] != nil && a.launcher == .custom) {
+            // `apply` set and checked `a.launcher` / `a.customCommand`.
+            func line(_ text: String) -> String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+            let match = a.launcher == .custom
+                ? file.targets.first { $0.launcher == .custom && line($0.customCommand) == line(a.customCommand) }
+                : file.targets.first { $0.id == a.launcher.rawValue } ?? file.targets.first { $0.launcher == a.launcher }
+            var id = match?.id
+            if id == nil {
+                guard file.targets.count < LaunchTarget.maxCount else {
+                    throw Usage(message: "--launcher: there are already \(LaunchTarget.maxCount) targets; pick one with --target, or remove one (pullping targets)")
+                }
+                var t = file.newTarget(a.launcher, customCommand: a.customCommand)
+                (t.source, t.by) = ("cli", a.by)
+                file.targets.append(t)
+                id = t.id
+            }
+            if handler { file.makeDefault(id!) } else { a.target = id }
+        }
+        let t = file.target(for: a).target
+        (a.launcher, a.customCommand) = (t.launcher, t.customCommand)
     }
 
     /// `hook add|edit --session <id>` also links the session to the hook's pull request, in the hook's folder.
@@ -648,8 +775,8 @@ public enum AutomationCLI {
         let rows = [
             ("id", a.id.uuidString.lowercased()), ("name", a.name), ("enabled", a.enabled ? "on" : "off"), ("kinds", a.kinds.isEmpty && a.id == Automation.handlerID ? "all" : kindNames(a).joined(separator: ",")),
             ("scope", a.scope.rawValue), ("repos", a.repos.joined(separator: ",")), ("actors", a.actors.joined(separator: ",")),
-            ("mode", a.mode.rawValue), ("agent", a.agent.rawValue), ("command", a.agentCommand), ("launcher", a.launcher.rawValue),
-            ("custom command", a.customCommand), ("cwd", a.workingDirectory), ("runs per PR", "\(a.maxRunsPerPR)"),
+            ("mode", a.mode.rawValue), ("agent", a.agent.rawValue), ("command", a.agentCommand), ("target", a.target ?? "default"),
+            ("launcher", a.launcher.rawValue), ("custom command", a.customCommand), ("cwd", a.workingDirectory), ("runs per PR", "\(a.maxRunsPerPR)"),
             ("pr", a.pr.map { "\($0.repo)#\($0.number)" } ?? ""), ("session", a.sessionID ?? ""), ("expires", a.expiresAt?.ISO8601Format() ?? ""),
             ("source", a.source), ("by", a.by), ("created", a.createdAt.ISO8601Format()),
         ] + extra
@@ -699,8 +826,9 @@ public enum AutomationCLI {
     /// A linked-session automation resumes the pull request's link (none: refused), as in the app.
     public static func prepareRun(_ args: [String], store: AutomationStore, state: TrackedState, env: [String: String], now: Date) throws -> RunRequest {
         guard !args.isEmpty else { throw HelpRequested() }
-        let (values, flags, positional) = try parse(args, options: ["pr"], flags: ["dry-run", "json"])
+        let (values, flags, positional) = try parse(args, options: ["pr", "scenario"], flags: ["dry-run", "json"])
         guard positional.count == 1 else { throw Usage(message: "run takes one id prefix") }
+        let picked = try values["scenario"].map(scenario)
         let file = store.load()
         if let failure = store.failure { throw Failure(message: failure) }
         let a = try resolve(positional[0], in: file.automations, hook: nil)
@@ -717,9 +845,22 @@ public enum AutomationCLI {
             throw Failure(message: reason)
         }
         let resolved = try file.resolved(a, repo: pr.repo, number: pr.number, headRef: pr.headRef, env: env)
+        let scenario = picked ?? Scenario.derive(events: [], pr: pr)
         return RunRequest(automation: resolved.automation, pr: pr, eventID: eventID, dryRun: flags.contains("dry-run"), json: flags.contains("json"),
                           newSessionID: LaunchPlanner.newSessionID(for: resolved.automation), folders: file.repoFolders,
-                          hints: file.link(for: pr.repo, number: pr.number).map { [$0.cwd] } ?? [], note: resolved.note)
+                          hints: file.link(for: pr.repo, number: pr.number).map { [$0.cwd] } ?? [], note: resolved.note,
+                          target: resolved.target, scenario: scenario, task: file.task(scenario))
+    }
+
+    /// `--scenario <id>`: a `Scenario` raw value.
+    private static func scenario(_ raw: String) throws -> Scenario {
+        guard let s = Scenario(rawValue: raw) else { throw Usage(message: "unknown scenario \(raw) (pullping prompts list)") }
+        return s
+    }
+
+    /// `--target <id>` on a single run: an existing target.
+    private static func checkTarget(_ id: String?, in file: AutomationFile) throws {
+        if let id, !file.targets.contains(where: { $0.id == id }) { throw Usage(message: "--target \(id): no such target (pullping targets list)") }
     }
 
     /// `session resume` (args after it): the panel's Resume Session from the shell, as a handler run with the same gates and
@@ -728,13 +869,17 @@ public enum AutomationCLI {
     /// handler's app, an open session is focused there (`focusRunning`, true = focused) instead (`RunRequest.focused`).
     public static func prepareHandlerRun(_ args: [String], store: AutomationStore, state: TrackedState, env: [String: String], now: Date,
                                          focusRunning: (SessionLink) -> Bool = { _ in false }) throws -> RunRequest {
-        let (parsed, flags, positional) = try parse(args, options: ["pr", "prompt", "prompt-file", "by"], flags: ["force", "json"])
+        let (parsed, flags, positional) = try parse(args, options: ["pr", "prompt", "prompt-file", "by", "target", "scenario"],
+                                                    flags: ["force", "json", "no-prompt"])
         try noArguments(positional)
         var values = parsed
+        if flags.contains("no-prompt"), values["prompt"] != nil || values["prompt-file"] != nil { throw Usage(message: "use --prompt or --no-prompt, not both") }
         try readPromptFile(&values, env: env)
         guard let target = try ref(values["pr"]) else { throw Usage(message: "--pr is required") }
+        let picked = try values["scenario"].map(scenario)
         let file = store.load()
         if let failure = store.failure { throw Failure(message: failure) }
+        try checkTarget(values["target"], in: file)
         guard file.enabled else { throw Failure(message: "Automations are off (pullping automations on)") }
         guard file.handler.enabled else { throw Failure(message: "Handle with Agent is off (pullping handler on)") }
         guard let link = file.link(for: target.repo, number: target.number) else {
@@ -754,8 +899,9 @@ public enum AutomationCLI {
             throw Failure(message: "Handed off \(max(0, Int(now.timeIntervalSince(last.at)))) s ago")
         }
         var focused = false
+        let opens = file.target(for: file.handler, picked: values["target"]).target
         if !flags.contains("force"), let changed, now.timeIntervalSince(changed) < SessionFinder.openWithin {
-            guard file.handler.launcher == .ghostex, focusRunning(link) else {
+            guard opens.launcher == .ghostex, opens.reuseRunning, focusRunning(link) else {
                 throw Failure(message: "Session \(link.sessionID.prefix(8))… appears to be open in another terminal (changed \(max(0, Int(now.timeIntervalSince(changed)))) s ago); continue there, or add --force")
             }
             focused = true
@@ -763,11 +909,43 @@ public enum AutomationCLI {
         var handler = file.handler
         handler.sessionID = Automation.linkedSession
         if let prompt = values["prompt"] { handler.prompt = prompt }
-        let resolved = try file.resolved(handler, repo: pr.repo, number: pr.number, headRef: pr.headRef, env: env)
+        let resolved = try file.resolved(handler, target: values["target"], repo: pr.repo, number: pr.number, headRef: pr.headRef, env: env)
         let by = PromptTemplate.clean(values["by"] ?? env["CLAUDE_CODE_SESSION_ID"] ?? "", max: 64)
+        let scenario = picked ?? Scenario.derive(events: [], pr: pr)
         return RunRequest(automation: resolved.automation, pr: pr, eventID: "manual:\(now.ISO8601Format())", dryRun: false, json: flags.contains("json"),
                           newSessionID: nil, folders: file.repoFolders, hints: [link.cwd], note: resolved.note + (by.isEmpty ? "" : " · by \(by)"), handoff: true,
-                          focused: focused)
+                          focused: focused, target: resolved.target, prompt: !flags.contains("no-prompt"), scenario: scenario, task: file.task(scenario))
+    }
+
+    /// `handler run` (args after it): what a Handle with Agent click would start, as a dry run only (a real run from the shell is
+    /// `session resume`). Gates: Run Automations, Handle with Agent, a tracked pull request; `--resume` needs a link.
+    public static func prepareHandlerDryRun(_ args: [String], store: AutomationStore, state: TrackedState, env: [String: String], now: Date) throws -> RunRequest {
+        let (values, flags, positional) = try parse(args, options: ["pr", "target", "scenario"], flags: ["dry-run", "new", "resume", "no-prompt", "json"])
+        try noArguments(positional)
+        guard flags.contains("dry-run") else {
+            throw Usage(message: "handler run needs --dry-run: real runs start from the app or with pullping session resume")
+        }
+        if flags.isSuperset(of: ["new", "resume"]) { throw Usage(message: "use --new or --resume, not both") }
+        if flags.isSuperset(of: ["new", "no-prompt"]) { throw Usage(message: "--no-prompt is for a resume: a new session needs its prompt") }
+        guard let ref = try ref(values["pr"]) else { throw Usage(message: "--pr is required") }
+        let picked = try values["scenario"].map(scenario)
+        let file = store.load()
+        if let failure = store.failure { throw Failure(message: failure) }
+        try checkTarget(values["target"], in: file)
+        guard let pr = tracked(ref, in: state) else { throw Failure(message: "PullPing is not tracking \(ref.repo) #\(ref.number) yet") }
+        guard file.enabled else { throw Failure(message: "Automations are off (pullping automations on)") }
+        guard file.handler.enabled else { throw Failure(message: "Handle with Agent is off (pullping handler on)") }
+        let link = file.link(for: pr.repo, number: pr.number)
+        let resume = flags.contains("resume") || (!flags.contains("new") && link != nil)
+        if flags.contains("no-prompt") && !resume { throw Failure(message: "No session linked to \(pr.repo) #\(pr.number): --no-prompt resumes one") }
+        var handler = file.handler
+        handler.sessionID = resume ? Automation.linkedSession : nil
+        let resolved = try file.resolved(handler, target: values["target"], repo: pr.repo, number: pr.number, headRef: pr.headRef, env: env)
+        let scenario = picked ?? Scenario.derive(events: [], pr: pr)
+        return RunRequest(automation: resolved.automation, pr: pr, eventID: "manual:\(now.ISO8601Format())", dryRun: true, json: flags.contains("json"),
+                          newSessionID: LaunchPlanner.newSessionID(for: resolved.automation), folders: file.repoFolders,
+                          hints: link.map { [$0.cwd] } ?? [], note: resolved.note, target: resolved.target, prompt: !flags.contains("no-prompt"),
+                          scenario: scenario, task: file.task(scenario))
     }
 
     /// Records the run as the app's Run menu does (Recent Runs, runs per pull request and the failure cap count it) and reports it.
@@ -775,7 +953,7 @@ public enum AutomationCLI {
     public static func finishRun(_ request: RunRequest, runID: String, error: String?, store: AutomationStore, now: Date,
                                  cwd: String? = nil) -> (output: String, error: String, status: Int32) {
         let a = request.automation, pr = request.pr, detail = error ?? a.launcher.title + request.note
-        let name = a.id == Automation.handlerID ? "\(a.name) (\(sessionWord(a)))" : a.name  // as the app records it
+        let name = runName(a, scenario: request.scenario, prompt: request.prompt)  // as the app records it
         store.mutate {
             $0.runs.append(RunRecord(automationID: a.id, prID: pr.id, eventID: request.eventID, at: now, ok: error == nil, detail: detail,
                                      label: "\(name) · \(pr.repo) #\(pr.number)"))
@@ -786,7 +964,8 @@ public enum AutomationCLI {
         var object: [String: Any] = ["ok": error == nil, "runID": runID, "automation": a.id.uuidString, "pr": "\(pr.repo)#\(pr.number)", "detail": detail]
         if request.handoff { object["session"] = a.sessionID ?? "" }
         let started = request.note.contains(GhostexSessions.focusedNote)
-            ? "Focused \(agentWord(a)) \((a.sessionID ?? "").prefix(8))… in \(a.launcher.title); its input holds a line pointing at the prompt: press Return there."
+            ? "Focused \(agentWord(a)) \((a.sessionID ?? "").prefix(8))… in \(a.launcher.title)"
+                + (request.prompt ? "; its input holds a line pointing at the prompt: press Return there." : ".")
             : request.handoff
             ? "Resumed \(agentWord(a)) \((a.sessionID ?? "").prefix(8))… on \(pr.repo) #\(pr.number) in \(a.launcher.title) (\(tilde(cwd ?? a.workingDirectory, home: NSHomeDirectory())))."
             : "Started \(a.name) on \(pr.repo) #\(pr.number) in \(a.launcher.title)."
@@ -795,15 +974,22 @@ public enum AutomationCLI {
         return (output, failure.map { "pullping: \($0)" } ?? "", failure == nil ? 0 : 1)
     }
 
-    /// `run --dry-run`: what the run would do. Nothing is written, started or recorded.
-    public static func dryRun(_ plan: LaunchPlan, json asJSON: Bool) -> String {
+    /// `run --dry-run`, `handler run --dry-run`: what the run would do. Nothing is written, started or recorded. `request` adds
+    /// where it opens and the scenario.
+    public static func dryRun(_ plan: LaunchPlan, json asJSON: Bool, request: RunRequest? = nil) -> String {
         let repo = plan.repo.map { ["repo         \($0.repoDir) (\($0.source))"] } ?? []
+        let target = request?.target.map { ["target       \($0.id) (\($0.name))"] } ?? []
+        let scenario = request.map { ["scenario     \($0.scenario.rawValue) (\($0.scenario.label))"] } ?? []
         if asJSON {
-            return json(["cwd": plan.cwd, "title": plan.title, "launchLine": plan.launchLine, "prompt": plan.promptText]
-                .merging(plan.repo.map { ["repo": $0.repoDir, "repoSource": $0.source] } ?? [:]) { $1 })
+            var object: [String: Any] = ["cwd": plan.cwd, "title": plan.title, "launchLine": plan.launchLine, "prompt": plan.promptText]
+            object.merge(plan.repo.map { ["repo": $0.repoDir, "repoSource": $0.source] } ?? [:]) { $1 }
+            if let request { object["scenario"] = request.scenario.rawValue; object["target"] = request.target?.id }
+            return json(object)
         }
-        return (["cwd          \(plan.cwd)"] + repo + ["title        \(plan.title)", "launch line  \(plan.launchLine)", "prompt:"]
-            + plan.promptText.split(separator: "\n", omittingEmptySubsequences: false).map { "  " + $0 }).joined(separator: "\n")
+        let prompt = plan.promptPath.isEmpty ? ["prompt       none (resume without prompt)"]
+            : ["prompt:"] + plan.promptText.split(separator: "\n", omittingEmptySubsequences: false).map { "  " + $0 }
+        return (["cwd          \(plan.cwd)"] + repo + target + scenario + ["title        \(plan.title)", "launch line  \(plan.launchLine)"] + prompt)
+            .joined(separator: "\n")
     }
 
     // MARK: runs / automations
@@ -1096,10 +1282,194 @@ public enum AutomationCLI {
         path == home || path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
     }
 
+    // MARK: targets / prompts / setup
+
+    /// `targets list|add|edit|default|rm`: Settings → Automations → Open With.
+    private static func targets(_ command: String, _ args: [String], store: AutomationStore, env: [String: String],
+                                installed: (Launcher) -> Bool) throws -> String {
+        let (values, flags, positional) = try parse(args, options: command == "add" || command == "edit" ? ["name", "launcher", "custom-command", "reuse", "by"] : ["by"],
+                                                    flags: command == "add" ? ["first", "json"] : ["json"])
+        func one() throws -> String {
+            guard positional.count == 1 else { throw Usage(message: "\(command) takes one target id") }
+            return positional[0]
+        }
+        func missing(_ id: String) -> Failure { Failure(message: "no target \(id) (pullping targets list)") }
+        let by = PromptTemplate.clean(values["by"] ?? env["CLAUDE_CODE_SESSION_ID"] ?? "", max: 64)
+        switch command {
+        case "list":
+            try noArguments(positional)
+            let file = store.load()
+            if flags.contains("json") { return try encode(file.targets) }
+            return file.targets.enumerated().map { i, t in
+                ([t.id.padding(toLength: 12, withPad: " ", startingAt: 0), t.name, t.summary] + (i == 0 ? ["default"] : []) + (t.source == "cli" ? ["cli"] : []))
+                    .joined(separator: "  ")
+            }.joined(separator: "\n")
+        case "add", "edit":
+            let id = try one()
+            if command == "add" {
+                guard LaunchTarget.isValidID(id), id != "default" else {
+                    throw Usage(message: "a target id is a-z, 0-9 and -, at most 32 characters, not default: \(id)")
+                }
+                guard values["launcher"] != nil else { throw Usage(message: "--launcher is required (pullping launchers)") }
+            } else if values.isEmpty {
+                throw Usage(message: "edit needs an option to change")
+            }
+            let saved = try store.mutate { file in
+                Result {
+                    let index = file.targets.firstIndex { $0.id == id }
+                    var t: LaunchTarget
+                    if command == "add" {
+                        guard index == nil else { throw Usage(message: "there is already a target \(id)") }
+                        guard file.targets.count < LaunchTarget.maxCount else {
+                            throw Usage(message: "at most \(LaunchTarget.maxCount) targets; remove one first (pullping targets rm <id>)")
+                        }
+                        t = LaunchTarget(id: id, name: "", launcher: .terminal)
+                    } else {
+                        guard let index else { throw missing(id) }
+                        t = file.targets[index]
+                    }
+                    if let raw = values["launcher"] {
+                        t.launcher = try choice(raw, "--launcher")
+                        guard installed(t.launcher) else { throw Usage(message: "--launcher \(raw): \(t.launcher.title) is not installed (see pullping launchers)") }
+                    }
+                    if let custom = values["custom-command"] {
+                        guard t.launcher == .custom else { throw Usage(message: "--custom-command is for --launcher custom") }
+                        t.customCommand = custom
+                    }
+                    if t.launcher != .custom { t.customCommand = "" }
+                    guard t.launcher != .custom || !t.customCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                        throw Usage(message: "--launcher custom needs --custom-command")
+                    }
+                    if let reuse = values["reuse"] {
+                        guard ["on", "off"].contains(reuse) else { throw Usage(message: "--reuse must be on or off") }
+                        t.reuseRunning = reuse == "on"
+                    }
+                    if let name = values["name"] { t.name = PromptTemplate.clean(name, max: 40) }
+                    if t.name.isEmpty { t.name = t.launcher.title }
+                    (t.source, t.by) = ("cli", by)
+                    if let index { file.targets[index] = t } else if flags.contains("first") { file.targets.insert(t, at: 0) } else { file.targets.append(t) }
+                    return (t, file.targets.first?.id == t.id)
+                }
+            }.get()
+            if flags.contains("json") { return try encode(saved.0) }
+            return "\(command == "add" ? "Added" : "Updated") target \(saved.0.id): \(saved.0.name) · \(saved.0.summary)\(saved.1 ? " (default)" : "")."
+        case "default":
+            let id = try one()
+            let t = try store.mutate { file in
+                Result {
+                    guard let i = file.targets.firstIndex(where: { $0.id == id }) else { throw missing(id) }
+                    (file.targets[i].source, file.targets[i].by) = ("cli", by)
+                    file.makeDefault(id)
+                    return file.targets[0]
+                }
+            }.get()
+            return "\(t.name) is the default: notification buttons, pullping session resume and rules without --target open there."
+        case "rm":
+            let id = try one()
+            let (moved, fallback) = try store.mutate { file in
+                Result {
+                    guard file.targets.contains(where: { $0.id == id }) else { throw missing(id) }
+                    guard file.targets.count > 1 else { throw Failure(message: "\(id) is the only target; add another first") }
+                    let moved = file.removeTarget(id)
+                    return (moved, file.defaultTarget.name)
+                }
+            }.get()
+            return "Removed target \(id)" + (moved == 0 ? "." : "; \(moved) \(moved == 1 ? "rule uses" : "rules use") the default (\(fallback)) now.")
+        case "--help", "help": throw HelpRequested()
+        default: throw Usage(message: "unknown targets command \(command)")
+        }
+    }
+
+    /// `prompts list|show|set|reset`: Settings → Automations → Prompts.
+    private static func prompts(_ command: String, _ args: [String], store: AutomationStore, env: [String: String]) throws -> String {
+        let (values, flags, positional) = try parse(args, options: command == "set" ? ["text", "file"] : [], flags: ["json"])
+        func one() throws -> Scenario {
+            guard positional.count == 1 else { throw Usage(message: "\(command) takes one scenario (pullping prompts list)") }
+            return try scenario(positional[0])
+        }
+        func object(_ s: Scenario, _ file: AutomationFile) -> [String: Any] {
+            ["scenario": s.rawValue, "label": s.label, "custom": file.task(s) != s.builtIn, "text": file.task(s), "builtIn": s.builtIn]
+        }
+        switch command {
+        case "list":
+            try noArguments(positional)
+            let file = store.load()
+            if flags.contains("json") { return json(Scenario.allCases.map { object($0, file) }) }
+            return Scenario.allCases.map { s in
+                let first = file.task(s).split(separator: "\n").first.map(String.init) ?? ""
+                return [s.rawValue.padding(toLength: 18, withPad: " ", startingAt: 0), s.label.padding(toLength: 26, withPad: " ", startingAt: 0),
+                        (file.task(s) == s.builtIn ? "built-in" : "custom").padding(toLength: 10, withPad: " ", startingAt: 0),
+                        first.count > 60 ? first.prefix(59) + "…" : first].joined(separator: "")
+            }.joined(separator: "\n")
+        case "show":
+            let s = try one(), file = store.load()
+            if flags.contains("json") { return json(object(s, file)) }
+            let custom = file.task(s) != s.builtIn
+            return "\(s.rawValue) — \(s.label) (\(custom ? "custom" : "built-in"))\n\(file.task(s))" + (custom ? "\n\nBuilt-in:\n\(s.builtIn)" : "")
+        case "set":
+            let s = try one()
+            guard (values["text"] == nil) != (values["file"] == nil) else { throw Usage(message: "set needs --text <text> or --file <path | ->") }
+            let text = try values["text"] ?? contents(values["file"]!, option: "--file", env: env)
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw Usage(message: "the text is empty; pullping prompts reset \(s.rawValue) goes back to the built-in")
+            }
+            guard text.count <= Scenario.maxTaskLength else { throw Usage(message: "a task text has at most \(Scenario.maxTaskLength) characters (this one \(text.count))") }
+            let file = store.mutate { file -> AutomationFile in file.scenarioPrompts[s.rawValue] = text; return file }
+            return flags.contains("json") ? json(object(s, file)) : "Set the \(s.label) prompt."
+        case "reset":
+            let s = try one()
+            let had = store.mutate { $0.scenarioPrompts.removeValue(forKey: s.rawValue) != nil }
+            return had ? "Reset the \(s.label) prompt to the built-in." : "The \(s.label) prompt is already the built-in."
+        case "--help", "help": throw HelpRequested()
+        default: throw Usage(message: "unknown prompts command \(command)")
+        }
+    }
+
+    /// `setup guide|prompt|status`: the agent-guided setup (`AgentSetup`).
+    private static func setup(_ command: String, _ args: [String], store: AutomationStore, env: [String: String],
+                              installed: (Launcher) -> Bool, version: String) throws -> String {
+        let (_, flags, positional) = try parse(args, options: [], flags: ["json"])
+        try noArguments(positional)
+        switch command {
+        case "guide": return AgentSetup.guide
+        case "prompt": return AgentSetup.prompt
+        case "status":
+            let file = store.load(), home = env["HOME"] ?? NSHomeDirectory()
+            let clones = RepoIndex.scan(roots: file.repoFolders.roots, home: home, now: Date()).entries.count
+            let h = file.handler, rules = file.automations.filter { !$0.isHook }
+            let automatic = rules.filter { $0.enabled && $0.mode == .auto }
+            let custom = Scenario.allCases.filter { file.task($0) != $0.builtIn }.map(\.rawValue)
+            let prompt = h.prompt == Automation.defaultHandlerPrompt ? "default" : h.prompt.contains("{task}") ? "custom" : "custom, no {task}"
+            if flags.contains("json") {
+                let targets = (try? JSONSerialization.jsonObject(with: AutomationStore.encoder.encode(file.targets))) ?? []
+                return json([
+                    "version": version, "automations": file.enabled, "findSessions": file.findSessions, "targets": targets,
+                    "handler": ["enabled": h.enabled, "agent": h.agent.rawValue, "command": h.agentCommand, "cwd": h.workingDirectory,
+                                "kinds": h.kinds.isEmpty ? ["all"] : kindNames(h), "prompt": prompt] as [String: Any],
+                    "launchers": Launcher.allCases.filter(installed).map(\.rawValue),
+                    "folders": ["roots": file.repoFolders.roots, "fallback": file.repoFolders.fallback, "clones": clones] as [String: Any],
+                    "customPrompts": custom, "rules": rules.count, "hooks": file.automations.count - rules.count,
+                    "automaticRules": automatic.map { ["id": shortID($0), "name": $0.name] }, "linkedSessions": file.sessions.count,
+                ])
+            }
+            return [
+                "PullPing \(version.isEmpty ? "(development build)" : version) · Run Automations \(file.enabled ? "on" : "off")",
+                "Handle with Agent: \(h.enabled ? "on" : "off") · \(agentWord(h)) · \(h.workingDirectory) · prompt \(prompt)",
+                "Open With: " + file.targets.enumerated().map { i, t in "\(t.name)\(i == 0 ? " (default)" : "") · \(t.summary)" }.joined(separator: "; "),
+                "Repository folders: \(file.repoFolders.roots.joined(separator: ", ")) (\(clones) clones) · fallback \(file.repoFolders.fallback)",
+                "Look for earlier sessions: \(file.findSessions ? "on" : "off") · custom prompts: \(custom.isEmpty ? "none" : custom.joined(separator: ", "))",
+                "Rules: \(rules.count) (\(automatic.count) automatic) · hooks: \(file.automations.count - rules.count) · linked sessions: \(file.sessions.count)",
+            ].joined(separator: "\n")
+        case "--help", "help": throw HelpRequested()
+        default: throw Usage(message: "unknown setup command \(command)")
+        }
+    }
+
     /// `set` takes the handler editor's options only (a usage error for the others) and checks them like a rule's.
     private static func handler(_ command: String, _ args: [String], store: AutomationStore, env: [String: String], now: Date,
                                 installed: (Launcher) -> Bool) throws -> String {
-        let options: Set<String> = command == "set" ? ["on", "agent", "command", "launcher", "custom-command", "cwd", "prompt", "prompt-file", "find-sessions", "by"] : []
+        let options: Set<String> = command == "set" ? ["on", "agent", "command", "launcher", "custom-command", "cwd", "prompt", "prompt-file", "find-sessions", "by"]
+            : ["on", "off"].contains(command) ? ["by"] : []
         let parsed = try parse(args, options: options, flags: ["json"])
         var values = parsed.values
         try noArguments(parsed.positional)
@@ -1118,7 +1488,10 @@ public enum AutomationCLI {
                 Result {
                     var h = file.handler
                     // on a copy: a failed check changes nothing; only --find-sessions leaves the handler and its provenance alone
-                    if !values.isEmpty || !toggle.isEmpty { try apply(values, toggle, to: &h, hook: false, env: env, now: now, installed: installed) }
+                    if !values.isEmpty || !toggle.isEmpty {
+                        try apply(values, toggle, to: &h, hook: false, env: env, now: now, installed: installed)
+                        try selectTarget(values, for: &h, in: &file, handler: true)
+                    }
                     file.handler = h
                     if let findSessions { file.findSessions = findSessions }
                     return (h, file.findSessions)
@@ -1140,5 +1513,12 @@ public enum AutomationCLI {
     public static func agentWord(_ a: Automation) -> String { a.agentCommand.isEmpty ? a.agent.rawValue : a.agentCommand }
     public static func sessionWord(_ a: Automation) -> String {
         a.usesLinkedSession ? "linked session" : a.sessionID.map { "resume \($0.prefix(4))…" } ?? "new session"
+    }
+
+    /// A run's name in Recent Runs and Activity: a rule's name; for the handler "Handle with Agent (resume 1a2b… · Changes
+    /// requested)", "(resume 1a2b…, no prompt)". The hand-off brake finds resumes by " (resume ".
+    public static func runName(_ a: Automation, scenario: Scenario?, prompt: Bool = true) -> String {
+        guard a.id == Automation.handlerID else { return a.name }
+        return "\(a.name) (\(sessionWord(a))" + (!prompt ? ", no prompt" : scenario.map { " · \($0.label)" } ?? "") + ")"
     }
 }
