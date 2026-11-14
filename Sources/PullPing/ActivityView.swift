@@ -19,17 +19,17 @@ struct ActivityView: View {
     /// `store.activitySeenAt` when the feed opened: what counts as new while it stays open.
     @State private var seenAt: Date?
 
-    /// New first, then by day, newest first; rows newest first.
-    private var days: [(title: String, rows: [Int])] {
+    /// New first, then by day, newest first; rows newest first. Rows carry their entry: compaction shifts `store.activity`
+    /// while SwiftUI still renders old rows, so a row must never look its entry up by index (crash in 0.7.0 dev builds).
+    private var days: [(title: String, rows: [(index: Int, entry: ActivityEntry)])] {
         let scope = store.listSelection.scope
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        let rows = store.activity.indices.reversed().filter { i in
-            let e = store.activity[i]
-            return scope.matches(e) && matches(e) && (q.isEmpty || "\(e.repo) #\(e.number) \(e.title) \(e.actor ?? "") \(e.automation ?? "")".lowercased().contains(q))
-        }
+        let rows = store.activity.enumerated().reversed().filter { _, e in
+            scope.matches(e) && matches(e) && (q.isEmpty || "\(e.repo) #\(e.number) \(e.title) \(e.actor ?? "") \(e.automation ?? "")".lowercased().contains(q))
+        }.map { (index: $0.offset, entry: $0.element) }
         let seen = seenAt ?? store.activitySeenAt
-        let new = rows.filter { store.activity[$0].at > seen }
-        return (new.isEmpty ? [] : [("New", new)]) + Dictionary(grouping: rows.filter { store.activity[$0].at <= seen }) { Calendar.current.startOfDay(for: store.activity[$0].at) }
+        let new = rows.filter { $0.entry.at > seen }
+        return (new.isEmpty ? [] : [("New", new)]) + Dictionary(grouping: rows.filter { $0.entry.at <= seen }) { Calendar.current.startOfDay(for: $0.entry.at) }
             .sorted { $0.key > $1.key }.map { (Self.title($0.key), $0.value) }
     }
 
@@ -49,10 +49,10 @@ struct ActivityView: View {
         List(selection: $selection) {
             ForEach(days, id: \.title) { day in
                 Section(day.title) {
-                    ForEach(day.rows, id: \.self) { i in
-                        let entry = store.activity[i]
+                    ForEach(day.rows, id: \.index) { row in
+                        let entry = row.entry
                         ActivityEntryRow(entry: entry, account: store.multiAccount ? entry.accountID.flatMap(store.account)?.displayName ?? "@\(entry.account)" : nil)
-                            .tag(i)
+                            .tag(row.index)
                     }
                 }
             }
