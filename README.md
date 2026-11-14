@@ -31,7 +31,7 @@ brew install --cask roypadina/tap/pullping
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/status-panel-dark.png">
-<img src="docs/screenshots/status-panel.png" alt="PullPing status panel: what needs you, in To Review, Your Pull Requests and Mentions and Assigned, each row with a status chip such as Re-review, Changes requested or Ready to merge" width="320">
+<img src="docs/screenshots/status-panel.png" alt="PullPing status panel: what needs you, in To Review, Your Pull Requests and Mentions, Assigned and Reminders, each row with a status chip such as Re-review, Changes requested or Ready to merge" width="320">
 </picture>
 &nbsp;
 <img src="docs/screenshots/main-window.png" alt="PullPing main window: a sidebar with Needs Me, My Pull Requests, Reviews, Issues, Watching, Closed and Activity per account, the Needs Me list, and the details of the selected pull request" width="620">
@@ -57,8 +57,10 @@ brew install --cask roypadina/tap/pullping
 - **Notifications only when something needs you.** A small panel appears at the top right when a review is asked of you, your pull request needs a fix or is ready to merge, or you are mentioned or assigned. It never takes keyboard focus and is grouped per pull request. Merges, passing CI, new commits and the rest go to Activity without a notification. Pick Off, Banner (hides itself) or Alert (stays) for each reason.
 - **Activity.** Everything PullPing saw and did, in one list: every event, whether it notified you or went to your phone, plus every automation run. Filter it, and see what is new since your last look.
 - **Review reminders.** While a review or re-review waits on you, PullPing nudges you again every so often until you review, the request is removed, or the pull request is merged or closed.
+- **Remind Me.** Put any pull request off until later (in an hour, tomorrow at 9:00, next week, or a time you pick): when it is due, it is new and in Needs Me again, with a notification.
+- **Select several, mark as unread.** Select many rows at once and act on all of them; Mark as Read turns into Mark as Unread to bring an item back.
 - **Snooze, mute, hide, mark as read, stop tracking.** All of them from the panel, the menu bar and the main window, with Undo for Hide and Stop Tracking. Hidden pull requests leave every list and count but still notify you.
-- **Keyboard friendly.** Arrow keys and Return in the panel, menu commands with shortcuts, VoiceOver announcements for new notifications.
+- **Keyboard friendly.** Arrow keys and Return in the panel, menu commands with shortcuts, single keys on a focused list (O, U, M, H, R; Settings → Shortcuts), VoiceOver announcements for new notifications and for what a key did.
 - **`pullping://` links** for Shortcuts and Raycast.
 - Universal binary, no third-party dependencies, no analytics.
 
@@ -110,8 +112,8 @@ open dist/PullPing.app
 2. Add an account: **Add Account…** in the Welcome window, or **Settings → Accounts**. See
    [Accounts and tokens](#accounts-and-tokens).
 3. Click the menu-bar icon. **↩** opens the selected pull request in your browser, **⌘↩** opens it in the
-   main window, **Esc** closes the panel. Right-click a row for Open in Browser, Mark as Read,
-   Mute, Hide, Snooze and Stop Tracking. Right-click the menu-bar icon, or click **⋯** in the panel, for the same menu (Pause Notifications included).
+   main window, **Esc** closes the panel. Right-click a row for Open in Browser, Mark as Read (or Unread),
+   Remind Me, Mute, Hide, Snooze Notifications and Stop Tracking; ⌘-click or ⇧-click to act on several rows. Right-click the menu-bar icon, or click **⋯** in the panel, for the same menu (Pause Notifications included).
 4. The first sync of an account is silent: PullPing learns what already exists, and only tells
    you about what happens afterwards (plus review requests, assignments and mentions it finds).
 
@@ -124,10 +126,15 @@ still reaches you.
 |---|---|
 | Refresh now | ⌘R |
 | Open the main window | ⌘1 |
-| Open in browser | ⇧⌘O |
-| Mark as read / Mark all as read | ⇧⌘U / ⌥⇧⌘U |
+| Open in browser | ⇧⌘O, or O |
+| Mark as read or unread / Mark all as read | ⇧⌘U, or U / ⌥⇧⌘U |
+| Mute or unmute | ⌃⌘M, or M |
+| Hide or unhide | ⌃⌘H, or H |
+| Remind Me… | ⌃⌘R, or R |
 | Stop tracking | ⌘⌫ |
 | Settings | ⌘, |
+
+The single keys (O, U, M, H, R) work while a pull request list has keyboard focus, in the window and the panel; switch them off in **Settings → Shortcuts**, which lists every shortcut. To change a menu shortcut, add PullPing under System Settings → Keyboard → Keyboard Shortcuts → App Shortcuts.
 
 Links: `pullping://open`, `pullping://open?pr=<id>`, `pullping://refresh`, `pullping://settings`.
 
@@ -161,7 +168,8 @@ app is never interrupted. Everything else is listed in [Activity](#activity) wit
 - **One panel per pull request.** Several events on the same pull request merge into one panel; up to four panels are shown, the rest collapse into "+N more".
 - **On each panel:** **Open** (opens the pull request and marks it read), **Snooze** (15 minutes, 1 hour, 3 hours, tomorrow 9:00), **Mute PR** (**Mute Issue** on an issue), and a close button.
 - **Review reminders:** while a review or re-review waits on you (a team request too, while its notification is on), the panel shows again every 15, 30, 60 (default), 120 or 240 minutes, or never. It stops when you review, the request is removed, the pull request is merged or closed, or you mute or snooze it.
-- **Mute** keeps a pull request listed but silences its panels and reminders and leaves it out of the menu-bar count. **Snooze** silences them for a while. **Stop Tracking** removes the pull request and ignores it from then on (Edit → Undo brings it back).
+- **Remind Me** (row menu, Pull Request menu, ⌃⌘R or R): at the time you pick, the pull request is new and in Needs Me again, with an Alert panel titled **Reminder** (and your phone, if you tick Reminder in Settings → Phone). Reading it ends the reminder.
+- **Mute** keeps a pull request listed but silences its panels and reminders and leaves it out of the menu-bar count. **Snooze Notifications** silences them for a while and does nothing when it ends; Remind Me brings the item back. **Stop Tracking** removes the pull request and ignores it from then on (Edit → Undo brings it back).
 - **Pause:** right-click the menu-bar icon → **Pause Notifications** for 1 hour, 3 hours or until tomorrow 9:00. Panels, phone notifications and reminders stay quiet until then.
 - **Phone (ntfy):** in **Settings → Phone**, enter a server (default `https://ntfy.sh`) and a topic, subscribe to the same topic in the ntfy phone app, then tick the kinds of event to send, for your own pull requests and for others. Nothing is sent until you tick one. Sends follow the same rules as panels (never your own actions, never muted, snoozed or paused pull requests) but are chosen per kind of event, not per reason, so a merge can still go to your phone. An optional access token (for a protected server) and a fallback topic URL (used when the server fails) are kept in your login keychain. **Send Test Notification** checks the setup.
 - Your own actions never notify you. An optional sound plays once when panels appear. Every action on a panel also exists in the menu-bar panel and the menus, for keyboard and VoiceOver use.
