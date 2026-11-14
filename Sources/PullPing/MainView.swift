@@ -21,7 +21,9 @@ struct MainView: View {
             }
             .navigationSplitViewColumnWidth(min: 300, ideal: 380, max: 560)
         } detail: {
-            if let pr = store.selectedPR {
+            if !activity && store.selectedIDs.count > 1 {
+                SelectionSummaryView(store: store, ids: store.selectedIDs)
+            } else if let pr = store.selectedPR {
                 PRDetailView(store: store, pr: pr)
             } else if activity, let i = activityRow, store.activity.indices.contains(i) {
                 let entry = store.activity[i]
@@ -40,10 +42,17 @@ struct MainView: View {
         .navigationTitle(activity ? "Activity" : "Pull Requests")
         .navigationSubtitle(store.freshness)
         .frame(minWidth: 900, minHeight: 520)
-        .task(id: store.selectedID) {  // selected for ≥ 1 s = read
-            guard let id = store.selectedID, let pr = store.selectedPR, Attention.unread(pr) > 0 else { return }
-            try? await Task.sleep(for: .seconds(1))
+        .task(id: store.selectedID) {  // one row selected for Settings › General › Mark as read when selected = read
+            let delay = store.settings.markReadSeconds
+            guard delay >= 0, let id = store.selectedID, let pr = store.selectedPR, Attention.unread(pr) > 0 else { return }
+            if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
             if !Task.isCancelled { store.markRead([id]) }
+        }
+        .onChange(of: activity) { _, activity in  // the menus must never act on rows out of sight
+            if activity && store.selectedIDs.count > 1 { store.selectedIDs = []; activityRow = nil }
+        }
+        .sheet(isPresented: Binding(get: { store.remindIDs != nil }, set: { if !$0 { store.remindIDs = nil } })) {
+            if let ids = store.remindIDs { RemindSheet(store: store, ids: ids) }
         }
     }
 }
@@ -146,11 +155,21 @@ struct PRListView: View {
     @Binding var query: String
     /// Collapsed sections (Drafts) the user opened, by title.
     @State private var opened: Set<String> = []
+    /// The ids last shown and their sidebar row (nil while searching): Needs Me keeps a selected row in place.
+    @State private var shown: (item: SidebarItem?, ids: [String]) = (nil, [])
 
     /// The selected row's sections; while searching, every row's items under their row's name.
     private var sections: [ListSection] {
         let item = store.listSelection
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        if q.isEmpty && item.filter == .needsMe && shown.item == item {
+            // Reading an item (a mention, a comment, a reminder) can end its reason: the selected row stays, in place, until
+            // the selection moves on (Mail's Unread filter), so it doesn't vanish under the cursor.
+            let kept = store.selectedIDs.compactMap { store.tracked.prs[$0] }
+                .filter { shown.ids.contains($0.id) && item.scope.matches($0) && $0.state == .open && !$0.muted && !$0.hidden }
+            let shownOrder = item.filter.sections(store.prs(item.scope, item.filter)).flatMap(\.prs)
+            return item.filter.sections(Attention.keeping(shownOrder, kept, order: shown.ids))
+        }
         guard !q.isEmpty else { return item.filter.sections(store.prs(item.scope, item.filter)) }
         let hits = store.prs.filter { pr in
             item.scope.matches(pr) && "\(pr.repo) #\(pr.number) \(pr.title) \(pr.authorLogin)".lowercased().contains(q)
@@ -163,7 +182,7 @@ struct PRListView: View {
         let sections = sections
         let filter = store.listSelection.filter
         let ids = sections.flatMap(\.prs).map(\.id)
-        List(selection: $store.selectedID) {
+        List(selection: $store.selectedIDs) {
             ForEach(store.errorAccounts) { account in  // FLW-17: inline, with the fix one click away
                 AccountErrorRow(account: account, status: store.statuses[account.id] ?? .ok)
             }
@@ -183,14 +202,17 @@ struct PRListView: View {
                 }
             }
         }
-        .onChange(of: ids, initial: true) { _, ids in  // the detail never shows a row the list doesn't
-            if let id = store.selectedID, !ids.contains(id) { store.selectedID = nil }
+        .onChange(of: ids, initial: true) { _, ids in  // the detail and the menus never act on a row the list doesn't show
+            shown = (query.isEmpty ? store.listSelection : nil, ids)
+            let visible = store.selectedIDs.intersection(ids)
+            if visible != store.selectedIDs { store.selectedIDs = visible }
         }
         .contextMenu(forSelectionType: String.self) { ids in
             PRMenuItems(store: store, ids: ids)
         } primaryAction: { ids in
-            ids.forEach(store.open)
+            store.open(ids)
         }
+        .prKeys(store: store, ids: store.selectedIDs)
         .overlay {
             if ids.isEmpty {
                 if !query.isEmpty {
@@ -346,13 +368,13 @@ struct PRMenuItems: View {
 
     var body: some View {
         if !ids.isEmpty {
-            let muted = ids.allSatisfy { store.tracked.prs[$0]?.muted == true }
-            let hidden = ids.allSatisfy { store.tracked.prs[$0]?.hidden == true }
-            Button("Open in Browser") { ids.forEach(store.open) }
-            Button("Mark as Read") { store.markRead(ids) }
+            let muted = store.all(ids, \.muted), hidden = store.all(ids, \.hidden)
+            Button("Open in Browser") { store.open(ids) }
+            Button(store.readTitle(ids)) { store.toggleRead(ids) }
+            RemindMenu(store: store, ids: ids)
             Button(muted ? "Unmute" : "Mute") { store.setMuted(ids, !muted) }
             Button(hidden ? "Unhide" : "Hide") { store.setHidden(ids, !hidden) }
-            Menu("Snooze") {
+            Menu("Snooze Notifications") {
                 ForEach(Snooze.allCases, id: \.self) { option in
                     Button(option.title) { store.snooze(ids, option) }
                 }
@@ -363,6 +385,143 @@ struct PRMenuItems: View {
             }
             Divider()
             Button("Stop Tracking") { store.stopTracking(ids) }
+        }
+    }
+}
+
+/// Remind Me ▸ for the selection: at the time the item becomes new and needs you again, with an Alert panel. Not Snooze
+/// (stay quiet until then). Row menus, the detail ⋯ menu, the summary's More menu and the Pull Request menu (`menuBar`).
+struct RemindMenu: View {
+    let store: Store
+    let ids: Set<String>
+    /// The Pull Request menu: Custom… shows ⌃⌘R and Clear Reminder dims when none is set (MNU-8); row menus hide it (MNU-12).
+    var menuBar = false
+
+    var body: some View {
+        let set = ids.compactMap { store.tracked.prs[$0]?.remindAt }
+        Menu("Remind Me") {
+            if ids.count == 1, let at = set.first {
+                Button("Set for \(Remind.label(at, now: store.now))") {}.disabled(true)
+                Divider()
+            }
+            ForEach(Remind.Option.allCases, id: \.self) { option in
+                Button(option.title) { store.setReminder(ids, option.date(from: Date())) }
+            }
+            Divider()
+            // Mirrored in Settings › Shortcuts (`ShortcutsTab`).
+            Button("Custom…") { store.askReminder(ids) }
+                .keyboardShortcut(menuBar ? KeyboardShortcut("r", modifiers: [.command, .control]) : nil)
+            if menuBar || !set.isEmpty {
+                Divider()
+                Button("Clear Reminder") { store.setReminder(ids, nil) }.disabled(set.isEmpty)
+            }
+        }
+        .disabled(ids.isEmpty)
+    }
+}
+
+/// Remind Me ▸ Custom… (and R, ⌃⌘R): one date for the items. R then Return = tomorrow 9:00.
+struct RemindSheet: View {
+    let store: Store
+    let ids: Set<String>
+    @State private var date: Date
+    @Environment(\.dismiss) private var dismiss
+
+    init(store: Store, ids: Set<String>) {
+        self.store = store
+        self.ids = ids
+        let current = ids.count == 1 ? ids.first.flatMap { store.tracked.prs[$0]?.remindAt } : nil
+        _date = State(initialValue: max(current ?? Remind.Option.tomorrow.date(from: Date()), Date()))
+    }
+
+    var body: some View {
+        let prs = ids.compactMap { store.tracked.prs[$0] }
+        VStack(alignment: .leading, spacing: 16) {
+            Text(verbatim: prs.count == 1 ? "Remind me about \u{201C}\(prs[0].title)\u{201D}" : "Remind me about \(prs.count) items")
+                .font(.headline).lineLimit(2)
+            DatePicker("Remind me", selection: $date, in: Date()..., displayedComponents: [.date, .hourAndMinute])
+            HStack {
+                if prs.contains(where: { $0.remindAt != nil }) {
+                    Button("Clear Reminder") { store.setReminder(ids, nil); dismiss() }
+                }
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Set Reminder") { store.setReminder(ids, date); dismiss() }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 420)
+    }
+}
+
+/// The detail pane with 2+ selected (Mail's "N messages selected"): what they need, and actions for all of them.
+struct SelectionSummaryView: View {
+    let store: Store
+    let ids: Set<String>
+
+    var body: some View {
+        let breakdown = Attention.breakdown(ids.compactMap { store.tracked.prs[$0] }, counting: store.settings.badgeReasons)
+        let read = store.readTitle(ids), unread = store.anyUnread(ids)
+        ContentUnavailableView {
+            Label("\(ids.count) Items Selected", systemImage: "square.stack")
+        } description: {
+            if !breakdown.isEmpty { Text(breakdown) }
+        } actions: {
+            HStack {
+                Button(read) { store.toggleRead(ids) }
+                Button("Open in Browser") { store.open(ids) }
+                Menu {
+                    PRMenuItems(store: store, ids: ids)
+                } label: {
+                    Label("More", systemImage: "ellipsis").labelStyle(.iconOnly)
+                }
+                .menuStyle(.button)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("More: Remind Me, Mute, Hide, Snooze, Stop Tracking")
+                .accessibilityLabel("More")
+            }
+        }
+        .toolbar {  // the single detail's two buttons: the toolbar keeps its shape between 1 and N (TBR-2)
+            ToolbarItemGroup {
+                Button("Open in Browser", systemImage: "safari") { store.open(ids) }
+                    .help("Open in browser (⇧⌘O)")
+                Button(read, systemImage: unread ? "envelope.open" : "envelope.badge") { store.toggleRead(ids) }
+                    .help(unread ? "Mark as read (⇧⌘U)" : "Mark as unread (⇧⌘U)")
+            }
+        }
+    }
+}
+
+extension View {
+    /// Single keys on a focused pull request list (Settings › Shortcuts): O open, U read/unread, M mute, H hide, R Remind Me.
+    /// Only while the list has focus, so the search field keeps its keys (KBD-6); off with the setting (WCAG 2.1.4).
+    func prKeys(store: Store, ids: Set<String>) -> some View {
+        onKeyPress(characters: .letters, phases: .down) { press in
+            guard store.settings.singleKeyShortcuts, !ids.isEmpty, press.modifiers.isDisjoint(with: [.command, .option, .control]) else {
+                return .ignored
+            }
+            // The key's Latin letter on Hebrew and other non-Latin layouts: ⌘ switches a layout to its Latin keys.
+            let key = NSApp.currentEvent?.characters(byApplyingModifiers: .command)?.lowercased() ?? press.characters.lowercased()
+            let done: String
+            switch key {
+            case "o": store.open(ids); return .handled
+            case "r": store.askReminder(ids); return .handled
+            case "u":
+                done = store.anyUnread(ids) ? "Marked as read" : "Marked as unread"
+                store.toggleRead(ids)
+            case "m":
+                let muted = store.all(ids, \.muted)
+                store.setMuted(ids, !muted)
+                done = muted ? "Unmuted" : "Muted"
+            case "h":
+                let hidden = store.all(ids, \.hidden)
+                store.setHidden(ids, !hidden)
+                done = hidden ? "Unhidden" : "Hidden"
+            default: return .ignored
+            }
+            AccessibilityNotification.Announcement(done).post()  // focus doesn't move, so say what changed (A11Y-6)
+            return .handled
         }
     }
 }
@@ -520,10 +679,11 @@ struct PRDetailView: View {
         }
         .toolbar {
             ToolbarItemGroup {
+                let unread = Attention.unread(pr) > 0
                 Button("Open in Browser", systemImage: "safari") { store.open(pr.id) }
                     .help("Open in browser (⇧⌘O)")
-                Button("Mark as Read", systemImage: "envelope.open") { store.markRead([pr.id]) }
-                    .help("Mark as read (⇧⌘U)")
+                Button(store.readTitle([pr.id]), systemImage: unread ? "envelope.open" : "envelope.badge") { store.toggleRead([pr.id]) }
+                    .help(unread ? "Mark as read (⇧⌘U)" : "Mark as unread (⇧⌘U)")
                 RunAutomationMenu(store: store, pr: pr, compact: true)
             }
         }
@@ -558,11 +718,12 @@ struct PRDetailView: View {
             // The two main actions as buttons, the rest in More: five buttons truncated in a narrow detail column (PRN-4).
             HStack {
                 Button("Open in Browser") { store.open(pr.id) }.buttonStyle(.borderedProminent)
-                Button("Mark as Read") { store.markRead([pr.id]) }
+                Button(store.readTitle([pr.id])) { store.toggleRead([pr.id]) }
                 Menu {
+                    RemindMenu(store: store, ids: [pr.id])
                     Button(pr.muted ? "Unmute" : "Mute") { store.setMuted([pr.id], !pr.muted) }
                     Button(pr.hidden ? "Unhide" : "Hide") { store.setHidden([pr.id], !pr.hidden) }
-                    Menu("Snooze") {
+                    Menu("Snooze Notifications") {
                         ForEach(Snooze.allCases, id: \.self) { option in Button(option.title) { store.snooze([pr.id], option) } }
                     }
                     Divider()
@@ -573,7 +734,7 @@ struct PRDetailView: View {
                 .menuStyle(.button)  // bordered like its neighbours
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .help("More: Mute, Hide, Snooze, Stop Tracking")
+                .help("More: Remind Me, Mute, Hide, Snooze, Stop Tracking")
             }
             .padding(.top, 4)
         }

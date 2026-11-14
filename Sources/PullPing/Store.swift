@@ -80,7 +80,7 @@ enum Filter: String, CaseIterable {
             switch self {
             case .needsMe:
                 if [.review, .reReview, .teamReview].contains(bucket) { return "To Review" }
-                return !pr.isIssue && pr.roles.contains(.author) ? "Your Pull Requests" : "Mentions & Assigned"
+                return !pr.isIssue && pr.roles.contains(.author) ? "Your Pull Requests" : "Mentions, Assigned & Reminders"
             case .myPRs: return [.fix, .merge].contains(bucket) ? "Your Turn" : bucket == .draft ? "Drafts" : "Waiting on Others"
             case .reviews: return [.review, .reReview].contains(bucket) ? "Needs Your Review" : bucket == .teamReview ? "Team Requests" : "Reviewed"
             case .issues: return bucket == .issueAssigned ? "Assigned to Me" : bucket == .issueMine ? "Opened by Me" : "Mentioned"
@@ -89,14 +89,14 @@ enum Filter: String, CaseIterable {
             }
         }
         let order: [String] = switch self {
-        case .needsMe: ["To Review", "Your Pull Requests", "Mentions & Assigned"]
+        case .needsMe: ["To Review", "Your Pull Requests", "Mentions, Assigned & Reminders"]
         case .myPRs: ["Your Turn", "Waiting on Others", "Drafts"]
         case .reviews: ["Needs Your Review", "Team Requests", "Reviewed"]
         case .issues: ["Assigned to Me", "Opened by Me", "Mentioned"]
         case .watching, .closed: [""]
         case .mutedHidden: ["Muted", "Hidden"]
         }
-        let queues: Set<String> = ["To Review", "Your Pull Requests", "Mentions & Assigned", "Your Turn", "Needs Your Review", "Team Requests",
+        let queues: Set<String> = ["To Review", "Your Pull Requests", "Mentions, Assigned & Reminders", "Your Turn", "Needs Your Review", "Team Requests",
                                    "Assigned to Me", "Opened by Me", "Mentioned"]
         let grouped = Dictionary(grouping: prs, by: by)
         return order.compactMap { title in
@@ -230,7 +230,14 @@ final class Store {
     /// Main-window sidebar row; nil only in screenshots. Read `listSelection`.
     var selection: SidebarItem? = SidebarItem(scope: .all, filter: .needsMe)
     /// Main-window selection; the Pull Request menu acts on it.
-    var selectedID: String?
+    var selectedIDs: Set<String> = []
+    /// The selected item while exactly one is selected (the detail pane, auto mark-read); setting it selects only that one.
+    var selectedID: String? {
+        get { selectedIDs.count == 1 ? selectedIDs.first : nil }
+        set { selectedIDs = newValue.map { [$0] } ?? [] }
+    }
+    /// The Remind Me sheet's items (Custom…, R, ⌃⌘R); nil = no sheet.
+    var remindIDs: Set<String>?
     /// Activity entries after this are new: the sidebar dot and the feed's New section. Set when the feed is left.
     var activitySeenAt: Date { didSet { if persist { UserDefaults.standard.set(activitySeenAt, forKey: DefaultsKey.activitySeenAt) } } }
     /// Phone notification secrets: keychain only. The demo store never reads or writes the keychain.
@@ -588,16 +595,25 @@ final class Store {
         }
         reload()
         pumpBackground()  // runs queued from the command line, and its cancels
-        var due: [PREvent] = []
+        var due: [PREvent] = [], remind: [String] = []
         for pr in tracked.prs.values where enabledIDs.contains(pr.accountID) {
             if let next = Reminders.nextReminder(pr: pr, settings: settings, now: now), next <= now {
                 due.append(Reminders.event(for: pr, now: now))
             }
+            if let at = pr.remindAt, at <= now { remind.append(pr.id) }
         }
-        guard !due.isEmpty else { return }
+        guard !due.isEmpty || !remind.isEmpty else { return }  // no save on a quiet tick
         let ids = Set(due.map(\.prID)), t = now
-        mutate { for id in ids { $0.prs[id]?.lastReminderAt = t } }
-        show(due)
+        var fired: [PREvent] = []
+        mutate { state in
+            for id in ids { state.prs[id]?.lastReminderAt = t }
+            for id in remind {
+                guard var pr = state.prs[id], let event = Remind.fire(&pr, now: t) else { continue }
+                state.prs[id] = pr
+                fired.append(event)
+            }
+        }
+        show(due + fired)
     }
 
     // MARK: Pull request actions
@@ -609,9 +625,60 @@ final class Store {
         NotificationPanels.shared.dismiss(prID: id)
     }
 
+    /// A selection: more than 10 asks first (⌘A then Return would open every tracked item, MOD-8).
+    func open(_ ids: Set<String>) {
+        if ids.count > 10 {
+            let alert = NSAlert()
+            alert.messageText = "Open \(ids.count) items in your browser?"
+            alert.addButton(withTitle: "Open")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        for id in ids { open(id) }
+    }
+
     func markRead(_ ids: Set<String>) {
         let t = Date()
-        mutate { for id in ids { $0.prs[id]?.lastReadAt = t } }
+        mutate { state in
+            for id in ids where state.prs[id] != nil { Attention.markRead(&state.prs[id]!, now: t) }
+        }
+    }
+
+    func markUnread(_ ids: Set<String>) {
+        mutate { state in
+            for id in ids where state.prs[id] != nil { Attention.markUnread(&state.prs[id]!) }
+        }
+    }
+
+    func anyUnread(_ ids: Set<String>) -> Bool { ids.contains { tracked.prs[$0].map { Attention.unread($0) > 0 } ?? false } }
+
+    /// Mark as Read while any is unread, else Mark as Unread (Mail's one toggling command).
+    func toggleRead(_ ids: Set<String>) { anyUnread(ids) ? markRead(ids) : markUnread(ids) }
+
+    func readTitle(_ ids: Set<String>) -> String { ids.isEmpty || anyUnread(ids) ? "Mark as Read" : "Mark as Unread" }
+
+    /// Every one has the flag (Unmute, Unhide); false for none.
+    func all(_ ids: Set<String>, _ flag: KeyPath<TrackedPR, Bool>) -> Bool {
+        !ids.isEmpty && ids.allSatisfy { tracked.prs[$0]?[keyPath: flag] == true }
+    }
+
+    /// Remind Me; nil clears. Setting one marks the items read (a "later" gesture; it also ends a reminder that is due now)
+    /// and dismisses their panels. Clearing leaves read state alone.
+    func setReminder(_ ids: Set<String>, _ at: Date?) {
+        let t = Date()
+        mutate { state in
+            for id in ids where state.prs[id] != nil {
+                state.prs[id]!.remindAt = at
+                if at != nil { Attention.markRead(&state.prs[id]!, now: t) }
+            }
+        }
+        if at != nil { ids.forEach { NotificationPanels.shared.dismiss(prID: $0) } }
+    }
+
+    /// The Remind Me sheet, on the main window (also from the menu-bar panel).
+    func askReminder(_ ids: Set<String>) {
+        remindIDs = ids
+        MainWindow.shared.show()
     }
 
     func markAllRead() { markRead(Set(tracked.prs.keys)) }
@@ -653,7 +720,7 @@ final class Store {
         mutate { state in
             for pr in removed { state.prs[pr.id] = nil; state.ignoredIDs.insert(pr.id) }
         }
-        if selectedID.map(ids.contains) == true { selectedID = nil }
+        selectedIDs.subtract(ids)
         ids.forEach { NotificationPanels.shared.dismiss(prID: $0) }
         undoManager.registerUndo(withTarget: self) { store in
             MainActor.assumeIsolated { store.restore(removed) }

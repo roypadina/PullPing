@@ -16,12 +16,12 @@ final class ScenarioTests: XCTestCase {
         return p
     }
 
-    /// Every row of the taxonomy: each `NeedReason` maps to one scenario, none to `general`.
+    /// Every row of the taxonomy: each `NeedReason` maps to one scenario, only a Remind Me reminder to `general`.
     func testEveryReasonMapsToItsScenario() {
         let expected: [NeedReason?: Scenario] = [
             .toReview: .review, .teamToReview: .review, .reReview: .reReview, .changesRequested: .changesRequested,
             .newComments: .comments, .mentioned: .comments, .ciFailed: .ciFailed, .conflicts: .conflicts,
-            .readyToMerge: .readyToMerge, .assigned: .assigned, nil: .general,
+            .readyToMerge: .readyToMerge, .assigned: .assigned, .reminder: .general, nil: .general,
         ]
         XCTAssertEqual(Set(expected.keys.compactMap { $0 }), Set(NeedReason.allCases))
         for (reason, scenario) in expected { XCTAssertEqual(Scenario(reason), scenario, "\(String(describing: reason))") }

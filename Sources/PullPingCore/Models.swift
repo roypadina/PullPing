@@ -168,6 +168,10 @@ public struct TrackedPR: Identifiable, Codable, Sendable, Equatable {
     public var firstTrackedAt: Date
     /// Only under the Hidden filter, never counted; still notifies unless muted.
     @FalseIfMissing public var hidden = false
+    /// Remind Me: when the user asked to be reminded; nil = none. Cleared when it fires (`Remind.fire`).
+    public var remindAt: Date?
+    /// Mark as Unread: unread without an event by someone else. Cleared by mark-read.
+    @FalseIfMissing public var markedUnread = false
 
     public init(id: String, accountID: UUID, firstTrackedAt: Date) {
         self.id = id
@@ -195,7 +199,7 @@ extension KeyedDecodingContainer {
 public enum EventKind: String, Codable, Sendable, CaseIterable, CodingKeyRepresentable {
     case comment, mentioned, reviewApproved, reviewChangesRequested, reviewCommented, reviewRequested, assigned, newCommits,
          ciPassed, ciFailed, readyForReview, convertedToDraft, merged, closed, reopened, reviewDismissed, retitled, labeled, reviewReminder,
-         conflicts, readyToMerge
+         conflicts, readyToMerge, reminder
 }
 
 extension EventKind {
@@ -223,12 +227,14 @@ extension EventKind {
         case .reviewReminder: "Reminder: review requested"
         case .conflicts: "Conflicts"
         case .readyToMerge: "Ready to merge"
+        case .reminder: "Reminder"
         }
     }
 }
 
 public struct PREvent: Identifiable, Codable, Sendable, Equatable {
-    /// GitHub node id, or "ci:<oid>:<state>", "head:<oid>", "conflict:<oid>", "ready:<oid>", "rr:<login>:<date>", "assign:<login>:<date>", "reminder:<date>".
+    /// GitHub node id, or "ci:<oid>:<state>", "head:<oid>", "conflict:<oid>", "ready:<oid>", "rr:<login>:<date>", "assign:<login>:<date>", "reminder:<date>",
+    /// "remind:<date>" (Remind Me).
     /// Unique per PR only: key lists that mix PRs by `prID` + `id`.
     public let id: String
     public var prID: String

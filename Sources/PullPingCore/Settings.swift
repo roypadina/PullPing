@@ -14,6 +14,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public static let reminderOptions = [0, 15, 30, 60, 120, 240]
     public static let autoHideOptions = [5, 8, 12, 20]
     public static let activityOptions = [7, 30, 90]
+    /// Seconds a row stays selected in the window before it is marked read; -1 = never.
+    public static let markReadOptions = [0, 1, 2, 5, -1]
 
     public static let defaultStyles: [EventKind: NotificationStyle] = Dictionary(uniqueKeysWithValues: EventKind.allCases.map {
         ($0, [.reviewChangesRequested, .ciFailed, .merged].contains($0) ? .alert : .banner)
@@ -27,6 +29,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public static let defaultNeedStyles: [NeedReason: NotificationStyle] = [
         .toReview: .alert, .reReview: .alert, .teamToReview: .banner, .changesRequested: .alert, .ciFailed: .alert, .conflicts: .banner,
         .mentioned: .alert, .assigned: .alert, .newComments: .banner, .readyToMerge: .banner,
+        .reminder: .alert,  // not a setting: a reminder I set always stays until dismissed
     ]
 
     public var pollIntervalMinutes = 3
@@ -60,6 +63,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var trackIssues = true
     /// Days the activity log keeps (`ActivityLog`, also capped at 5000 entries).
     public var activityDays = 30
+    /// Settings > General > Mark as read when selected (`markReadOptions`).
+    public var markReadSeconds = 0
+    /// Settings > Shortcuts: O, U, M, H, R on a focused pull request list.
+    public var singleKeyShortcuts = true
 
     public init() {}
 
@@ -88,6 +95,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
         phoneOthers = try value(.phoneOthers, phoneOthers)
         trackIssues = try value(.trackIssues, trackIssues)
         activityDays = try value(.activityDays, activityDays)
+        markReadSeconds = try value(.markReadSeconds, markReadSeconds)
+        singleKeyShortcuts = try value(.singleKeyShortcuts, singleKeyShortcuts)
         // Saved before issue tracking (no trackIssues key): the newer `assigned` reason starts on, like the rest.
         if !c.contains(.trackIssues) { badgeReasons.insert(.assigned) }
         // Saved before 0.7.0 (no needStyles key): styles come from the per-kind ones, the new reasons start counted.
@@ -97,6 +106,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
             needStyles = Self.needStyles(mine: styles, others: otherStyles)
             badgeReasons.formUnion([.reReview, .conflicts])
         }
+        // Not a setting: a reminder I set always counts (also fixes files saved by 0.7.0 dev builds).
+        badgeReasons.insert(.reminder)
     }
 
     /// 0.6 per-kind styles to per-reason ones: each reason takes the stronger style of the kinds that raised it, so a kind

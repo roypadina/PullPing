@@ -41,7 +41,9 @@ final class SettingsTests: XCTestCase {
         settings.phoneMine = [.ciFailed, .merged]
         settings.phoneOthers = [.reviewRequested]
         settings.needStyles[.teamToReview] = .off
-        settings.badgeReasons = [.toReview]
+        settings.badgeReasons = [.toReview, .reminder]
+        settings.markReadSeconds = -1
+        settings.singleKeyShortcuts = false
         settings.menuBarDot = false
         XCTAssertEqual(try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings)), settings)
     }
@@ -49,7 +51,7 @@ final class SettingsTests: XCTestCase {
     func testNeedStyles() throws {
         let settings = AppSettings()
         XCTAssertEqual(NeedReason.allCases.map(settings.needStyle),
-                       [.alert, .alert, .alert, .alert, .banner, .alert, .alert, .banner, .banner, .banner])  // NeedReason order
+                       [.alert, .alert, .alert, .alert, .banner, .alert, .alert, .alert, .banner, .banner, .banner])  // NeedReason order
         XCTAssertEqual(AppSettings.needStyles(mine: AppSettings.defaultStyles, others: AppSettings.defaultOtherStyles),
                        AppSettings.defaultNeedStyles, "an untouched 0.6 setup gets exactly the new defaults")
         let data = try JSONEncoder().encode(settings)
@@ -65,8 +67,9 @@ final class SettingsTests: XCTestCase {
         """#
         let s = try JSONDecoder().decode(AppSettings.self, from: Data(json.utf8))
         XCTAssertEqual(s.needStyles, [.toReview: .off, .reReview: .off, .teamToReview: .off, .changesRequested: .banner, .ciFailed: .off,
-                                      .conflicts: .banner, .mentioned: .banner, .assigned: .banner, .newComments: .alert, .readyToMerge: .off])
-        XCTAssertEqual(s.badgeReasons, [.toReview, .ciFailed, .reReview, .conflicts])  // new reasons start counted
+                                      .conflicts: .banner, .mentioned: .banner, .assigned: .banner, .newComments: .alert, .readyToMerge: .off,
+                                      .reminder: .alert])
+        XCTAssertEqual(s.badgeReasons, [.toReview, .ciFailed, .reReview, .conflicts, .reminder])  // new reasons start counted
         // New comments fire on my pull requests only: others' comment style doesn't turn it back on.
         XCTAssertEqual(AppSettings.needStyles(mine: [.comment: .off, .reviewCommented: .off], others: [.comment: .alert])[.newComments], .off)
         XCTAssertEqual(AppSettings.needStyles(mine: [.comment: .off, .reviewCommented: .alert], others: [:])[.newComments], .alert)
@@ -74,7 +77,7 @@ final class SettingsTests: XCTestCase {
         later.badgeReasons.remove(.reReview)
         later.needStyles[.toReview] = .alert
         let again = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(later))
-        XCTAssertEqual(again.badgeReasons, [.toReview, .ciFailed, .conflicts], "migrates once")
+        XCTAssertEqual(again.badgeReasons, [.toReview, .ciFailed, .conflicts, .reminder], "migrates once")
         XCTAssertEqual(again.needStyle(.toReview), .alert)
         XCTAssertEqual(again.needStyle(.reReview), .off)
     }
@@ -83,5 +86,26 @@ final class SettingsTests: XCTestCase {
     func testMenuBarDotDefaultsOn() throws {
         XCTAssertTrue(AppSettings().menuBarDot)
         XCTAssertTrue(try JSONDecoder().decode(AppSettings.self, from: Data(#"{ "badgeMode": "needsMe" }"#.utf8)).menuBarDot)
+    }
+
+    /// Mark as read when selected and single-key shortcuts: defaults, and files saved before them take the defaults; a
+    /// reminder I set always counts and always alerts.
+    func testTriageDefaults() throws {
+        let fresh = AppSettings()
+        XCTAssertEqual(fresh.markReadSeconds, 0)
+        XCTAssertTrue(fresh.singleKeyShortcuts)
+        XCTAssertEqual(AppSettings.markReadOptions, [0, 1, 2, 5, -1])
+        let old = try JSONDecoder().decode(AppSettings.self, from: fixture("v061-settings"))
+        XCTAssertEqual(old.markReadSeconds, 0)
+        XCTAssertTrue(old.singleKeyShortcuts)
+        XCTAssertTrue(old.badgeReasons.contains(.reminder))
+        XCTAssertEqual(old.needStyle(.reminder), .alert)
+        // A 0.7.0 dev build's file: needStyles without the key, badgeReasons without the reason.
+        let dev = try JSONDecoder().decode(AppSettings.self, from: Data(#"{ "needStyles": { "to review": "banner" }, "badgeReasons": ["to review"], "trackIssues": true }"#.utf8))
+        XCTAssertEqual(dev.badgeReasons, [.toReview, .reminder])
+        XCTAssertEqual(dev.needStyle(.reminder), .alert)
+        var never = fresh
+        never.markReadSeconds = -1
+        XCTAssertEqual(try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(never)).markReadSeconds, -1)
     }
 }

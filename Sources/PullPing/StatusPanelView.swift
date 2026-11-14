@@ -5,7 +5,7 @@ import SwiftUI
 /// Status item popover: scope (All · @a · @b) and filter over the list, keyboard-driven (MBX-1: a list needs a panel).
 struct StatusPanelView: View {
     let store: Store
-    @State private var selection: String?
+    @State private var selection: Set<String> = []
     /// Collapsed groups the user opened (Waiting on Others, Reviewed, Drafts), by title.
     @State private var opened: Set<String> = []
     @FocusState private var listFocused: Bool
@@ -146,19 +146,20 @@ struct StatusPanelView: View {
             }
             .listStyle(.sidebar)
             .onChange(of: ids) { _, ids in  // never act on a row the list no longer shows
-                if let selection, !ids.contains(selection) { self.selection = nil }
+                if !selection.isSubset(of: ids) { selection.formIntersection(ids) }
             }
             .focused($listFocused)
             .contextMenu(forSelectionType: String.self) { ids in
                 PRMenuItems(store: store, ids: ids)
             } primaryAction: { ids in  // double-click or Return
-                ids.forEach(store.open)
+                store.open(ids)
             }
-            .onKeyPress(.return, phases: .down) { press in  // ⌘↩ opens the selection in the main window
-                guard press.modifiers.contains(.command), let selection else { return .ignored }
-                MainWindow.shared.show(select: selection)
+            .onKeyPress(.return, phases: .down) { press in  // ⌘↩ opens the one selected row in the main window
+                guard press.modifiers.contains(.command), selection.count == 1, let id = selection.first else { return .ignored }
+                MainWindow.shared.show(select: id)
                 return .handled
             }
+            .prKeys(store: store, ids: selection)
             .onAppear { listFocused = true }
         }
     }

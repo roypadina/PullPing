@@ -56,6 +56,7 @@ extension EventKind {
         case .reviewReminder: ("reminder", "bell.badge", Theme.needsYou)
         case .conflicts: ("Conflicts with base", "exclamationmark.triangle", Theme.bad)
         case .readyToMerge: ("Ready to merge", "checkmark.circle", Theme.good)
+        case .reminder: ("reminded you", "alarm", Theme.needsYou)
         }
     }
 
@@ -107,12 +108,17 @@ extension Attention.Lead.Tone {
 }
 
 extension TrackedPR {
-    /// Issue, the status chip of its bucket (`Attention.lead`), Draft, CI and Muted, in reading order.
+    /// Issue, the status chip of its bucket (`Attention.lead`), the reminder, Draft, CI and Muted, in reading order.
     var chips: [Chip] {
         var chips: [Chip] = []
         if isIssue { chips.append(Chip(text: "Issue", symbol: "smallcircle.filled.circle")) }
         let lead = Attention.lead(self)
         if let lead { chips.append(Chip(text: lead.text, symbol: lead.symbol, tint: lead.tone.color)) }
+        if Attention.reminderDue(self) {
+            chips.append(Chip(text: "Reminder", symbol: "alarm", tint: Theme.needsYou))
+        } else if let remindAt {
+            chips.append(Chip(text: "Remind " + Remind.label(remindAt, now: Date()), symbol: "alarm"))
+        }
         if state == .open && isDraft && Attention.bucket(self) != .draft { chips.append(Chip(text: "Draft", symbol: "circle.dashed")) }
         if state == .open && !(lead?.text.hasPrefix("CI") ?? false) {  // the status chip may already be about CI
             switch ci {
@@ -141,6 +147,7 @@ extension NeedReason {
         case .newComments: "New comments"
         case .readyToMerge: "Ready to merge"
         case .teamToReview: "Team review requested"
+        case .reminder: "Reminder"
         }
     }
 
@@ -157,6 +164,7 @@ extension NeedReason {
         case .assigned: ("person.crop.circle.badge.checkmark", Theme.needsYou)
         case .newComments: ("bubble.left", Theme.needsYou)
         case .readyToMerge: ("checkmark.circle", Theme.good)
+        case .reminder: ("alarm", Theme.needsYou)
         }
     }
 }

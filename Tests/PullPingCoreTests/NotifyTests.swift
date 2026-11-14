@@ -82,4 +82,11 @@ final class NotifyTests: XCTestCase {
         XCTAssertNil(reason(event(.comment, own: true), mine()))
         XCTAssertNil(reason(event(.reviewRequested, own: true), theirs([.reviewRequested])))
     }
+
+    /// A Remind Me reminder asks for me on any item; it never chooses an agent task of its own.
+    func testReminder() {
+        XCTAssertEqual(reason(event(.reminder), mine()), .reminder)
+        XCTAssertEqual(reason(event(.reminder), theirs([.commenter])), .reminder)
+        XCTAssertEqual(Scenario.derive(events: [event(.reminder)], pr: theirs([.commenter])), .general)
+    }
 }

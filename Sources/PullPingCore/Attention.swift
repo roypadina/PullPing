@@ -4,7 +4,7 @@ import Foundation
 /// breakdown wording and the stored key, so it never changes.
 public enum NeedReason: String, Codable, Sendable, CaseIterable, CodingKeyRepresentable {
     case toReview = "to review", reReview = "to re-review", changesRequested = "changes requested", ciFailed = "CI failed"
-    case conflicts = "with conflicts", mentioned, assigned, newComments = "with new comments", readyToMerge = "ready to merge"
+    case conflicts = "with conflicts", mentioned, assigned, reminder = "reminder due", newComments = "with new comments", readyToMerge = "ready to merge"
     case teamToReview = "team review"
 }
 
@@ -71,9 +71,29 @@ public enum Attention {
         return map
     }
 
-    /// Events by others newer than the last read. Baseline marks everything read (Poller).
+    /// Events by others newer than the last read, at least 1 while marked unread. Baseline marks everything read (Poller).
     public static func unread(_ pr: TrackedPR) -> Int {
-        pr.events.filter { !$0.isOwn && $0.at > (pr.lastReadAt ?? .distantPast) }.count
+        max(pr.events.filter { !$0.isOwn && $0.at > (pr.lastReadAt ?? .distantPast) }.count, pr.markedUnread ? 1 : 0)
+    }
+
+    public static func markRead(_ pr: inout TrackedPR, now: Date) {
+        pr.lastReadAt = now
+        pr.markedUnread = false
+    }
+
+    /// Mark as Unread: the flag lights the dot; rewinding the read mark to just before the newest event by someone else
+    /// brings back the reason that event gave (a mention, a comment on my pull request, a due reminder). Not `lastReadAt =
+    /// nil`: that would revive weeks-old mentions.
+    public static func markUnread(_ pr: inout TrackedPR) {
+        pr.markedUnread = true
+        guard let newest = pr.events.filter({ !$0.isOwn }).map(\.at).max(), let read = pr.lastReadAt, read >= newest else { return }
+        // Whole seconds: the state file stores ISO-8601 dates without fractions.
+        pr.lastReadAt = Date(timeIntervalSince1970: (newest.timeIntervalSince1970 - 1).rounded(.down))
+    }
+
+    /// A Remind Me reminder fired and is not read yet.
+    public static func reminderDue(_ pr: TrackedPR) -> Bool {
+        pr.events.contains { $0.kind == .reminder && !$0.isOwn && $0.at > (pr.lastReadAt ?? .distantPast) }
     }
 
     public static func awaitingMyReview(_ pr: TrackedPR) -> Bool {
@@ -199,6 +219,7 @@ public enum Attention {
             (.conflicts, bucket == .fix && conflicted(pr)),
             (.mentioned, unread.contains { $0.kind == .mentioned }),
             (.assigned, unread.contains { $0.kind == .assigned }),
+            (.reminder, unread.contains { $0.kind == .reminder }),
             (.newComments, mine && unread.contains { talk.contains($0.kind) }),
             (.readyToMerge, bucket == .merge),
             (.teamToReview, bucket == .teamReview),
@@ -219,10 +240,23 @@ public enum Attention {
         case .conflicts: [.conflicts]
         case .mentioned: [.mentioned]
         case .assigned: [.assigned]
+        case .reminder: [.reminder]
         case .newComments: [.comment, .reviewApproved, .reviewChangesRequested, .reviewCommented]
         case .readyToMerge: [.reviewApproved, .ciPassed, .readyToMerge]
         }
         return pr.events.filter { kinds.contains($0.kind) }.map(\.at).max()
+    }
+
+    /// `list` plus each of `kept` that it lacks, put back where `order` (the ids last shown) had it: after its nearest
+    /// earlier id still in the list, else first. Keeps a row in place when reading it removed its reason.
+    public static func keeping(_ list: [TrackedPR], _ kept: [TrackedPR], order: [String]) -> [TrackedPR] {
+        var result = list
+        for pr in kept where !result.contains(where: { $0.id == pr.id }) {
+            let earlier = order.firstIndex(of: pr.id).map { order[..<$0] } ?? []
+            let after = earlier.reversed().lazy.compactMap { id in result.firstIndex { $0.id == id } }.first
+            result.insert(pr, at: after.map { $0 + 1 } ?? 0)
+        }
+        return result
     }
 
     public static func needsMe(_ pr: TrackedPR, counting: Set<NeedReason> = Set(NeedReason.allCases)) -> Bool {

@@ -20,6 +20,7 @@ public enum Notify {
         case .reviewApproved where mine, .ciPassed where mine, .readyToMerge where mine: return bucket == .merge ? .readyToMerge : nil
         case .mentioned: return .mentioned
         case .assigned: return .assigned
+        case .reminder: return .reminder
         default: return nil
         }
     }

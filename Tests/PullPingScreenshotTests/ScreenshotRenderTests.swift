@@ -36,6 +36,7 @@ final class ScreenshotRenderTests: XCTestCase {
             try save("settings-phone", PhoneTab(store: store), NSSize(width: 520, height: PhoneTab.height))
             try save("settings-general", GeneralTab(store: store), NSSize(width: 520, height: GeneralTab.height))
             try save("settings-menu-bar", MenuBarTab(store: store), NSSize(width: 520, height: MenuBarTab.height))
+            try save("settings-shortcuts", ShortcutsTab(store: store), NSSize(width: 520, height: ShortcutsTab.height))
         }
     }
 
@@ -117,7 +118,7 @@ final class ScreenshotRenderTests: XCTestCase {
         func sections(_ filter: Filter) -> [String] {
             filter.sections(store.prs(.all, filter)).map { "\($0.title): " + $0.prs.map(\.id).joined(separator: " ") }
         }
-        XCTAssertEqual(sections(.needsMe), ["To Review: PR_3 PR_9 PR_13", "Your Pull Requests: PR_2 PR_1", "Mentions & Assigned: PR_15 I_1"])
+        XCTAssertEqual(sections(.needsMe), ["To Review: PR_3 PR_9 PR_13", "Your Pull Requests: PR_2 PR_1", "Mentions, Assigned & Reminders: PR_15 I_1"])
         XCTAssertEqual(sections(.myPRs), ["Your Turn: PR_2 PR_1", "Waiting on Others: PR_11 PR_12 PR_10", "Drafts: PR_4"])
         XCTAssertEqual(sections(.reviews), ["Needs Your Review: PR_3 PR_9", "Team Requests: PR_13", "Reviewed: PR_8 PR_14"])
         XCTAssertEqual(sections(.issues), ["Assigned to Me: I_4", "Opened by Me: I_1"])
@@ -128,7 +129,7 @@ final class ScreenshotRenderTests: XCTestCase {
         let map = store.signals(.all)
         XCTAssertEqual(Filter.allCases.map { $0.signal(map).needs }, [7, 2, 3, 1, 0, 0, 0])
         XCTAssertEqual(Filter.allCases.map { $0.signal(map).new }, [6, 2, 2, 1, 2, 1, 0], "PR_6 muted, PR_16 hidden: no dot")
-        XCTAssertEqual(Set(NeedReason.notifyOrder), Set(NeedReason.allCases))
+        XCTAssertEqual(Set(NeedReason.notifyOrder), Set(NeedReason.allCases).subtracting([.reminder]), "a reminder you set is not a setting")
     }
 
     /// The status panel's filter menu (`FilterMenu`, AppKit): the number = need you as a count badge, a dot on the icon for
@@ -422,6 +423,30 @@ final class ScreenshotRenderTests: XCTestCase {
                     PRDetailView(store: detailStore, pr: detailStore.tracked.prs[id]!).frame(width: 520).border(Color.secondary.opacity(0.4))
                 }
             }.padding(12), NSSize(width: 3 * 532 + 12, height: 760))
+            // Triage: three selected (the summary pane), one reminder set (PR_15) and one due (PR_5, from Watching into Needs Me),
+            // the Remind Me sheet, a due reminder's detail, Shortcuts with single keys on and off.
+            let triage = Fixtures.sampleStore()
+            triage.selection = nil
+            triage.setTracked { state in
+                state.prs["PR_15"]?.remindAt = Remind.Option.tomorrow.date(from: Date())
+                guard var due = state.prs["PR_5"] else { return }
+                due.remindAt = Date()
+                _ = Remind.fire(&due, now: Date())
+                state.prs["PR_5"] = due
+            }
+            triage.selectedIDs = ["PR_3", "PR_2", "PR_15"]
+            try save("triage-main", MainView(store: triage), NSSize(width: 1180, height: 720))
+            try save("triage-detail-sheet", HStack(alignment: .top, spacing: 12) {
+                PRDetailView(store: triage, pr: triage.tracked.prs["PR_5"]!).frame(width: 520, height: 520).border(Color.secondary.opacity(0.4))
+                RemindSheet(store: triage, ids: ["PR_15"]).fixedSize().border(Color.secondary.opacity(0.4))
+                RemindSheet(store: triage, ids: ["PR_3", "PR_2"]).fixedSize().border(Color.secondary.opacity(0.4))
+            }.padding(12), NSSize(width: 532 + 2 * 432 + 24, height: 544))
+            let keysOff = Fixtures.sampleStore()
+            keysOff.settings.singleKeyShortcuts = false
+            try save("settings-shortcuts", HStack(alignment: .top, spacing: 12) {
+                ShortcutsTab(store: triage).frame(width: 520, height: ShortcutsTab.height).border(Color.secondary.opacity(0.4))
+                ShortcutsTab(store: keysOff).frame(width: 520, height: ShortcutsTab.height).border(Color.secondary.opacity(0.4))
+            }.padding(12), NSSize(width: 2 * 532 + 12, height: ShortcutsTab.height + 24))
             // Notification panels: every reason, the agent buttons, notes (What's New, draft ready), the overflow summary.
             let pr = { store.tracked.prs[$0]! }
             let chevron = PanelAction(id: Automation.handlerMenuActionID, title: "More agent options", run: {}) { NSMenu() }

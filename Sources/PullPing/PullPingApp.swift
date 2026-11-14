@@ -76,7 +76,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 /// Menu bar while a window is open (policy `.regular`). Pull Request items act on the main-window selection
-/// and are dimmed without one (MNU-8). The Edit menu keeps its default groups (MNU-5).
+/// and are dimmed without one (MNU-8). The Edit menu keeps its default groups (MNU-5). The shortcuts are mirrored in
+/// Settings › Shortcuts (`ShortcutsTab`): change both together.
 struct AppCommands: Commands {
     let store: Store
 
@@ -97,12 +98,13 @@ struct AppCommands: Commands {
             Button("Activity") { MainWindow.shared.showActivity() }
         }
         CommandMenu("Pull Request") {
-            let pr = store.selectedPR
-            let ids: Set<String> = pr.map { [$0.id] } ?? []
-            Button("Open in Browser") { ids.forEach(store.open) }
-                .keyboardShortcut("o", modifiers: [.command, .shift]).disabled(pr == nil)
-            Button("Mark as Read") { store.markRead(ids) }
-                .keyboardShortcut("u", modifiers: [.command, .shift]).disabled(pr == nil)
+            let ids = store.selectedIDs
+            let pr = store.selectedPR  // exactly one selected: the agent menus
+            let muted = store.all(ids, \.muted), hidden = store.all(ids, \.hidden)
+            Button("Open in Browser") { store.open(ids) }
+                .keyboardShortcut("o", modifiers: [.command, .shift]).disabled(ids.isEmpty)
+            Button(store.readTitle(ids)) { store.toggleRead(ids) }
+                .keyboardShortcut("u", modifiers: [.command, .shift]).disabled(ids.isEmpty)
             Button("Mark All as Read") { store.markAllRead() }
                 .keyboardShortcut("u", modifiers: [.command, .shift, .option])
             Divider()
@@ -111,19 +113,22 @@ struct AppCommands: Commands {
             // The row menu's and the toolbar's Run Automation ▸ here too (MNU-2); dimmed without a selection.
             if let pr { RunAutomationMenu(store: store, pr: pr) } else { Menu("Run Automation") {}.disabled(true) }
             Divider()
-            Button(pr?.muted == true ? "Unmute" : "Mute") { store.setMuted(ids, !(pr?.muted ?? false)) }.disabled(pr == nil)
-            Button(pr?.hidden == true ? "Unhide" : "Hide") { store.setHidden(ids, !(pr?.hidden ?? false)) }.disabled(pr == nil)
-            Menu("Snooze") {
+            RemindMenu(store: store, ids: ids, menuBar: true)
+            Menu("Snooze Notifications") {
                 ForEach(Snooze.allCases, id: \.self) { option in
                     Button(option.title) { store.snooze(ids, option) }
                 }
             }
-            .disabled(pr == nil)
+            .disabled(ids.isEmpty)
+            Button(muted ? "Unmute" : "Mute") { store.setMuted(ids, !muted) }
+                .keyboardShortcut("m", modifiers: [.command, .control]).disabled(ids.isEmpty)
+            Button(hidden ? "Unhide" : "Hide") { store.setHidden(ids, !hidden) }
+                .keyboardShortcut("h", modifiers: [.command, .control]).disabled(ids.isEmpty)
             Button("Stop Tracking") {
                 // ⌘⌫ deletes to line start while typing in the search field (KBD-6).
                 if let text = NSApp.keyWindow?.firstResponder as? NSTextView { text.deleteToBeginningOfLine(nil) } else { store.stopTracking(ids) }
             }
-            .keyboardShortcut(.delete, modifiers: .command).disabled(pr == nil)
+            .keyboardShortcut(.delete, modifiers: .command).disabled(ids.isEmpty)
             Divider()
             Button("Dismiss All Notifications") { NotificationPanels.shared.dismissAll() }
         }

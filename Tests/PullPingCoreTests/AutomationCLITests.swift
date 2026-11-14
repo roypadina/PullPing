@@ -79,6 +79,7 @@ final class AutomationCLITests: XCTestCase {
             ["hook", "add", "--pr", "octo-org/widgets#12", "--prompt", "p"],  // no --on
             ["hook", "add", "--pr", "octo-org/widgets#12", "--on", "comment,approved", "--prompt", "p"],
             ["hook", "add", "--pr", "octo-org/widgets#12", "--on", "reviewReminder", "--prompt", "p"],
+            ["hook", "add", "--pr", "octo-org/widgets#12", "--on", "reminder", "--prompt", "p"],
             ["hook", "add", "--pr", "octo-org/widgets#12", "--on", "comment"],  // no prompt
             ["hook", "add", "--pr", "octo-org/widgets#12", "--on", "comment", "--prompt", "  \n"],
             ["hook", "add", "--pr", "octo-org/widgets#12", "--on", "comment", "--prompt", "p", "--prompt-file", "x"],
@@ -153,9 +154,10 @@ final class AutomationCLITests: XCTestCase {
 
     func testKindsAndHelp() {
         let kinds = run(["hook", "kinds"]).output.split(separator: "\n")
-        XCTAssertEqual(kinds.count, EventKind.allCases.count - 1)
+        XCTAssertEqual(kinds.count, EventKind.allCases.count - 2)
         XCTAssertTrue(kinds.contains { $0.hasPrefix("reviewApproved") && $0.hasSuffix("Review approved") })
         XCTAssertFalse(kinds.contains { $0.hasPrefix("reviewReminder") })
+        XCTAssertFalse(kinds.contains { $0.hasPrefix("reminder") }, "Remind Me never comes from a poll")
         let helps = [["hook", "--help"]: "hook", ["hook"]: "hook", ["hook", "help"]: "hook", ["hook", "add", "--pr", "x", "--help"]: "hook",
                      ["rule"]: "rule", ["rule", "edit", "--help"]: "rule", ["runs", "--help"]: "runs", ["automations"]: "automations",
                      ["automations", "on", "--help"]: "automations", ["--help"]: "<command>", ["help"]: "<command>", []: "<command>",
@@ -273,6 +275,7 @@ final class AutomationCLITests: XCTestCase {
             base + ["--name", " \n"],
             base + ["--on", ""],
             base + ["--on", "reviewReminder"],
+            base + ["--on", "reminder"],
             base + ["--scope", "everyone"],
             base + ["--repos", "octo-org"],
             base + ["--repos", "octo-org/*/x"],
@@ -467,7 +470,7 @@ final class AutomationCLITests: XCTestCase {
 
     func testKindsJSON() throws {
         let kinds = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(run(["kinds", "--json"]).output.utf8)) as? [[String: String]])
-        XCTAssertEqual(kinds.count, EventKind.allCases.count - 1)
+        XCTAssertEqual(kinds.count, EventKind.allCases.count - 2)
         XCTAssertEqual(kinds.first, ["kind": "comment", "label": "Comment added"])
     }
 

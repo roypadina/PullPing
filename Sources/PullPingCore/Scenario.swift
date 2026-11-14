@@ -33,7 +33,7 @@ public enum Scenario: String, CaseIterable, Codable, Sendable, Identifiable {
         case .conflicts: self = .conflicts
         case .readyToMerge: self = .readyToMerge
         case .assigned: self = .assigned
-        case nil: self = .general
+        case .reminder, nil: self = .general
         }
     }
 

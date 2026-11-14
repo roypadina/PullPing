@@ -44,11 +44,11 @@ final class CompatibilityTests: XCTestCase {
     /// them off sticks.
     func testAssignedReasonMigration() throws {
         let old = try JSONDecoder().decode(AppSettings.self, from: Data(#"{ "badgeReasons": ["to review", "mentioned"] }"#.utf8))
-        XCTAssertEqual(old.badgeReasons, [.toReview, .mentioned, .assigned, .reReview, .conflicts])
+        XCTAssertEqual(old.badgeReasons, [.toReview, .mentioned, .assigned, .reReview, .conflicts, .reminder])
         var mine = old
-        mine.badgeReasons.subtract([.assigned, .conflicts])
+        mine.badgeReasons.subtract([.assigned, .conflicts, .reminder])
         let again = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(mine))
-        XCTAssertEqual(again.badgeReasons, [.toReview, .mentioned, .reReview])
+        XCTAssertEqual(again.badgeReasons, [.toReview, .mentioned, .reReview, .reminder], "a reminder I set always counts")
         XCTAssertTrue(again.trackIssues)
     }
 
@@ -70,6 +70,15 @@ final class CompatibilityTests: XCTestCase {
         XCTAssertEqual(Attention.bucket(mine), .merge)
         XCTAssertEqual(Attention.bucket(theirs), .reviewed)  // re-review needs `myReview`: after the backfill refresh
         XCTAssertEqual(Attention.bucket(issue), .issueAssigned)
+        XCTAssertEqual([mine.remindAt, theirs.remindAt], [nil, nil])
+        XCTAssertEqual([mine.markedUnread, theirs.markedUnread], [false, false])
+        // Remind Me and Mark as Unread survive a save and a reload.
+        let store = StateStore(url: url)
+        store.update { $0.prs["PR_2"]?.remindAt = t0; $0.prs["PR_2"]?.markedUnread = true }
+        store.save()
+        let reloaded = try XCTUnwrap(StateStore(url: url).state.prs["PR_2"])
+        XCTAssertEqual(reloaded.remindAt, t0)
+        XCTAssertTrue(reloaded.markedUnread)
 
         let settings = try JSONDecoder().decode(AppSettings.self, from: fixture("v061-settings"))
         XCTAssertEqual(settings.needStyles, AppSettings.defaultNeedStyles)

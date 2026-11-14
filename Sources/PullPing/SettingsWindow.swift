@@ -24,6 +24,7 @@ final class SettingsWindow {
             add(tabs, "Menu Bar", "menubar.rectangle", MenuBarTab(store: store), height: MenuBarTab.height)
             add(tabs, "Phone", "iphone", PhoneTab(store: store), height: PhoneTab.height)
             add(tabs, "Automations", "play.rectangle", AutomationsTab(store: store), height: AutomationsTab.height)
+            add(tabs, "Shortcuts", "keyboard", ShortcutsTab(store: store), height: ShortcutsTab.height)
             add(tabs, "General", "gearshape", GeneralTab(store: store), height: GeneralTab.height)
             if let last = UserDefaults.standard.string(forKey: DefaultsKey.settingsTab),  // reopen on the last pane (SET-3)
                let index = tabs.tabViewItems.firstIndex(where: { $0.label == last }) {

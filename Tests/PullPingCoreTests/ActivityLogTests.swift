@@ -214,6 +214,22 @@ final class ActivityLogTests: XCTestCase {
         XCTAssertNil(AutomationCLI.sinceDate("-1h", now: t0))
         XCTAssertNil(AutomationCLI.sinceDate("h", now: t0))
     }
+
+    /// A due reminder: a panel unless notifications are off, paused, or the item muted or snoozed.
+    func testQuietReminder() {
+        var settings = AppSettings()
+        var pr = pr()
+        pr.roles = [.commenter]
+        let reminder = event(.reminder, actor: "PullPing")
+        func reason() -> ActivityEntry.Quiet? { ActivityEntry.Quiet.reason(reminder, pr: pr, settings: settings, offered: false, now: t0) }
+        XCTAssertNil(reason())
+        pr.snoozedUntil = t0.addingTimeInterval(60)
+        XCTAssertEqual(reason(), .snoozed)
+        pr.muted = true
+        XCTAssertEqual(reason(), .muted)
+        settings.pausedUntil = t0.addingTimeInterval(60)
+        XCTAssertEqual(reason(), .paused)
+    }
 }
 
 /// A value a `@Sendable` completion sets; read after `flush()`.

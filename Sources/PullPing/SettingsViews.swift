@@ -404,7 +404,7 @@ struct MenuBarTab: View {
                 } header: {
                     Text("Count in the Menu Bar")
                 } footer: {
-                    Text("Each pull request or issue counts once. Muted, hidden, merged and closed ones never count. A dot marks new activity you have not opened yet.").formFooter()
+                    Text("Each pull request or issue counts once. Muted, hidden, merged and closed ones never count. A dot marks new activity you have not opened yet. Reminders you set always count.").formFooter()
                 }
             }
         }
@@ -412,10 +412,68 @@ struct MenuBarTab: View {
     }
 }
 
+// MARK: Shortcuts
+
+/// Every shortcut, read-only (KBD-1). Menu shortcuts are changed in System Settings (App Shortcuts), so no recorder here;
+/// single keys only switch off.
+struct ShortcutsTab: View {
+    static let height: CGFloat = 780
+    @Bindable var store: Store
+
+    /// Command, menu shortcut, single key: mirrors `AppCommands`' Pull Request menu and `prKeys`.
+    private static let pullRequest = [("Open in Browser", "⇧⌘O", "O or ↩"), ("Mark as Read / Unread", "⇧⌘U", "U"), ("Mark All as Read", "⌥⇧⌘U", ""),
+                                      ("Mute / Unmute", "⌃⌘M", "M"), ("Hide / Unhide", "⌃⌘H", "H"), ("Remind Me…", "⌃⌘R", "R"),
+                                      ("Stop Tracking", "⌘⌫", "")]
+    private static let app = [("Refresh Now", "⌘R"), ("Open Window", "⌘1"), ("Settings", "⌘,"), ("Select All", "⌘A")]
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Single-key shortcuts", isOn: $store.settings.singleKeyShortcuts).controlSize(.mini)
+            } footer: {
+                Text("While a pull request list has keyboard focus, in the window and the menu-bar panel: the keys in the Key column, without ⌘.").formFooter()
+            }
+            Section("Pull Request") {
+                LabeledContent("") { columns("Menu", "Key", keyStyle: AnyShapeStyle(.secondary)) }
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)  // a header: each row below reads its own shortcuts
+                ForEach(Self.pullRequest, id: \.0) { command, menu, key in
+                    LabeledContent(command) {
+                        columns(menu, key, keyStyle: store.settings.singleKeyShortcuts ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            }
+            Section("App") {
+                ForEach(Self.app, id: \.0) { command, menu in
+                    LabeledContent(command) { columns(menu, "") }.accessibilityElement(children: .combine)
+                }
+            }
+            Section {
+                Button("Open Keyboard Settings…") {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension")!)
+                }
+            } footer: {
+                Text("To change a menu shortcut, add PullPing under Keyboard Shortcuts › App Shortcuts and type the menu title exactly, for example Mark as Read. Single keys cannot be changed.").formFooter()
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    /// Two right-aligned fixed-width columns: the menu shortcut, the single key.
+    private func columns(_ menu: String, _ key: String, keyStyle: AnyShapeStyle = AnyShapeStyle(.primary)) -> some View {
+        HStack(spacing: 0) {
+            Text(verbatim: menu).frame(width: 64, alignment: .trailing)
+            // A blank, not an empty Text: an empty cell dropped the row's shortcut to a second line.
+            Text(verbatim: key.isEmpty ? " " : key).frame(width: 64, alignment: .trailing).foregroundStyle(keyStyle)
+        }
+    }
+}
+
 // MARK: General
 
 struct GeneralTab: View {
-    static let height: CGFloat = 690
+    static let height: CGFloat = 740
     @Bindable var store: Store
 
     var body: some View {
@@ -432,10 +490,15 @@ struct GeneralTab: View {
                     Text("Per account").tag(InboxLayout.perAccount)
                 }
                 .pickerStyle(.radioGroup)
+                Picker("Mark as read when selected", selection: $store.settings.markReadSeconds) {
+                    ForEach(AppSettings.markReadOptions, id: \.self) { seconds in
+                        Text(seconds < 0 ? "Never" : seconds == 0 ? "Immediately" : seconds == 1 ? "After 1 second" : "After \(seconds) seconds").tag(seconds)
+                    }
+                }
             } header: {
                 Text("Inbox")
             } footer: {
-                Text("Unified lists all accounts together, then each account. Per account lists each account on its own.").formFooter()
+                Text("Unified lists all accounts together, then each account. Per account lists each account on its own. Selecting a pull request in the window marks it read; with Never, use Mark as Read (⇧⌘U).").formFooter()
             }
             Section {
                 Toggle("Track Issues", isOn: $store.settings.trackIssues).controlSize(.mini)
@@ -489,6 +552,7 @@ extension NeedReason {
         case .assigned: "Assigned to you"
         case .newComments: "New comments on your pull requests and issues"
         case .readyToMerge: "Your pull request is ready to merge"
+        case .reminder: "Reminders you set"
         }
     }
 
@@ -505,6 +569,7 @@ extension NeedReason {
         case .mentioned: "Unread mentions of me"
         case .newComments: "New comments or reviews on my pull requests and issues"
         case .readyToMerge: "My pull requests ready to merge"
+        case .reminder: "Reminders you set"
         }
     }
 }
@@ -891,7 +956,7 @@ struct RuleEditorSheet: View {
     /// Save found the file changed underneath (`pullping` meanwhile): Reload or Save Anyway.
     @State private var conflict = false
     @Environment(\.dismiss) private var dismiss
-    private static let kinds = EventKind.allCases.filter { $0 != .reviewReminder }
+    private static let kinds = EventKind.allCases.filter { $0 != .reviewReminder && $0 != .reminder }
 
     init(store: Store, rule: Automation, handler: Bool = false) {
         self.store = store

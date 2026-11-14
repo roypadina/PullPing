@@ -32,8 +32,8 @@ public struct RunRequest: Sendable {
 }
 
 public enum AutomationCLI {
-    /// `reviewReminder` is PullPing's own repeat, never a poll event.
-    static let kinds = EventKind.allCases.filter { $0 != .reviewReminder }
+    /// `reviewReminder` and `reminder` are PullPing's own (a repeat, Remind Me), never a poll event.
+    static let kinds = EventKind.allCases.filter { $0 != .reviewReminder && $0 != .reminder }
 
     /// Keep `pullping session set` in it as one unbroken literal (no interpolation): ~/Scripts/pullping-link-pr greps the binary for it.
     public static let help = """

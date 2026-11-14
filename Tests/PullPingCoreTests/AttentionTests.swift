@@ -418,4 +418,84 @@ final class AttentionTests: XCTestCase {
                        ["3 need you, 2 new", "3 need you", "2 new", ""])
         XCTAssertEqual(Signal(needs: 1, new: 2, newNeeds: 1) + Signal(needs: 2, new: 0), Signal(needs: 3, new: 2, newNeeds: 1))
     }
+
+    // MARK: Mark as Unread, Remind Me, sticky rows
+
+    func event(_ kind: EventKind, at: Date, own: Bool = false, id: String = UUID().uuidString) -> PREvent {
+        PREvent(id: id, prID: "PR_1", kind: kind, actor: own ? me : "alice", at: at, summary: "", url: nil, isOwn: own)
+    }
+
+    func testMarkedUnreadLightsTheItem() {
+        var p = pr()
+        p.markedUnread = true
+        XCTAssertEqual(Attention.unread(p), 1)
+        XCTAssertTrue(Attention.isNew(p, now: t0))
+        XCTAssertEqual(Attention.badgeCount([p], enabledAccounts: [p.accountID], mode: .allUnread), 1)
+        XCTAssertNil(Attention.needReason(p), "the flag alone adds no reason")
+        Attention.markRead(&p, now: t0)
+        XCTAssertFalse(p.markedUnread)
+        XCTAssertEqual(p.lastReadAt, t0)
+        XCTAssertEqual(Attention.unread(p), 0)
+    }
+
+    func testMarkUnreadBringsBackAReadMention() {
+        var p = pr()
+        p.events = [event(.mentioned, at: t0), event(.comment, at: t0.addingTimeInterval(60), own: true)]
+        Attention.markRead(&p, now: t0.addingTimeInterval(120))
+        XCTAssertNil(Attention.needReason(p))
+        Attention.markUnread(&p)
+        XCTAssertTrue(p.markedUnread)
+        XCTAssertEqual(p.lastReadAt, t0.addingTimeInterval(-1), "just before the newest event by someone else")
+        XCTAssertEqual(Attention.needReason(p), .mentioned)
+        XCTAssertEqual(Attention.unread(p), 1)
+    }
+
+    func testMarkUnreadLeavesAnUnreadItemsReadMarkAlone() {
+        var p = pr()
+        p.events = [event(.comment, at: t0), event(.mentioned, at: t0.addingTimeInterval(60))]
+        p.lastReadAt = t0.addingTimeInterval(30)
+        Attention.markUnread(&p)
+        XCTAssertEqual(p.lastReadAt, t0.addingTimeInterval(30))
+        XCTAssertTrue(p.markedUnread)
+    }
+
+    func testMarkUnreadOnOwnEventsOnlySetsTheFlag() {
+        var p = pr(roles: [.author])
+        p.events = [event(.comment, at: t0, own: true)]
+        p.lastReadAt = t0.addingTimeInterval(10)
+        Attention.markUnread(&p)
+        XCTAssertEqual(p.lastReadAt, t0.addingTimeInterval(10))
+        XCTAssertTrue(p.markedUnread)
+        XCTAssertEqual(Attention.unread(p), 1)
+    }
+
+    func testReminderReason() {
+        var p = pr(roles: [.commenter])
+        p.events = [event(.reminder, at: t0)]
+        XCTAssertTrue(Attention.reminderDue(p))
+        XCTAssertEqual(Attention.needReason(p), .reminder)
+        XCTAssertEqual(Attention.breakdown([p]), "1 reminder due")
+        XCTAssertEqual(Attention.waitingSince(p, .reminder), t0)
+        var muted = p
+        muted.muted = true
+        XCTAssertNil(Attention.needReason(muted))
+        var review = p
+        review.roles = [.reviewRequested]
+        XCTAssertEqual(Attention.needReason(review), .toReview, "a higher reason wins")
+        Attention.markRead(&p, now: t0.addingTimeInterval(1))
+        XCTAssertFalse(Attention.reminderDue(p))
+        XCTAssertNil(Attention.needReason(p))
+        Attention.markUnread(&p)
+        XCTAssertEqual(Attention.needReason(p), .reminder, "Mark as Unread brings it back")
+    }
+
+    func testKeeping() {
+        let a = pr("A"), b = pr("B"), c = pr("C"), d = pr("D")
+        let order = ["A", "B", "C"]
+        XCTAssertEqual(Attention.keeping([a, c], [b], order: order).map(\.id), ["A", "B", "C"], "middle row stays in place")
+        XCTAssertEqual(Attention.keeping([b, c], [a], order: order).map(\.id), ["A", "B", "C"], "first row stays first")
+        XCTAssertEqual(Attention.keeping([a, b, c], [b], order: order).map(\.id), ["A", "B", "C"], "no duplicate")
+        XCTAssertEqual(Attention.keeping([a, c], [d], order: order).map(\.id), ["D", "A", "C"], "unknown id goes first")
+        XCTAssertEqual(Attention.keeping([a], [c, b], order: order).map(\.id), ["A", "B", "C"], "two kept, any order")
+    }
 }
