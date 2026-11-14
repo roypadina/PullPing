@@ -94,5 +94,8 @@ final class SupportPromptTests: XCTestCase {
         XCTAssertFalse(SupportPromptState.calm([failing]), "CI failed on yours")
         failing.muted = true
         XCTAssertTrue(SupportPromptState.calm([failing]), "muted items are out of mind")
+        var reminded = pr()
+        reminded.events = [event(.reminder)]
+        XCTAssertFalse(SupportPromptState.calm([reminded]), "a reminder you set is due")
     }
 }

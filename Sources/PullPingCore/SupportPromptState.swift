@@ -65,10 +65,10 @@ public struct SupportPromptState: Codable, Equatable, Sendable {
         return Notify.reason(event, pr: pr).map(trouble.contains) == true ? .stress : nil
     }
 
-    /// Nothing waits on you that weighs: no review or re-review asked of you, nothing to fix on yours. Team requests,
-    /// mentions and comments don't count.
+    /// Nothing waits on you that weighs: no review or re-review asked of you, nothing to fix on yours, no reminder of yours
+    /// due. Team requests, mentions and comments don't count.
     public static func calm(_ prs: [TrackedPR]) -> Bool {
-        prs.allSatisfy { Attention.needReason($0, counting: trouble.union([.toReview, .reReview])) == nil }
+        prs.allSatisfy { Attention.needReason($0, counting: trouble.union([.toReview, .reReview, .reminder])) == nil }
     }
 
     static func major(_ version: String) -> Int { Int(version.split(separator: ".").first ?? "") ?? 0 }
