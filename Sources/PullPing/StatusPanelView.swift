@@ -205,9 +205,7 @@ enum FilterMenu {
     }
 }
 
-/// A borderless button that opens an AppKit menu below itself on click, once PullPing's activation has landed
-/// (`StatusItem.whenActivationSettles`): the activation from the panel's first click arrives ~100 ms after it and re-keys the
-/// popover, which closed a menu opened sooner (seen in a trace, 0.7.0 dev builds).
+/// A borderless button that opens an AppKit menu below itself on click (SwiftUI's `Menu` closed on the panel's first click).
 struct PopUpMenuButton<Label: View>: View {
     let chevron: Bool
     let menu: () -> NSMenu
@@ -216,9 +214,15 @@ struct PopUpMenuButton<Label: View>: View {
 
     var body: some View {
         Button {
-            StatusItem.shared.whenActivationSettles {
-                guard let view = anchor.view else { return }
-                menu().popUp(positioning: nil, at: NSPoint(x: 0, y: view.isFlipped ? view.bounds.maxY + 4 : -4), in: view)
+            guard let view = anchor.view else { return }
+            let menu = menu(), at = NSPoint(x: 0, y: view.isFlipped ? view.bounds.maxY + 4 : -4)
+            let front = { NSWorkspace.shared.frontmostApplication == .current }
+            let wasFront = front(), opened = Date()
+            if menu.popUp(positioning: nil, at: at, in: view) { return }
+            // shortcut: if PullPing still wasn't active, opening the menu activates it and that closes the menu at once (traced):
+            // reopen it once. Drop when the panel's activation is reliable on every macOS PullPing supports.
+            if !wasFront, front(), Date().timeIntervalSince(opened) < 0.5 {
+                DispatchQueue.main.async { menu.popUp(positioning: nil, at: at, in: view) }
             }
         } label: {
             HStack(spacing: 3) {
