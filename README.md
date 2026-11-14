@@ -217,7 +217,7 @@ your version; it never turns on automatic runs or the search through your agent 
   "resume this session when the pull request is approved or commented on". A hook runs once and is then removed;
   an unused one expires after 14 days.
 
-<img src="docs/screenshots/settings-automations.png" alt="Settings, Automations tab: the Copy Setup Prompt note, Run Automations on, Handle with Agent on, Open With with Terminal (the default) and Ghostex, and the first scenario prompts" width="340">
+<img src="docs/screenshots/settings-automations.png" alt="Settings, Automations tab: the Copy Setup Prompt note, Run Automations on, Handle with Agent on, three rules, and Open With with Terminal (the default) and Ghostex" width="340">
 &nbsp;
 <img src="docs/screenshots/rule-editor.png" alt="The rule editor: agent, command, where it opens, working directory {worktree_dir}, the pull request's linked session as the session, and the prompt" width="420">
 

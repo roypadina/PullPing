@@ -78,7 +78,7 @@ final class ScreenshotRenderTests: XCTestCase {
         }
         store.setFindSessions(false)  // reloads the store's copy
         store.mutateRepoFolders { $0.roots = ["~/Code", "~/src"] }  // also reloads the store's copy
-        try save("settings-automations", AutomationsTab(store: store), NSSize(width: 520, height: 1010))  // down to Open With and the first prompts
+        try save("settings-automations", AutomationsTab(store: store), NSSize(width: 520, height: 1010))  // down to the rules and Open With
         // Scrolled to its end (agent, session, prompt); 32 pt taller than the sheet so the top edge falls between sections.
         try render(RuleEditorSheet(store: store, rule: review), size: NSSize(width: 560, height: 672), dark: false, scrollToEnd: true,
                    to: URL(fileURLWithPath: dir).appendingPathComponent("rule-editor.png"))
