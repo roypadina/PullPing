@@ -856,7 +856,7 @@ private struct RuleRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(rule.name).fontWeight(.semibold).lineLimit(1)
                 Text(verbatim: summary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    .help(rule.source == "cli" ? "Written from the command line" + (rule.by.isEmpty ? "" : " by \(rule.by)") : "")
+                    .help(summary + (rule.source == "cli" ? "\nWritten from the command line" + (rule.by.isEmpty ? "" : " by \(rule.by)") : ""))  // whole, as it truncates (A11Y-15)
             }
             Spacer(minLength: 8)
             Toggle("Enabled", isOn: Binding(get: { rule.enabled }, set: { store.setEnabled(rule.id, $0) }))
