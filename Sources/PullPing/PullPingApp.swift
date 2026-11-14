@@ -108,6 +108,8 @@ struct AppCommands: Commands {
             Divider()
             Menu("Handle with Agent") { if let pr { HandlerMenu(store: store, pr: pr) } }
                 .disabled(pr == nil || !store.agentMenuShown)
+            // The row menu's and the toolbar's Run Automation ▸ here too (MNU-2); dimmed without a selection.
+            if let pr { RunAutomationMenu(store: store, pr: pr) } else { Menu("Run Automation") {}.disabled(true) }
             Divider()
             Button(pr?.muted == true ? "Unmute" : "Mute") { store.setMuted(ids, !(pr?.muted ?? false)) }.disabled(pr == nil)
             Button(pr?.hidden == true ? "Unhide" : "Hide") { store.setHidden(ids, !(pr?.hidden ?? false)) }.disabled(pr == nil)
