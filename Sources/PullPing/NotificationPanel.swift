@@ -126,6 +126,7 @@ final class NotificationPanels {
     var isEmpty: Bool { active.isEmpty }
 
     private func add(prID: String?, _ model: PanelModel, autoHide: Int) {
+        SupportPrompt.shared.makeWay()  // a new panel comes first: a support card on screen counts as a snooze
         guard let screen = Self.screenUnderMouse() else { return }
         let panel = NotificationNSPanel(contentRect: NSRect(x: 0, y: 0, width: Theme.panelWidth, height: Theme.panelHeight),
                                         styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)

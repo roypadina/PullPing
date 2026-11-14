@@ -3,10 +3,15 @@ import PullPingCore
 import SwiftUI
 
 /// One dynamic colour from a light/dark pair: flips with the appearance like the system's semantic colours.
-private func dyn(light: NSColor, dark: NSColor) -> Color {
+/// Increase Contrast uses the `hc` variants when given, else the pair.
+private func dyn(light: NSColor, dark: NSColor, hcLight: NSColor? = nil, hcDark: NSColor? = nil) -> Color {
     Color(nsColor: NSColor(name: nil) {
-        $0.bestMatch(from: [.aqua, .darkAqua, .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua])
-            .map { $0 == .darkAqua || $0 == .accessibilityHighContrastDarkAqua } == true ? dark : light
+        switch $0.bestMatch(from: [.aqua, .darkAqua, .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua]) {
+        case .darkAqua: dark
+        case .accessibilityHighContrastAqua: hcLight ?? light
+        case .accessibilityHighContrastDarkAqua: hcDark ?? dark
+        default: light
+        }
     })
 }
 
@@ -24,6 +29,10 @@ enum Theme {
     static let neutral = Color.secondary
     /// Text on a filled signal button: white on the deep light fills, ink on the bright dark fills.
     static let onSignal = dyn(light: .white, dark: rgb(0x0D1117))
+    /// Ko-fi red, the support card's Tip button (MeetAlert's values).
+    static let kofi = dyn(light: rgb(0xC8302D), dark: rgb(0xFF5E5B), hcLight: rgb(0xA32320), hcDark: rgb(0xFF8783))
+    /// The support card's base tint over `.regularMaterial`: navy ink, not neutral black.
+    static let cardInk = dyn(light: NSColor(white: 1, alpha: 0.45), dark: NSColor(srgbRed: 0.05, green: 0.07, blue: 0.13, alpha: 0.55))
 
     static let panelWidth: CGFloat = 420
     static let panelHeight: CGFloat = 112
