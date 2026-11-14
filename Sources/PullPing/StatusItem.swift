@@ -11,6 +11,10 @@ final class StatusItem: NSObject, NSPopoverDelegate {
     private var item: NSStatusItem?
     private let popover = NSPopover()
     private var visibility: NSKeyValueObservation?
+    /// While the popover is open: a click anywhere else or Escape closes it, even when the panel isn't key or focused
+    /// (`.transient` and `onExitCommand` alone missed clicks in other apps and Escape without a focused view).
+    private var closeMonitors: [Any] = []
+    private var resignObserver: NSObjectProtocol?
     /// The packaged template glyph; the SF Symbol when running unbundled (`swift run`).
     private let glyph = NSImage(named: "menubar") ?? NSImage(systemSymbolName: "arrow.triangle.pull", accessibilityDescription: nil)
 
@@ -78,11 +82,32 @@ final class StatusItem: NSObject, NSPopoverDelegate {
         NSApp.activate()  // user click only: arrows and Return need a key window
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
+        watchForClose()
+    }
+
+    private func watchForClose() {
+        guard closeMonitors.isEmpty else { return }
+        let clicks: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: clicks, handler: { [weak self] _ in
+            Task { @MainActor in self?.closePopover() }  // another app, the desktop, another menu-bar item
+        }) { closeMonitors.append(global) }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
+            guard event.keyCode == 53, let self, self.popover.isShown else { return event }  // 53 = Escape
+            self.closePopover()
+            return nil
+        }) { closeMonitors.append(local) }
+        resignObserver = NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.closePopover() }
+        }
     }
 
     /// A closed popover drops its SwiftUI view, so it stops re-rendering on every store change.
     func popoverDidClose(_ notification: Notification) {
         popover.contentViewController = nil
+        closeMonitors.forEach(NSEvent.removeMonitor)
+        closeMonitors = []
+        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
+        resignObserver = nil
     }
 
     /// Order per MBX-11: actions, status, Settings / About, Quit last. Rebuilt per click so Pause shows its state.
