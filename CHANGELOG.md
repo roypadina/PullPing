@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Planned as 0.7.0.
+## [0.7.0] - 2026-11-15
 
 > **Before you update:** going back to 0.6.1 afterwards resets PullPing's settings to their defaults and makes it sync your pull requests again from scratch (silently, without notifications). Accounts, automations and the activity log are kept; an older version still opens every automation in the same app, but once it saves a change, the Open With list is rebuilt from the apps in use (names and order lost) and your own scenario prompts are gone.
 
