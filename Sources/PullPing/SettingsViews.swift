@@ -363,9 +363,10 @@ struct PhoneTab: View {
     }
 }
 
-// MARK: General
+// MARK: Menu Bar
 
-struct GeneralTab: View {
+/// The icon, its count and dot, and what the count counts (was part of General; split so neither pane scrolls, SET-8).
+struct MenuBarTab: View {
     static let height: CGFloat = 640
     @Bindable var store: Store
     @AppStorage(DefaultsKey.showMenuBarIcon) private var showIcon = true
@@ -373,10 +374,6 @@ struct GeneralTab: View {
     var body: some View {
         Form {
             Section {
-                Picker("Check GitHub every", selection: $store.settings.pollIntervalMinutes) {
-                    ForEach(AppSettings.pollIntervalOptions, id: \.self) { Text($0 == 1 ? "1 minute" : "\($0) minutes").tag($0) }
-                }
-                LaunchAtLoginToggle()
                 Toggle("Show in the Menu Bar", isOn: $showIcon).controlSize(.mini)
                     .onChange(of: showIcon) { StatusItem.shared.setVisible(showIcon) }
                 Picker("Menu bar count", selection: $store.settings.badgeMode) {
@@ -396,18 +393,38 @@ struct GeneralTab: View {
             }
             if store.settings.badgeMode == .needsMe {
                 Section {
-                    ForEach(NeedReason.allCases, id: \.self) { reason in
+                    ForEach(NeedReason.notifyOrder, id: \.self) { reason in  // the order of Settings > Notifications
                         Toggle(reason.settingsLabel, isOn: Binding(
                             get: { store.settings.badgeReasons.contains(reason) },
                             set: { on in
                                 if on { store.settings.badgeReasons.insert(reason) } else { store.settings.badgeReasons.remove(reason) }
                             }))
+                        .controlSize(.mini)
                     }
                 } header: {
                     Text("Count in the Menu Bar")
                 } footer: {
                     Text("Each pull request or issue counts once. Muted, hidden, merged and closed ones never count. A dot marks new activity you have not opened yet.").formFooter()
                 }
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+// MARK: General
+
+struct GeneralTab: View {
+    static let height: CGFloat = 600
+    @Bindable var store: Store
+
+    var body: some View {
+        Form {
+            Section {
+                Picker("Check GitHub every", selection: $store.settings.pollIntervalMinutes) {
+                    ForEach(AppSettings.pollIntervalOptions, id: \.self) { Text($0 == 1 ? "1 minute" : "\($0) minutes").tag($0) }
+                }
+                LaunchAtLoginToggle()
             }
             Section {
                 Picker("Layout", selection: $store.settings.inboxLayout) {
@@ -439,9 +456,12 @@ struct GeneralTab: View {
                 Text("Track Issues adds open issues you opened, are assigned to, are mentioned in or comment on. Turning it off removes them from the lists. Activity, in the window's sidebar, lists every event and run, at most 5000.").formFooter()
             }
             Section("About") {
+                // Two per row: four in one row truncated at 520 pt.
                 HStack {
                     Button("About PullPing…") { AboutWindow.show() }
                     Button("Check for Updates…") { Updates.check() }
+                }
+                HStack {
                     Button("Welcome Guide…") { WelcomeWindow.show() }
                     Button("Support on Ko-fi ☕") { NSWorkspace.shared.open(AboutInfo.kofi) }
                 }
@@ -472,7 +492,7 @@ extension NeedReason {
         }
     }
 
-    /// Settings > General > Count in the Menu Bar.
+    /// Settings > Menu Bar > Count in the Menu Bar.
     var settingsLabel: String {
         switch self {
         case .toReview: "Review requested from me"
@@ -508,6 +528,7 @@ struct AutomationsTab: View {
     @State private var newOverride = ""
     @State private var editingTarget: LaunchTarget?
     @State private var removingTarget: LaunchTarget?
+    @State private var removingRule: Automation?
     @State private var editingScenario: Scenario?
     @State private var copied = false
 
@@ -556,22 +577,21 @@ struct AutomationsTab: View {
                     Button("Edit…") { editing = store.handler }
                 }
                 Toggle("Look for earlier sessions", isOn: Binding(get: { store.automationFile.findSessions }, set: { store.setFindSessions($0) }))
+                    .controlSize(.mini)
             } header: {
                 Text("Handle with Agent")
             } footer: {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Adds a Handle with Agent button to the notifications you pick in Edit… and to the pull request's menu. When an agent has linked its session to the pull request (`pullping session set`, or one PullPing started), the button becomes Resume Session and New Session. The buttons open with the first app under Open With; the pull request's menu and the notification's chevron offer the others and Resume Without Prompt.").formFooter()
-                    Text("When a pull request has no linked session, PullPing searches your local Claude Code and Codex transcripts (`~/.claude/projects`, `~/.codex/sessions`) for the pull request's URL or branch. Only file names and folders are read into PullPing; nothing leaves your Mac.").formFooter()
+                    Text("Adds Handle with Agent to the notifications you pick in Edit… and to the pull request's menu. With a linked session (`pullping session set`, or one PullPing started) it becomes Resume Session and New Session. It opens with the default under Open With; the menu and the notification's chevron offer the others.").formFooter()
+                    Text("Look for earlier sessions: with nothing linked, PullPing searches your Claude Code and Codex transcripts (`~/.claude/projects`, `~/.codex/sessions`) for the pull request's URL or branch. Only file names and folders are read; nothing leaves your Mac.").formFooter()
                 }
             }
             .disabled(!store.automationsEnabled)
-            openWith
-            prompts
-            backgroundRuns
+            // By use: what you turn on and edit first, then where runs open and what they say, then folders and status lists.
             Section {
                 if store.rules.isEmpty { Text("No rules yet.").foregroundStyle(.secondary) }
                 ForEach(store.rules) { rule in
-                    RuleRow(store: store, rule: rule) { editing = rule }
+                    RuleRow(store: store, rule: rule, onEdit: { editing = rule }, onRemove: { removingRule = rule })
                 }
             } header: {
                 Text("Rules")
@@ -582,6 +602,9 @@ struct AutomationsTab: View {
                 }
             }
             .disabled(!store.automationsEnabled)
+            openWith
+            backgroundRuns
+            prompts
             Section {
                 let folders = store.automationFile.repoFolders
                 if folders.roots.isEmpty { Text("No folders.").foregroundStyle(.secondary) }
@@ -602,7 +625,7 @@ struct AutomationsTab: View {
                 Text("Repository Folders")
             } footer: {
                 HStack(alignment: .firstTextBaseline) {
-                    Text("{repo_dir}, the default working directory: PullPing finds a repository by the owner/repo of its git remotes in these folders (3 levels deep), whatever the clone is called; without one, the fallback folder, so a run never fails only because the repository isn't cloned. Add an override when it lives elsewhere.").formFooter()
+                    Text("{repo_dir}, the default working directory, is the clone whose git remote matches the pull request's owner/repo, searched 3 levels deep in these folders. Not cloned: the fallback folder. Somewhere else: add an override below.").formFooter()
                     Button("Add Folder…") {
                         func expanded(_ path: String) -> String { (path as NSString).expandingTildeInPath }
                         if let dir = Self.chooseFolder() {
@@ -696,6 +719,13 @@ struct AutomationsTab: View {
         .sheet(item: $editing) { RuleEditorSheet(store: store, rule: $0, handler: $0.id == Automation.handlerID).frame(width: 560, height: 640) }
         .sheet(item: $editingTarget) { TargetEditorSheet(store: store, target: $0).frame(width: 460) }
         .sheet(item: $editingScenario) { ScenarioPromptSheet(store: store, scenario: $0).frame(width: 560, height: 600) }
+        .confirmationDialog(removingRule.map { "Remove \($0.name.isEmpty ? "this rule" : "\u{201C}\($0.name)\u{201D}")?" } ?? "",
+                            isPresented: Binding(get: { removingRule != nil }, set: { if !$0 { removingRule = nil } })) {
+            Button("Remove", role: .destructive) { if let r = removingRule { store.removeAutomation(r.id) } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Its events, prompt and settings are deleted.")
+        }
         .alert(removingTarget.map { "Remove \($0.name)?" } ?? "", isPresented: Binding(get: { removingTarget != nil }, set: { if !$0 { removingTarget = nil } })) {
             Button("Remove", role: .destructive) { if let t = removingTarget { store.mutateAutomationFile { $0.removeTarget(t.id) } } }
             Button("Cancel", role: .cancel) {}
@@ -747,13 +777,19 @@ struct AutomationsTab: View {
     /// Settings → Automations → Prompts: each scenario's task text, built-in or the user's.
     private var prompts: some View {
         Section {
-            ForEach(Scenario.allCases, id: \.self) { s in
-                HStack {
-                    Text(s.label)
-                    Spacer(minLength: 8)
-                    Text(store.automationFile.task(s) == s.builtIn ? "Built-in" : "Custom").font(.caption).foregroundStyle(.secondary)
-                    Button("Edit…") { editingScenario = s }
+            // Collapsed: nine rows most people never change (the summary says whether any is custom).
+            DisclosureGroup {
+                ForEach(Scenario.allCases, id: \.self) { s in
+                    HStack {
+                        Text(s.label)
+                        Spacer(minLength: 8)
+                        Text(store.automationFile.task(s) == s.builtIn ? "Built-in" : "Custom").font(.caption).foregroundStyle(.secondary)
+                        Button("Edit…") { editingScenario = s }
+                    }
                 }
+            } label: {
+                let custom = Scenario.allCases.filter { store.automationFile.task($0) != $0.builtIn }.count
+                LabeledContent("Scenario prompts", value: custom == 0 ? "All built-in" : "\(custom) custom")
             }
         } header: {
             Text("Prompts")
@@ -776,7 +812,7 @@ struct AutomationsTab: View {
         } header: {
             Text("Background Runs")
         } footer: {
-            Text("Claude Code runs without a terminal and can only read: the repository folder and the pull request's diff and discussion. Codex can't run in the background yet. PullPing posts nothing until you click Post in a draft. Review in Background and Summarize are in each pull request's Handle with Agent menu; a rule can run in the background too. At most 2 at once, 10 minutes each.").formFooter()
+            Text("Claude Code runs without a terminal and can only read the repository folder and the pull request's diff and discussion; the result is a draft, and PullPing posts nothing until you click Post. Start one from a pull request's Handle with Agent menu or from a rule. At most 2 at once, 10 minutes each. Codex can't run in the background yet.").formFooter()
         }
         .disabled(!store.automationsEnabled)
     }
@@ -813,6 +849,7 @@ private struct RuleRow: View {
     let store: Store
     let rule: Automation
     let onEdit: () -> Void
+    let onRemove: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -828,7 +865,7 @@ private struct RuleRow: View {
                 .controlSize(.mini)
                 .help(rule.enabled ? "On" : "Off")
             Button("Edit…", action: onEdit)
-            Button("Remove", role: .destructive) { store.removeAutomation(rule.id) }
+            Button("Remove…", role: .destructive, action: onRemove)
         }
     }
 
@@ -918,6 +955,8 @@ struct RuleEditorSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            Text(handler ? "Handle with Agent" : original == nil ? "New Rule" : "Edit Rule").font(.headline)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 20).padding(.top, 16)
             Form {
                 if !handler {
                     Section {
@@ -1074,6 +1113,8 @@ struct TargetEditorSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            Text(isNew ? "Add to Open With" : "Edit Open With").font(.headline)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 20).padding(.top, 16)
             Form {
                 Section {
                     TextField("Name", text: $target.name, prompt: Text(verbatim: target.launcher.title))
@@ -1087,7 +1128,7 @@ struct TargetEditorSheet: View {
                         TextField("Custom command", text: $target.customCommand, prompt: Text(verbatim: "open -a iTerm {script}"))
                     }
                     if target.launcher == .ghostex {
-                        Toggle("Focus the session if it is already running", isOn: $target.reuseRunning)
+                        Toggle("Focus the session if it is already running", isOn: $target.reuseRunning).controlSize(.mini)
                     }
                 } footer: {
                     Text(target.launcher == .custom

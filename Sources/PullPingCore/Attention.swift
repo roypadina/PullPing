@@ -184,7 +184,7 @@ public enum Attention {
     }
 
     /// Why an open, shown, unmuted item needs me, from its bucket, plus unread mentions, assignments and (my pull requests and
-    /// issues, or issues assigned to me) unread comments or reviews. Only reasons in `counting` (Settings > General) apply;
+    /// issues, or issues assigned to me) unread comments or reviews. Only reasons in `counting` (Settings > Menu Bar) apply;
     /// the first match in `NeedReason` order wins, so each item counts once.
     public static func needReason(_ pr: TrackedPR, counting: Set<NeedReason> = Set(NeedReason.allCases)) -> NeedReason? {
         guard pr.state == .open, !pr.muted, !pr.hidden else { return nil }

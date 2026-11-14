@@ -44,7 +44,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var otherStyles = AppSettings.defaultOtherStyles
     public var inboxLayout = InboxLayout.unified
     public var badgeMode = BadgeMode.needsMe
-    /// What "Pull requests that need me" counts (Settings > General); all reasons by default.
+    /// What "Pull requests that need me" counts (Settings > Menu Bar); all reasons by default.
     public var badgeReasons = Set(NeedReason.allCases)
     /// The menu-bar icon shows a dot while something is new (`Attention.isNew`); not with the All unread count.
     public var menuBarDot = true

@@ -58,11 +58,11 @@ struct ActivityView: View {
             }
         }
         .safeAreaInset(edge: .top) {
-            Picker("Show", selection: $filter) {
-                ForEach(ActivityFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            // Segments while the column is wide enough, else a menu (five segments clipped a 400 pt column).
+            ViewThatFits(in: .horizontal) {
+                filterPicker.pickerStyle(.segmented)
+                filterPicker.pickerStyle(.menu).fixedSize()
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
             .padding(.horizontal, 12).padding(.vertical, 6)
         }
         .onChange(of: selection) { _, i in store.selectedID = i.flatMap(pr)?.id }
@@ -100,6 +100,13 @@ struct ActivityView: View {
         // Seen once left: another row, or the window in the background.
         .onDisappear { store.activitySeenAt = Date() }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in store.activitySeenAt = Date() }
+    }
+
+    private var filterPicker: some View {
+        Picker("Show", selection: $filter) {
+            ForEach(ActivityFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+        }
+        .labelsHidden()
     }
 
     /// The row's pull request while PullPing still tracks it.

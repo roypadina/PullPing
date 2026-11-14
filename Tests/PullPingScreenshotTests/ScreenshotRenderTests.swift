@@ -35,6 +35,7 @@ final class ScreenshotRenderTests: XCTestCase {
             try save("settings-notifications", NotificationsTab(store: store), NSSize(width: 520, height: NotificationsTab.height))
             try save("settings-phone", PhoneTab(store: store), NSSize(width: 520, height: PhoneTab.height))
             try save("settings-general", GeneralTab(store: store), NSSize(width: 520, height: GeneralTab.height))
+            try save("settings-menu-bar", MenuBarTab(store: store), NSSize(width: 520, height: MenuBarTab.height))
         }
     }
 
@@ -317,7 +318,7 @@ final class ScreenshotRenderTests: XCTestCase {
     }
 
     /// Dev-only: the attention indicators (number = need you, dot = new). Sidebar per account with Work read (3/0 rows),
-    /// the panel scrolled to its collapsed groups, General with All unread (dot toggle off), menu-bar glyphs.
+    /// the panel scrolled to its collapsed groups, Menu Bar with All unread (dot toggle off), menu-bar glyphs.
     /// RENDER_REVIEW=<dir> swift test --filter ScreenshotRenderTests/test_renderIndicators
     func test_renderIndicators() throws {
         guard let dir = ProcessInfo.processInfo.environment["RENDER_REVIEW"] else { throw XCTSkip("set RENDER_REVIEW=<dir> to render") }
@@ -341,7 +342,7 @@ final class ScreenshotRenderTests: XCTestCase {
             }
             try save("indicators-panel", StatusPanelView(store: panel), NSSize(width: 380, height: 520), scrollToEnd: true)
             store.settings.badgeMode = .allUnread
-            try save("indicators-general", GeneralTab(store: store), NSSize(width: 520, height: 420))
+            try save("indicators-menu-bar", MenuBarTab(store: store), NSSize(width: 520, height: 420))
             let bar = HStack(spacing: 24) {
                 ForEach([false, true], id: \.self) { dot in
                     HStack(spacing: 9) {
@@ -353,6 +354,138 @@ final class ScreenshotRenderTests: XCTestCase {
             }
             .foregroundStyle(.primary).frame(width: 420, height: 120)
             try save("indicators-glyph", bar, NSSize(width: 420, height: 120))
+        }
+    }
+
+    /// Dev-only design review: every surface, light and dark, mostly as contact sheets. The popover's filter and account live
+    /// in @AppStorage: registered values on a scratch suite (memory only, nothing written to disk). The registration domain
+    /// is process-wide, so each popover is its own render.
+    /// RENDER_DESIGN=<dir> swift test --filter ScreenshotRenderTests/test_renderDesignLoop
+    func test_renderDesignLoop() throws {
+        guard let dir = ProcessInfo.processInfo.environment["RENDER_DESIGN"] else { throw XCTSkip("set RENDER_DESIGN=<dir> to render") }
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "PullPingDesignRender"))
+        for dark in [false, true] {
+            let suffix = dark ? "-dark" : ""
+            func save(_ name: String, _ view: some View, _ size: NSSize, scrollToEnd: Bool = false) throws {
+                try render(view, size: size, dark: dark, scrollToEnd: scrollToEnd, to: URL(fileURLWithPath: dir).appendingPathComponent("\(name)\(suffix).png"))
+            }
+            func popover(_ name: String, _ store: Store, _ filter: Filter, account: String = "") throws {
+                defaults.register(defaults: [DefaultsKey.panelFilter: filter.rawValue, DefaultsKey.panelAccount: account])
+                try save("popover-\(name)", StatusPanelView(store: store).defaultAppStorage(defaults), NSSize(width: 380, height: 520))
+            }
+            let store = Fixtures.sampleStore()
+            store.selection = nil
+            // Popover: every filter, then states (per-account layout, one account selected, an account error, no accounts, first sync, empty).
+            for filter in Filter.allCases { try popover(filter.rawValue, store, filter) }
+            let perAccount = Fixtures.sampleStore()
+            perAccount.settings.inboxLayout = .perAccount
+            let failing = Fixtures.sampleStore()
+            failing.statuses[Fixtures.work.id] = .badToken
+            failing.offline = true
+            let none = Store(state: StateStore(url: nil), accounts: [], settings: AppSettings(), persist: false)
+            let syncing = Store(state: StateStore(url: nil), accounts: [Fixtures.personal], settings: AppSettings(), persist: false)
+            syncing.syncing = true
+            let empty = Store(state: StateStore(url: nil), accounts: [Fixtures.personal], settings: AppSettings(), persist: false)
+            empty.setTracked { $0.lastPollAt = [Fixtures.personal.id: Date()] }
+            try popover("per-account-work", perAccount, .needsMe, account: Fixtures.work.id.uuidString)
+            try popover("error-offline", failing, .needsMe)
+            try popover("no-accounts", none, .needsMe)
+            try popover("first-sync", syncing, .needsMe)
+            try popover("empty", empty, .needsMe)
+            // Main window: unified, per account, and the list column of every sidebar row (the sidebar can't show a selection offscreen).
+            store.selectedID = "PR_2"
+            try save("main-unified", MainView(store: store), NSSize(width: 1180, height: 720))
+            store.selectedID = nil
+            try save("main-per-account", MainView(store: perAccount), NSSize(width: 1180, height: 720))
+            let lists = Filter.allCases.map { filter in
+                let s = Fixtures.sampleStore()
+                s.selection = SidebarItem(scope: .all, filter: filter)
+                return s
+            }
+            func list(_ i: Int) -> some View { PRListView(store: lists[i], query: .constant("")).frame(width: 400).border(Color.secondary.opacity(0.4)) }
+            try save("lists-1", HStack(spacing: 12) { ForEach(0..<4, id: \.self) { list($0) } }.padding(12),
+                     NSSize(width: 4 * 412 + 12, height: 760))
+            try save("lists-2", HStack(spacing: 12) {
+                ForEach(4..<7, id: \.self) { list($0) }
+                ActivityView(store: store, query: .constant(""), selection: .constant(nil)).frame(width: 400).border(Color.secondary.opacity(0.4))
+            }.padding(12), NSSize(width: 4 * 412 + 12, height: 760))
+            // Detail pane: my pull request (CI failed), a review request with a linked session and a draft, an issue.
+            let detailStore = Fixtures.sampleStore()
+            detailStore.mutateAutomationFile { $0.handler.enabled = true; $0.background.enabled = true }
+            let pr3 = detailStore.tracked.prs["PR_3"]!
+            detailStore.automationStore.mutate {
+                $0.setLink(SessionLink(pr: PRRef(repo: pr3.repo, number: pr3.number), agent: .claude, sessionID: "0f3c2a1e-5b7d-4c9e-8a10-2b4d6f8e1c3a",
+                                       cwd: "~/Code/gadgets", setAt: Date(), source: "cli", by: "claude"))
+            }
+            detailStore.setFindSessions(false)
+            try save("detail", HStack(spacing: 12) {
+                ForEach(["PR_2", "PR_3", "I_1"], id: \.self) { id in
+                    PRDetailView(store: detailStore, pr: detailStore.tracked.prs[id]!).frame(width: 520).border(Color.secondary.opacity(0.4))
+                }
+            }.padding(12), NSSize(width: 3 * 532 + 12, height: 760))
+            // Notification panels: every reason, the agent buttons, notes (What's New, draft ready), the overflow summary.
+            let pr = { store.tracked.prs[$0]! }
+            let chevron = PanelAction(id: Automation.handlerMenuActionID, title: "More agent options", run: {}) { NSMenu() }
+            let whatsNew = PanelModel(pr: pr("PR_1"), events: [], alert: true, account: nil, actions: [PanelAction(id: UUID(), title: "Notification Settings") {}])
+            whatsNew.note = ("New in PullPing 0.7", "Lists sort by whose turn it is: Needs Me first. A notification now means something needs you; merges, CI passes and other updates are listed in Activity.")
+            let draftNote = PanelModel(pr: pr("PR_1"), events: [], alert: true, account: nil,
+                                       actions: [PanelAction(id: UUID(), title: "Review Draft…", run: {}, symbol: "doc.text.magnifyingglass"),
+                                                 PanelAction(id: UUID(), title: "Open Session", run: {}, symbol: "terminal"),
+                                                 PanelAction(id: UUID(), title: "Discard", run: {}, symbol: "trash")])
+            draftNote.note = ("Review draft ready", "octo-org/gadgets #57 · Bump build tools to 2.4\nSuggests: request changes. Bumps the build tools; the lockfile still pins the old version.")
+            let models: [PanelModel] = ["PR_9", "PR_3", "PR_13", "PR_2", "PR_15", "I_4", "PR_1"].map {
+                PanelModel(pr: pr($0), events: Array(pr($0).events.suffix(1)), alert: true, account: "@dana")
+            } + [
+                PanelModel(pr: pr("PR_2"), events: pr("PR_2").events, alert: false, account: "@dana-work",
+                           actions: [PanelAction(id: Automation.handlerResumeActionID, title: "Resume Session") {},
+                                     PanelAction(id: Automation.handlerID, title: "New Session") {}, chevron]),
+                PanelModel(pr: pr("PR_9"), events: Array(pr("PR_9").events.suffix(1)), alert: false, account: "@dana",
+                           actions: [PanelAction(id: UUID(), title: "Run Answer review feedback") {}, PanelAction(id: Automation.handlerID, title: "Handle with Agent") {}, chevron]),
+                whatsNew, draftNote, PanelModel(pr: pr("PR_1"), events: [], alert: true, account: nil, moreCount: 3),
+            ]
+            try save("panels", LazyVGrid(columns: [GridItem(.fixed(Theme.panelWidth + 40), spacing: 16), GridItem(.fixed(Theme.panelWidth + 40))], spacing: 12) {
+                ForEach(Array(models.enumerated()), id: \.offset) { self.panel($0.element) }
+            }.padding(8), NSSize(width: 2 * (Theme.panelWidth + 40) + 16, height: 6 * (Theme.panelHeight + 52)))
+            // Windows: draft, Welcome, About.
+            try save("draft", DraftView(store: store, draft: Self.sampleDraft(store)) {}, NSSize(width: 620, height: 560))
+            try save("welcome-about", HStack(alignment: .top, spacing: 12) {
+                WelcomeView(onAddAccount: {}, onDone: {}).fixedSize().border(Color.secondary.opacity(0.4))
+                AboutView().fixedSize().border(Color.secondary.opacity(0.4))
+            }.padding(12), NSSize(width: 440 + 380 + 36, height: 760))
+            // Settings: every tab at its window height, Automations whole, the editor sheets.
+            let settings = Fixtures.sampleStore()
+            settings.statuses[Fixtures.work.id] = .badToken
+            try save("settings-tabs", HStack(alignment: .top, spacing: 12) {
+                AccountsTab(store: settings).frame(width: 520, height: AccountsTab.height).border(Color.secondary.opacity(0.4))
+                NotificationsTab(store: settings).frame(width: 520, height: NotificationsTab.height).border(Color.secondary.opacity(0.4))
+                PhoneTab(store: settings).frame(width: 520, height: PhoneTab.height).border(Color.secondary.opacity(0.4))
+            }.padding(12), NSSize(width: 3 * 532 + 12, height: NotificationsTab.height + 24))
+            try save("settings-general", GeneralTab(store: settings), NSSize(width: 520, height: GeneralTab.height))
+            try save("settings-menu-bar", MenuBarTab(store: settings), NSSize(width: 520, height: MenuBarTab.height))
+            var rule = Automation(name: "Answer review feedback", kinds: [.reviewChangesRequested, .comment], workingDirectory: "{worktree_dir}")
+            rule.scope = .mine
+            rule.sessionID = Automation.linkedSession
+            settings.mutateAutomationFile { file in
+                file.handler.enabled = true
+                file.background.enabled = true
+                file.targets = [LaunchTarget(id: "ghostex", name: "Ghostex", launcher: .ghostex), LaunchTarget(id: "terminal", name: "Terminal", launcher: .terminal)]
+                file.scenarioPrompts = [Scenario.review.rawValue: "Review it with the team checklist. Do not post anything."]
+                file.automations = [rule]
+            }
+            settings.mutateRepoFolders { $0.roots = ["~/Code", "~/src"]; $0.overrides = ["octo-org/widgets": "~/work/widgets"] }
+            try save("settings-automations-window", AutomationsTab(store: settings), NSSize(width: 520, height: AutomationsTab.height))
+            try save("settings-automations-whole", AutomationsTab(store: settings), NSSize(width: 520, height: 3000))
+            try save("editor-rule", HStack(spacing: 12) {
+                RuleEditorSheet(store: settings, rule: rule).frame(width: 560, height: 640).border(Color.secondary.opacity(0.4))
+                RuleEditorSheet(store: settings, rule: settings.handler, handler: true).frame(width: 560, height: 640).border(Color.secondary.opacity(0.4))
+            }.padding(12), NSSize(width: 2 * 572 + 12, height: 664))
+            try save("editor-rule-end", RuleEditorSheet(store: settings, rule: rule), NSSize(width: 560, height: 640), scrollToEnd: true)
+            try save("editor-others", HStack(alignment: .top, spacing: 12) {
+                TargetEditorSheet(store: settings, target: settings.automationFile.targets[0]).frame(width: 460).fixedSize(horizontal: false, vertical: true).border(Color.secondary.opacity(0.4))
+                ScenarioPromptSheet(store: settings, scenario: .review).frame(width: 560, height: 600).border(Color.secondary.opacity(0.4))
+                AddAccountSheet(store: settings).fixedSize().border(Color.secondary.opacity(0.4))
+            }.padding(12), NSSize(width: 460 + 560 + 500 + 48, height: 624))
         }
     }
 

@@ -44,7 +44,7 @@ enum Filter: String, CaseIterable {
         }
     }
 
-    /// `counting`: the reasons that count (Settings > General), for Needs Me.
+    /// `counting`: the reasons that count (Settings > Menu Bar), for Needs Me.
     func matches(_ pr: TrackedPR, counting: Set<NeedReason>) -> Bool {
         switch self {
         case .needsMe: Attention.needReason(pr, counting: counting) != nil
@@ -302,7 +302,7 @@ final class Store {
         return Attention.sorted(tracked.prs.values.filter { enabled.contains($0.accountID) }, counting: settings.badgeReasons)
     }
 
-    /// The menu-bar number (Settings > General > Menu bar count).
+    /// The menu-bar number (Settings > Menu Bar > Menu bar count).
     var badgeCount: Int { Attention.badgeCount(Array(tracked.prs.values), enabledAccounts: enabledIDs, mode: settings.badgeMode, counting: settings.badgeReasons) }
     /// "2 to review · 1 ready to merge": the status item's label (the panel header takes its segment's).
     var breakdown: String { Attention.breakdown(prs, counting: settings.badgeReasons) }
@@ -323,7 +323,7 @@ final class Store {
 
     /// Items new in any enabled account: the menu-bar dot and its "N new".
     var newCount: Int { signals(.all).values.reduce(0) { $0 + $1.new } }
-    /// Settings > General: the menu-bar dot is on, and the count isn't All unread (that number already counts unread).
+    /// Settings > Menu Bar: the menu-bar dot is on, and the count isn't All unread (that number already counts unread).
     var menuBarDot: Bool { settings.menuBarDot && settings.badgeMode != .allUnread }
 
     /// The sidebar row the list shows: per-account layout has no All Accounts rows, a removed account falls back.

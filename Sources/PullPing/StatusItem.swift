@@ -28,7 +28,7 @@ final class StatusItem: NSObject, NSPopoverDelegate {
         item.autosaveName = "PullPing"
         item.behavior = .removalAllowed  // ⌘-drag out hides it; the app keeps running (MBX-9)
         item.isVisible = UserDefaults.standard.object(forKey: DefaultsKey.showMenuBarIcon) as? Bool ?? true
-        visibility = item.observe(\.isVisible) { item, _ in  // keeps Settings > General > Show in the Menu Bar in sync
+        visibility = item.observe(\.isVisible) { item, _ in  // keeps Settings > Menu Bar > Show in the Menu Bar in sync
             let visible = item.isVisible
             if UserDefaults.standard.object(forKey: DefaultsKey.showMenuBarIcon) as? Bool ?? true != visible {
                 UserDefaults.standard.set(visible, forKey: DefaultsKey.showMenuBarIcon)

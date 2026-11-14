@@ -45,36 +45,38 @@ struct StatusPanelView: View {
         let elsewhere = filters.filter { $0 != filter && $0.signal(map).new > 0 }.map(\.title).joined(separator: ", ")
         let needs = filter.signal(map).needs
         return VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 8) {
-                VStack(alignment: .leading, spacing: 2) {
+            // Title and controls on one row; the lines below get the panel's whole width (beside the menu they wrapped and
+            // truncated, and their width changed with the filter's name).
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .center, spacing: 8) {
                     Text("Pull Requests").font(.headline)
-                    HStack(spacing: 4) {
-                        if store.syncing { ProgressView().controlSize(.mini) }
-                        if store.offline { Image(systemName: "wifi.slash").accessibilityHidden(true) }
-                        Text(store.freshness)
+                    Spacer()
+                    // In the title row (design §5.3), so the account segments get the whole row below.
+                    Menu {  // a Menu, not a menu Picker: that one is as wide as its longest item
+                        FilterOptions(filters: filters, map: map, filter: $filter)
+                    } label: {
+                        Label(needs > 0 ? "\(filter.title) \(needs)" : filter.title, systemImage: filter.symbol)
                     }
-                    .font(.caption).foregroundStyle(.secondary)
-                    // Both cover the selected segment. The count of new shows only here, on its own line: appended, the
-                    // breakdown's truncation cut it off.
-                    if !breakdown.isEmpty {
-                        Text(breakdown).font(.caption).foregroundStyle(Theme.needsYou).lineLimit(3)
-                    }
-                    if new > 0 { Text("\(new) new").font(.caption).foregroundStyle(.secondary) }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .help(elsewhere.isEmpty ? "Filter" : "Filter. New activity in \(elsewhere)")
+                    .accessibilityValue([needs > 0 ? "\(needs) need you" : nil, elsewhere.isEmpty ? nil : "new activity in \(elsewhere)"]
+                        .compactMap { $0 }.joined(separator: ", "))
+                    if !elsewhere.isEmpty { NewDot().accessibilityHidden(true) }  // the menu's value says it
+                    buttons
                 }
-                Spacer()
-                // In the title row (design §5.3), so the account segments get the whole row below.
-                Menu {  // a Menu, not a menu Picker: that one is as wide as its longest item
-                    FilterOptions(filters: filters, map: map, filter: $filter)
-                } label: {
-                    Label(needs > 0 ? "\(filter.title) \(needs)" : filter.title, systemImage: filter.symbol)
+                HStack(spacing: 4) {
+                    if store.syncing { ProgressView().controlSize(.mini) }
+                    if store.offline { Image(systemName: "wifi.slash").accessibilityHidden(true) }
+                    Text(store.freshness)
                 }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .help(elsewhere.isEmpty ? "Filter" : "Filter. New activity in \(elsewhere)")
-                .accessibilityValue([needs > 0 ? "\(needs) need you" : nil, elsewhere.isEmpty ? nil : "new activity in \(elsewhere)"]
-                    .compactMap { $0 }.joined(separator: ", "))
-                if !elsewhere.isEmpty { NewDot().accessibilityHidden(true) }  // the menu's value says it
-                buttons
+                .font(.caption).foregroundStyle(.secondary)
+                // Both cover the selected segment. The count of new shows only here, on its own line: appended, the
+                // breakdown's truncation cut it off.
+                if !breakdown.isEmpty {
+                    Text(breakdown).font(.caption).foregroundStyle(Theme.needsYou).lineLimit(3)
+                }
+                if new > 0 { Text("\(new) new").font(.caption).foregroundStyle(.secondary) }
             }
             if store.accounts.count > 1 {
                 // Segments while they fit the 380 pt panel; a menu once names get long (no header overflow).
@@ -156,18 +158,15 @@ struct StatusPanelView: View {
                 }
                 ForEach(sections, id: \.title) { section in
                     if section.title.isEmpty {
-                        PRRows(store: store, prs: section.prs)
+                        PRRows(store: store, prs: section.prs, scope: scope)
                     } else if section.collapsed {
                         Section(isExpanded: Binding(get: { opened.contains(section.title) }, set: { _ in opened.formSymmetricDifference([section.title]) })) {
-                            PRRows(store: store, prs: section.prs)
+                            PRRows(store: store, prs: section.prs, scope: scope)
                         } header: {
-                            HStack(spacing: 5) {
-                                Text("\(section.title) (\(section.prs.count))")
-                                if !opened.contains(section.title) && section.prs.contains(where: { Attention.isNew($0, now: store.now) }) { NewDot() }
-                            }
+                            CollapsedHeader(section: section, open: opened.contains(section.title), now: store.now) { opened.formSymmetricDifference([section.title]) }
                         }
                     } else {
-                        Section(section.title) { PRRows(store: store, prs: section.prs) }
+                        Section(section.title) { PRRows(store: store, prs: section.prs, scope: scope) }
                     }
                 }
             }

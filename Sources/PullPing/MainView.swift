@@ -89,9 +89,17 @@ struct SidebarView: View {
             .accessibilityLabel(signal.spoken.isEmpty ? filter.title : "\(filter.title), \(signal.spoken)")
             .tag(SidebarItem(scope: scope, filter: filter))
         }
-        Label("Activity", systemImage: "clock.arrow.circlepath")
-            .badge(store.hasNewActivity(scope) ? Text(verbatim: "●").accessibilityLabel("New activity") : nil)
-            .tag(SidebarItem(scope: scope, filter: .needsMe, activity: true))
+        let newActivity = store.hasNewActivity(scope)
+        Label {
+            HStack(spacing: 5) {  // the rows' dot, not a badge: one look for "new" in the sidebar
+                Text("Activity")
+                if newActivity { NewDot() }
+            }
+        } icon: {
+            Image(systemName: "clock.arrow.circlepath")
+        }
+        .accessibilityLabel(newActivity ? "Activity, new activity" : "Activity")
+        .tag(SidebarItem(scope: scope, filter: .needsMe, activity: true))
     }
 
     private func shown(_ filter: Filter, _ scope: Scope) -> Bool {
@@ -161,29 +169,17 @@ struct PRListView: View {
             }
             ForEach(sections, id: \.title) { section in
                 if section.title.isEmpty {
-                    PRRows(store: store, prs: section.prs)
+                    PRRows(store: store, prs: section.prs, scope: store.listSelection.scope)
                 } else if section.collapsed {
                     let open = opened.contains(section.title)
                     // This list style draws no disclosure for collapsible sections, so the header is the toggle.
                     Section(isExpanded: Binding(get: { open }, set: { _ in opened.formSymmetricDifference([section.title]) })) {
-                        PRRows(store: store, prs: section.prs)
+                        PRRows(store: store, prs: section.prs, scope: store.listSelection.scope)
                     } header: {
-                        Button { opened.formSymmetricDifference([section.title]) } label: {
-                            Label {
-                                HStack(spacing: 5) {
-                                    Text("\(section.title) (\(section.prs.count))")
-                                    if !open && section.prs.contains(where: { Attention.isNew($0, now: store.now) }) { NewDot() }
-                                }
-                            } icon: {
-                                Image(systemName: open ? "chevron.down" : "chevron.right")
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityValue(open ? "Expanded" : "Collapsed")
+                        CollapsedHeader(section: section, open: open, now: store.now) { opened.formSymmetricDifference([section.title]) }
                     }
                 } else {
-                    Section("\(section.title) (\(section.prs.count))") { PRRows(store: store, prs: section.prs) }
+                    Section("\(section.title) (\(section.prs.count))") { PRRows(store: store, prs: section.prs, scope: store.listSelection.scope) }
                 }
             }
         }
@@ -218,6 +214,31 @@ struct PRListView: View {
                     .help("Refresh now (⌘R)")
             }
         }
+    }
+}
+
+/// A collapsible section's header (Drafts, Waiting on Others, Reviewed) in the window and the status panel: the list styles draw
+/// no disclosure (or only on hover), so the header is the toggle. A dot while closed and something in it is new.
+struct CollapsedHeader: View {
+    let section: ListSection
+    let open: Bool
+    let now: Date
+    let toggle: () -> Void
+
+    var body: some View {
+        Button(action: toggle) {
+            Label {
+                HStack(spacing: 5) {
+                    Text("\(section.title) (\(section.prs.count))")
+                    if !open && section.prs.contains(where: { Attention.isNew($0, now: now) }) { NewDot() }
+                }
+            } icon: {
+                Image(systemName: open ? "chevron.down" : "chevron.right")
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(open ? "Expanded" : "Collapsed")
     }
 }
 
@@ -273,10 +294,12 @@ struct EmptyState: View {
 struct PRRows: View {
     let store: Store
     let prs: [TrackedPR]
+    /// One account's list: no account chip on every row.
+    var scope: Scope = .all
 
     var body: some View {
         ForEach(prs) { pr in
-            PRRow(pr: pr, account: store.login(for: pr), now: store.now).tag(pr.id)
+            PRRow(pr: pr, account: scope == .all ? store.login(for: pr) : nil, now: store.now).tag(pr.id)
         }
     }
 }
@@ -532,12 +555,25 @@ struct PRDetailView: View {
                 }
             }
             // Actions sit with the header, not on the window's bottom edge (LAY-6).
+            // The two main actions as buttons, the rest in More: five buttons truncated in a narrow detail column (PRN-4).
             HStack {
                 Button("Open in Browser") { store.open(pr.id) }.buttonStyle(.borderedProminent)
                 Button("Mark as Read") { store.markRead([pr.id]) }
-                Button(pr.muted ? "Unmute" : "Mute") { store.setMuted([pr.id], !pr.muted) }
-                Button(pr.hidden ? "Unhide" : "Hide") { store.setHidden([pr.id], !pr.hidden) }
-                Button("Stop Tracking") { store.stopTracking([pr.id]) }
+                Menu {
+                    Button(pr.muted ? "Unmute" : "Mute") { store.setMuted([pr.id], !pr.muted) }
+                    Button(pr.hidden ? "Unhide" : "Hide") { store.setHidden([pr.id], !pr.hidden) }
+                    Menu("Snooze") {
+                        ForEach(Snooze.allCases, id: \.self) { option in Button(option.title) { store.snooze([pr.id], option) } }
+                    }
+                    Divider()
+                    Button("Stop Tracking") { store.stopTracking([pr.id]) }
+                } label: {
+                    Label("More", systemImage: "ellipsis.circle").labelStyle(.iconOnly)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("More: Mute, Hide, Snooze, Stop Tracking")
             }
             .padding(.top, 4)
         }

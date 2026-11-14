@@ -61,7 +61,7 @@ struct DraftView: View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(verbatim: "\(draft.repo) #\(draft.number) · \(draft.title)").font(.headline).lineLimit(2)
-                Text(verbatim: "Drafted by \(draft.agent.rawValue) · at commit \(draft.head.prefix(7)) · \(relativeAge(draft.createdAt, now: store.now))")
+                Text(verbatim: "Drafted by \(draft.agent.title) · at commit \(draft.head.prefix(7)) · \(relativeAge(draft.createdAt, now: store.now))")
                     .font(.callout).foregroundStyle(.secondary)
                 if draft.notCloned {
                     Text("Not cloned on this Mac: drafted from the diff and the discussion only.").font(.callout).foregroundStyle(.secondary)
@@ -78,6 +78,7 @@ struct DraftView: View {
                 TextEditor(text: $text)
                     .font(.body)
                     .accessibilityLabel("Review text")
+                    .padding(6)  // the text kept off the border
                     .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
                 Picker("Post as @\(draft.login):", selection: $event) {
                     ForEach(DraftPost.Event.allCases, id: \.self) { Text($0.title).tag($0) }
@@ -183,7 +184,7 @@ struct AgentDraftRow: View {
     private func line(_ draft: BackgroundDraft?) -> String {
         let age = relativeAge(run.at, now: store.now)
         if let draft {
-            return draft.action == .review ? "Review draft by \(draft.agent.rawValue) · suggests \(draft.verdict.phrase) · \(age)" : "Summary · \(draft.summary)"
+            return draft.action == .review ? "Review draft by \(draft.agent.title) · suggests \(draft.verdict.phrase) · \(age)" : "Summary · \(draft.summary)"
         }
         let title = run.background?.title ?? ""
         return run.status?.isActive == true ? "\(title) · \(run.status?.word ?? "") · \(age)" : "\(title) · \(run.detail) · \(age)"

@@ -21,6 +21,7 @@ final class SettingsWindow {
             // Each pane gets its own height (SET-8): grouped forms have no intrinsic height.
             add(tabs, "Accounts", "person.2", AccountsTab(store: store), height: AccountsTab.height)
             add(tabs, "Notifications", "bell.badge", NotificationsTab(store: store), height: NotificationsTab.height)
+            add(tabs, "Menu Bar", "menubar.rectangle", MenuBarTab(store: store), height: MenuBarTab.height)
             add(tabs, "Phone", "iphone", PhoneTab(store: store), height: PhoneTab.height)
             add(tabs, "Automations", "play.rectangle", AutomationsTab(store: store), height: AutomationsTab.height)
             add(tabs, "General", "gearshape", GeneralTab(store: store), height: GeneralTab.height)
