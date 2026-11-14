@@ -179,7 +179,7 @@ Link**. A newly tracked pull request's earlier history is not listed. Entries ar
 → Keep activity for**: 7, 30 or 90 days), at most 5000, in `~/Library/Application Support/PullPing/activity.jsonl`.
 `pullping activity [--since 2d] [--pr <ref>] [--json]` prints them, also while PullPing is not running.
 
-<img src="docs/screenshots/activity.png" alt="The Activity list: filters All, Needs Me, My PRs, Reviews and Runs; a New section, then today; each entry with its pull request, who did what, and chips such as Notified, Phone and Ran Fix failing CI" width="380">
+<img src="docs/screenshots/activity.png" alt="The Activity list: a New section, then today; each entry with its pull request, who did what, and chips such as Notified, Phone and Ran Fix failing CI" width="380">
 
 ## Agent automations
 

@@ -57,13 +57,21 @@ struct ActivityView: View {
                 }
             }
         }
-        .safeAreaInset(edge: .top) {
-            // Segments while the column is wide enough, else a menu (five segments clipped a 400 pt column).
-            ViewThatFits(in: .horizontal) {
-                filterPicker.pickerStyle(.segmented).labelsHidden()
-                filterPicker.pickerStyle(.menu).fixedSize()  // "Show: All": a lone "All" said nothing
+        .toolbar {
+            // Mail's filter button: filled while filtering. In the toolbar, not above the list: there a "Show" pop-up floated
+            // centred and clipped to "A" in a live window (five segments clipped a 400 pt column).
+            ToolbarItem {
+                Menu {
+                    Picker("Show", selection: $filter) {
+                        ForEach(ActivityFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                } label: {
+                    Label("Show: \(filter.rawValue)", systemImage: filter == .all ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                }
+                .help(filter == .all ? "Filter activity" : "Showing \(filter.rawValue)")
             }
-            .padding(.horizontal, 12).padding(.vertical, 6)
         }
         .onChange(of: selection) { _, i in store.selectedID = i.flatMap(pr)?.id }
         .contextMenu(forSelectionType: Int.self) { rows in
@@ -85,6 +93,12 @@ struct ActivityView: View {
             if days.isEmpty {
                 if !query.isEmpty {
                     ContentUnavailableView.search(text: query)
+                } else if filter != .all {  // the toolbar's filter is easy to miss: say it and offer the way back
+                    ContentUnavailableView {
+                        Label("No \(filter.rawValue) Activity", systemImage: "line.3.horizontal.decrease.circle")
+                    } actions: {
+                        Button("Show All") { filter = .all }
+                    }
                 } else {
                     ContentUnavailableView("No Activity", systemImage: "clock.arrow.circlepath",
                                            description: Text("Every event PullPing sees appears here, notified or not, with every automation run. Kept for \(store.settings.activityDays) days."))
@@ -100,12 +114,6 @@ struct ActivityView: View {
         // Seen once left: another row, or the window in the background.
         .onDisappear { store.activitySeenAt = Date() }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in store.activitySeenAt = Date() }
-    }
-
-    private var filterPicker: some View {
-        Picker("Show", selection: $filter) {
-            ForEach(ActivityFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-        }
     }
 
     /// The row's pull request while PullPing still tracks it.
