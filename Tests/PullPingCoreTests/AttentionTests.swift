@@ -450,6 +450,38 @@ final class AttentionTests: XCTestCase {
         XCTAssertEqual(Attention.unread(p), 1)
     }
 
+    func testMarkUnreadBringsBackAMentionFollowedByACommentAndCI() {
+        var p = pr(roles: [.commenter])
+        var ci = event(.ciFailed, at: t0.addingTimeInterval(120))
+        ci.actor = "CI"
+        p.events = [event(.mentioned, at: t0), event(.comment, at: t0.addingTimeInterval(60)), ci]
+        Attention.markRead(&p, now: t0.addingTimeInterval(180))
+        XCTAssertNil(Attention.needReason(p))
+        Attention.markUnread(&p)
+        XCTAssertEqual(p.lastReadAt, t0.addingTimeInterval(-1), "just before the mention, not the later comment or CI")
+        XCTAssertEqual(Attention.needReason(p), .mentioned)
+        XCTAssertEqual(Attention.unread(p), 3)
+    }
+
+    func testMarkUnreadOnMineRewindsToTheCommentNotTheLaterPush() {
+        var p = pr(roles: [.author])
+        p.events = [event(.comment, at: t0), event(.newCommits, at: t0.addingTimeInterval(60))]
+        Attention.markRead(&p, now: t0.addingTimeInterval(120))
+        Attention.markUnread(&p)
+        XCTAssertEqual(p.lastReadAt, t0.addingTimeInterval(-1))
+        XCTAssertEqual(Attention.needReason(p), .newComments)
+    }
+
+    func testMarkUnreadWithoutAReasonEventRewindsToTheNewestByOthers() {
+        var p = pr(roles: [.commenter])
+        p.events = [event(.comment, at: t0), event(.newCommits, at: t0.addingTimeInterval(60))]
+        Attention.markRead(&p, now: t0.addingTimeInterval(120))
+        Attention.markUnread(&p)
+        XCTAssertEqual(p.lastReadAt, t0.addingTimeInterval(59), "a comment on someone else's item gives no reason")
+        XCTAssertNil(Attention.needReason(p))
+        XCTAssertEqual(Attention.unread(p), 1)
+    }
+
     func testMarkUnreadLeavesAnUnreadItemsReadMarkAlone() {
         var p = pr()
         p.events = [event(.comment, at: t0), event(.mentioned, at: t0.addingTimeInterval(60))]

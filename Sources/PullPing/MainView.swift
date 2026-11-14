@@ -156,7 +156,11 @@ struct PRListView: View {
     /// Collapsed sections (Drafts) the user opened, by title.
     @State private var opened: Set<String> = []
     /// The ids last shown and their sidebar row (nil while searching): Needs Me keeps a selected row in place.
-    @State private var shown: (item: SidebarItem?, ids: [String]) = (nil, [])
+    @State private var shown = Shown()
+
+    private struct Shown: Equatable {
+        var item: SidebarItem?, ids: [String] = []
+    }
 
     /// The selected row's sections; while searching, every row's items under their row's name.
     private var sections: [ListSection] {
@@ -165,8 +169,12 @@ struct PRListView: View {
         if q.isEmpty && item.filter == .needsMe && shown.item == item {
             // Reading an item (a mention, a comment, a reminder) can end its reason: the selected row stays, in place, until
             // the selection moves on (Mail's Unread filter), so it doesn't vanish under the cursor.
-            let kept = store.selectedIDs.compactMap { store.tracked.prs[$0] }
-                .filter { shown.ids.contains($0.id) && item.scope.matches($0) && $0.state == .open && !$0.muted && !$0.hidden }
+            // Only rows that would still need me if unread: one whose reason ended on GitHub (approved, merged) goes.
+            let kept = store.selectedIDs.compactMap { store.tracked.prs[$0] }.filter { pr in
+                var unread = pr
+                unread.lastReadAt = nil
+                return shown.ids.contains(pr.id) && item.scope.matches(pr) && item.filter.matches(unread, counting: store.settings.badgeReasons)
+            }
             let shownOrder = item.filter.sections(store.prs(item.scope, item.filter)).flatMap(\.prs)
             return item.filter.sections(Attention.keeping(shownOrder, kept, order: shown.ids))
         }
@@ -182,6 +190,8 @@ struct PRListView: View {
         let sections = sections
         let filter = store.listSelection.filter
         let ids = sections.flatMap(\.prs).map(\.id)
+        // Keyed on the row and search state too: switching rows (or clearing a search) with the same ids must refresh `shown`.
+        let key = Shown(item: query.trimmingCharacters(in: .whitespaces).isEmpty ? store.listSelection : nil, ids: ids)
         List(selection: $store.selectedIDs) {
             ForEach(store.errorAccounts) { account in  // FLW-17: inline, with the fix one click away
                 AccountErrorRow(account: account, status: store.statuses[account.id] ?? .ok)
@@ -202,9 +212,9 @@ struct PRListView: View {
                 }
             }
         }
-        .onChange(of: ids, initial: true) { _, ids in  // the detail and the menus never act on a row the list doesn't show
-            shown = (query.isEmpty ? store.listSelection : nil, ids)
-            let visible = store.selectedIDs.intersection(ids)
+        .onChange(of: key, initial: true) { _, key in  // the detail and the menus never act on a row the list doesn't show
+            shown = key
+            let visible = store.selectedIDs.intersection(key.ids)
             if visible != store.selectedIDs { store.selectedIDs = visible }
         }
         .contextMenu(forSelectionType: String.self) { ids in
@@ -501,8 +511,13 @@ extension View {
             guard store.settings.singleKeyShortcuts, !ids.isEmpty, press.modifiers.isDisjoint(with: [.command, .option, .control]) else {
                 return .ignored
             }
-            // The key's Latin letter on Hebrew and other non-Latin layouts: ⌘ switches a layout to its Latin keys.
-            let key = NSApp.currentEvent?.characters(byApplyingModifiers: .command)?.lowercased() ?? press.characters.lowercased()
+            // An ASCII letter as typed (Dvorak keeps its letters). Else the key's Latin letter on Hebrew and other non-Latin
+            // layouts: ⌘ switches a layout to its Latin keys (`characters(byApplyingModifiers:)` raises on a non-key event).
+            var key = press.characters.lowercased()
+            if !key.allSatisfy({ $0.isASCII && $0.isLetter }), let event = NSApp.currentEvent, event.type == .keyDown,
+               let latin = event.characters(byApplyingModifiers: .command) {
+                key = latin.lowercased()
+            }
             let done: String
             switch key {
             case "o": store.open(ids); return .handled

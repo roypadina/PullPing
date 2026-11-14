@@ -128,7 +128,7 @@ struct AppCommands: Commands {
                 // ⌘⌫ deletes to line start while typing in the search field (KBD-6).
                 if let text = NSApp.keyWindow?.firstResponder as? NSTextView { text.deleteToBeginningOfLine(nil) } else { store.stopTracking(ids) }
             }
-            .keyboardShortcut(.delete, modifiers: .command).disabled(ids.isEmpty)
+            .keyboardShortcut(.delete, modifiers: .command).disabled(ids.isEmpty || store.remindIDs != nil)  // not behind the Remind Me sheet
             Divider()
             Button("Dismiss All Notifications") { NotificationPanels.shared.dismissAll() }
         }

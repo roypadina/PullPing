@@ -284,7 +284,7 @@ struct NotificationsTab: View {
 
 /// ntfy pushes (MeetAlert pattern): server and topic in settings, access token and fallback URL in the keychain.
 struct PhoneTab: View {
-    static let height: CGFloat = 640  // plan height; the 18-row table scrolls
+    static let height: CGFloat = 640  // plan height; the 21-row table scrolls
     @Bindable var store: Store
     @State private var sending = false
     @State private var testResult: Bool?
@@ -417,14 +417,15 @@ struct MenuBarTab: View {
 /// Every shortcut, read-only (KBD-1). Menu shortcuts are changed in System Settings (App Shortcuts), so no recorder here;
 /// single keys only switch off.
 struct ShortcutsTab: View {
-    static let height: CGFloat = 780
+    static let height: CGFloat = 820
     @Bindable var store: Store
 
     /// Command, menu shortcut, single key: mirrors `AppCommands`' Pull Request menu and `prKeys`.
     private static let pullRequest = [("Open in Browser", "⇧⌘O", "O or ↩"), ("Mark as Read / Unread", "⇧⌘U", "U"), ("Mark All as Read", "⌥⇧⌘U", ""),
-                                      ("Mute / Unmute", "⌃⌘M", "M"), ("Hide / Unhide", "⌃⌘H", "H"), ("Remind Me…", "⌃⌘R", "R"),
+                                      ("Mute / Unmute", "⌃⌘M", "M"), ("Hide / Unhide", "⌃⌘H", "H"), ("Remind Me ▸ Custom…", "⌃⌘R", "R"),
                                       ("Stop Tracking", "⌘⌫", "")]
-    private static let app = [("Refresh Now", "⌘R"), ("Open Window", "⌘1"), ("Settings", "⌘,"), ("Select All", "⌘A")]
+    private static let app = [("Refresh Now", "⌘R"), ("Open Window", "⌘1"), ("Settings", "⌘,"), ("Select All", "⌘A"),
+                              ("Open in Main Window (panel)", "⌘↩")]
 
     var body: some View {
         Form {
@@ -438,10 +439,15 @@ struct ShortcutsTab: View {
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)  // a header: each row below reads its own shortcuts
                 ForEach(Self.pullRequest, id: \.0) { command, menu, key in
+                    let keys = store.settings.singleKeyShortcuts
                     LabeledContent(command) {
-                        columns(menu, key, keyStyle: store.settings.singleKeyShortcuts ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+                        columns(menu, key, keyStyle: keys ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
                     }
-                    .accessibilityElement(children: .combine)
+                    // Says which is which ("menu ⌃⌘M, key M"); no key while single keys are off.
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(command)
+                    .accessibilityValue([menu.isEmpty ? nil : "menu \(menu)", keys && !key.isEmpty ? "key \(key)" : nil]
+                        .compactMap { $0 }.joined(separator: ", "))
                 }
             }
             Section("App") {

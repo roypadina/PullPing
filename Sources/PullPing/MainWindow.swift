@@ -33,6 +33,8 @@ final class MainWindow {
     static let shared = MainWindow()
     var store: Store?  // set once at launch
     private var window: NSWindow?
+    /// The window while it is key: a sheet's parent.
+    var keyWindow: NSWindow? { window?.isKeyWindow == true ? window : nil }
 
     func show(select id: String? = nil) {
         guard let store else { return }

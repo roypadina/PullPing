@@ -81,12 +81,17 @@ public enum Attention {
         pr.markedUnread = false
     }
 
-    /// Mark as Unread: the flag lights the dot; rewinding the read mark to just before the newest event by someone else
-    /// brings back the reason that event gave (a mention, a comment on my pull request, a due reminder). Not `lastReadAt =
-    /// nil`: that would revive weeks-old mentions.
+    /// Mark as Unread: the flag lights the dot; rewinding the read mark to just before the newest event by someone else that
+    /// gives a reason (a mention, an assignment, a due reminder, a comment or review on mine), else the newest event by
+    /// someone else, brings that reason back even when later comments, pushes or CI followed. Not `lastReadAt = nil`: that
+    /// would revive weeks-old mentions.
     public static func markUnread(_ pr: inout TrackedPR) {
         pr.markedUnread = true
-        guard let newest = pr.events.filter({ !$0.isOwn }).map(\.at).max(), let read = pr.lastReadAt, read >= newest else { return }
+        let others = pr.events.filter { !$0.isOwn }
+        let mine = pr.roles.contains(.author) || (pr.isIssue && pr.roles.contains(.assigned))
+        let reasons = Set<EventKind>([.mentioned, .assigned, .reminder]).union(mine ? talk : [])
+        guard let newest = others.filter({ reasons.contains($0.kind) }).map(\.at).max() ?? others.map(\.at).max(),
+              let read = pr.lastReadAt, read >= newest else { return }
         // Whole seconds: the state file stores ISO-8601 dates without fractions.
         pr.lastReadAt = Date(timeIntervalSince1970: (newest.timeIntervalSince1970 - 1).rounded(.down))
     }
@@ -210,7 +215,6 @@ public enum Attention {
         guard pr.state == .open, !pr.muted, !pr.hidden else { return nil }
         let unread = pr.events.filter { !$0.isOwn && $0.at > (pr.lastReadAt ?? .distantPast) }
         let mine = pr.roles.contains(.author) || (pr.isIssue && pr.roles.contains(.assigned)), bucket = bucket(pr)
-        let talk: Set<EventKind> = [.comment, .reviewApproved, .reviewChangesRequested, .reviewCommented]
         let checks: [(NeedReason, Bool)] = [
             (.toReview, bucket == .review),
             (.reReview, bucket == .reReview),
@@ -226,6 +230,9 @@ public enum Attention {
         ]
         return checks.first { counting.contains($0.0) && $0.1 }?.0
     }
+
+    /// Comments and reviews: `newComments` on my pull requests and issues.
+    static let talk: Set<EventKind> = [.comment, .reviewApproved, .reviewChangesRequested, .reviewCommented]
 
     /// When the item entered `reason`: its newest event of a kind that causes the reason, else `updatedAt`.
     public static func waitingSince(_ pr: TrackedPR, _ reason: NeedReason) -> Date { causedAt(pr, reason) ?? pr.updatedAt }

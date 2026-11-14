@@ -627,14 +627,17 @@ final class Store {
 
     /// A selection: more than 10 asks first (⌘A then Return would open every tracked item, MOD-8).
     func open(_ ids: Set<String>) {
-        if ids.count > 10 {
-            let alert = NSAlert()
-            alert.messageText = "Open \(ids.count) items in your browser?"
-            alert.addButton(withTitle: "Open")
-            alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard ids.count > 10 else { for id in ids { open(id) }; return }
+        let alert = NSAlert()
+        alert.messageText = "Open \(ids.count) items in your browser?"
+        alert.informativeText = "They will also be marked read."
+        alert.addButton(withTitle: "Open")
+        alert.addButton(withTitle: "Cancel")
+        let done = { (response: NSApplication.ModalResponse) in
+            if response == .alertFirstButtonReturn { for id in ids { self.open(id) } }
         }
-        for id in ids { open(id) }
+        // A sheet on the main window (MOD-11); app-modal only from the panel, where no window applies.
+        if let window = MainWindow.shared.keyWindow { alert.beginSheetModal(for: window, completionHandler: done) } else { done(alert.runModal()) }
     }
 
     func markRead(_ ids: Set<String>) {
