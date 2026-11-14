@@ -131,19 +131,17 @@ final class ScreenshotRenderTests: XCTestCase {
         XCTAssertEqual(Set(NeedReason.notifyOrder), Set(NeedReason.allCases))
     }
 
-    /// The status panel's filter menu as AppKit gets it (SwiftUI's menu bridge, `NSHostingMenu`, macOS 15+): every option
-    /// keeps its badge (number = need you, • = new), the words in the tooltip, the current filter checked.
-    func test_filterMenuBadges() throws {
-        guard #available(macOS 15, *) else { throw XCTSkip("NSHostingMenu needs macOS 15") }
+    /// The status panel's filter menu (`FilterMenu`, AppKit): the number = need you as a count badge, a dot on the icon for
+    /// new, the words in the tooltip, the current filter checked.
+    @MainActor func test_filterMenuBadges() {
         let store = Fixtures.sampleStore()
         let map = store.signals(.all)
-        let menu = NSHostingMenu(rootView: FilterOptions(filters: Filter.allCases, map: map, filter: .constant(.reviews)))
-        menu.update()
-        let items = menu.items.filter { !$0.title.isEmpty }
-        XCTAssertEqual(items.map(\.title), Filter.allCases.map(\.title))
-        XCTAssertEqual(items.map { $0.badge?.stringValue }, Filter.allCases.map { $0.signal(map).badge })
-        XCTAssertEqual(items.map { $0.toolTip ?? "" }, Filter.allCases.map { $0.signal(map).spoken })
-        XCTAssertEqual(items.map { $0.state == .on }, Filter.allCases.map { $0 == .reviews })
+        let menu = FilterMenu.make(filters: Filter.allCases, map: map, current: .reviews) { _ in }
+        XCTAssertEqual(menu.items.map(\.title), Filter.allCases.map(\.title))
+        XCTAssertEqual(menu.items.map { $0.badge?.itemCount ?? 0 }, Filter.allCases.map { $0.signal(map).needs })
+        XCTAssertEqual(menu.items.map { $0.image?.isTemplate == false }, Filter.allCases.map { $0.signal(map).new > 0 }, "dot icons only for new")
+        XCTAssertEqual(menu.items.map { $0.toolTip ?? "" }, Filter.allCases.map { $0.signal(map).spoken })
+        XCTAssertEqual(menu.items.map { $0.state == .on }, Filter.allCases.map { $0 == .reviews })
     }
 
     /// Dev-only review sheets (not docs): every row's list, the whole status panel, a panel per reason, Activity.

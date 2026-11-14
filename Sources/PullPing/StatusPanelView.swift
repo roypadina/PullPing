@@ -52,13 +52,11 @@ struct StatusPanelView: View {
                     Text("Pull Requests").font(.headline)
                     Spacer()
                     // In the title row (design §5.3), so the account segments get the whole row below.
-                    Menu {  // a Menu, not a menu Picker: that one is as wide as its longest item
-                        FilterOptions(filters: filters, map: map, filter: $filter)
+                    PopUpMenuButton(chevron: true) {
+                        FilterMenu.make(filters: filters, map: map, current: filter) { filter = $0 }
                     } label: {
                         Label(needs > 0 ? "\(filter.title) \(needs)" : filter.title, systemImage: filter.symbol)
                     }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
                     .help(elsewhere.isEmpty ? "Filter" : "Filter. New activity in \(elsewhere)")
                     .accessibilityValue([needs > 0 ? "\(needs) need you" : nil, elsewhere.isEmpty ? nil : "new activity in \(elsewhere)"]
                         .compactMap { $0 }.joined(separator: ", "))
@@ -110,35 +108,11 @@ struct StatusPanelView: View {
             .buttonStyle(.borderless)
             .keyboardShortcut("r")
             .help("Refresh now (⌘R)")
-        Menu {
-            Button("Open Window") { MainWindow.shared.show() }.keyboardShortcut("1")
-            Button("Activity") { MainWindow.shared.showActivity() }
-            Button("Mark All as Read") { store.markAllRead() }
-            Button("Dismiss All Notifications") { NotificationPanels.shared.dismissAll() }
-            Divider()
-            // Same items as the right-click menu (StatusItem), so both menus match.
-            Menu("Pause Notifications") {
-                ForEach([("1 Hour", Snooze.hour1), ("3 Hours", .hours3), ("Until Tomorrow 9:00", .tomorrow)], id: \.0) { title, option in
-                    Button(title) { store.pause(until: option.until(from: Date())) }
-                }
-                Divider()
-                Button("Resume") { store.pause(until: nil) }.disabled(!store.settings.isPaused(Date()))
-            }
-            if store.settings.isPaused(Date()), let until = store.settings.pausedUntil {
-                Text("Paused until \(until.formatted(date: .omitted, time: .shortened))")
-            }
-            Divider()
-            Button("Settings…") { SettingsWindow.shared.show() }.keyboardShortcut(",")
-            Button("About PullPing") { AboutWindow.show() }
-            Button("Support on Ko-fi ☕") { NSWorkspace.shared.open(AboutInfo.kofi) }
-            Divider()
-            Button("Quit PullPing") { NSApp.terminate(nil) }.keyboardShortcut("q")
+        PopUpMenuButton(chevron: false) {
+            StatusItem.shared.makeMenu() ?? NSMenu()
         } label: {
             Label("More", systemImage: "ellipsis.circle").labelStyle(.iconOnly)  // a menu, not Settings: no gear (SYM-2)
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
         .help("More: Open Window, Pause Notifications, Settings, Quit")
     }
 
@@ -190,25 +164,79 @@ struct StatusPanelView: View {
     }
 }
 
-/// The filter menu's options: the number = need you, • = new (`Filter.signal`), as menu-item badges. Its own view so a test
-/// can build the real NSMenu. AppKit reads a badged item as "Reviews, 3 •" and ignores `accessibilityLabel` here, so the
-/// words go in the tooltip.
-struct FilterOptions: View {
-    let filters: [Filter]
-    let map: [Bucket: Signal]
-    @Binding var filter: Filter
+/// The filter menu: the number = need you (a menu-item badge), a coloured dot = new, the words in the tooltip. AppKit, so
+/// both always render (SwiftUI's `.badge` on menu options dropped some) and `PopUpMenuButton` can open it after the click.
+enum FilterMenu {
+    @MainActor static func make(filters: [Filter], map: [Bucket: Signal], current: Filter, select: @escaping (Filter) -> Void) -> NSMenu {
+        let menu = NSMenu()
+        for option in filters {
+            let signal = option.signal(map)
+            let item = ClosureMenuItem(title: option.title) { select(option) }
+            item.image = icon(option.symbol, dot: signal.new > 0)
+            item.state = option == current ? .on : .off
+            if signal.needs > 0 { item.badge = NSMenuItemBadge(count: signal.needs) }
+            item.toolTip = signal.spoken
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    /// The option's symbol; with new activity, an accent dot on its top-right corner (drawn per appearance, so not a
+    /// template: the menu would tint the dot too).
+    static func icon(_ symbol: String, dot: Bool) -> NSImage? {
+        guard let base = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) else { return nil }
+        guard dot else { return base }
+        let image = NSImage(size: base.size, flipped: false) { rect in
+            base.draw(in: rect)
+            NSColor.labelColor.set()
+            rect.fill(using: .sourceAtop)
+            let dot = NSRect(x: rect.maxX - 6, y: rect.maxY - 6, width: 6, height: 6)
+            let cg = NSGraphicsContext.current?.cgContext
+            cg?.setBlendMode(.clear)  // a gap around the dot, so it reads apart from the glyph
+            NSBezierPath(ovalIn: dot.insetBy(dx: -1.5, dy: -1.5)).fill()
+            cg?.setBlendMode(.normal)
+            NSColor.controlAccentColor.setFill()
+            NSBezierPath(ovalIn: dot).fill()
+            return true
+        }
+        image.isTemplate = false
+        return image
+    }
+}
+
+/// A borderless button that opens an AppKit menu below itself on click. A SwiftUI `Menu` in the status popover opened on
+/// mouse down, and when that first click was what activated PullPing (`NSApp.activate()` is only a request on macOS 14+),
+/// the activation closed the menu at once; a button acts on mouse up, after the activation.
+struct PopUpMenuButton<Label: View>: View {
+    let chevron: Bool
+    let menu: () -> NSMenu
+    @ViewBuilder let label: () -> Label
+    @State private var anchor = Anchor()
 
     var body: some View {
-        Picker("Filter", selection: $filter) {
-            ForEach(filters, id: \.self) { option in
-                let signal = option.signal(map)
-                Label(option.title, systemImage: option.symbol)
-                    .badge(signal.badge.map { Text(verbatim: $0) })
-                    .help(signal.spoken)
-                    .tag(option)
+        Button {
+            guard let view = anchor.view else { return }
+            menu().popUp(positioning: nil, at: NSPoint(x: 0, y: view.isFlipped ? view.bounds.maxY + 4 : -4), in: view)
+        } label: {
+            HStack(spacing: 3) {
+                label()
+                if chevron { Image(systemName: "chevron.down").font(.caption2.weight(.semibold)).accessibilityHidden(true) }
             }
         }
-        .pickerStyle(.inline)
-        .labelsHidden()
+        .buttonStyle(.borderless)
+        .fixedSize()
+        .background(AnchorView(anchor: anchor))
+    }
+
+    final class Anchor { weak var view: NSView? }
+
+    struct AnchorView: NSViewRepresentable {
+        let anchor: Anchor
+        func makeNSView(context: Context) -> NSView {
+            let view = NSView()
+            anchor.view = view
+            return view
+        }
+        func updateNSView(_ view: NSView, context: Context) { anchor.view = view }
     }
 }

@@ -151,8 +151,18 @@ final class StatusItem: NSObject, NSPopoverDelegate {
 
     /// Order per MBX-11: actions, status, Settings / About, Quit last. Rebuilt per click so Pause shows its state.
     private func showMenu() {
-        guard let store, let item else { return }
+        guard let item, let menu = makeMenu() else { return }
         closePopover()
+        // shortcut: set-then-clear `menu` is the community way to open a status menu (popUpStatusItemMenu is deprecated);
+        // re-test on each macOS.
+        item.menu = menu
+        item.button?.performClick(nil)
+        item.menu = nil
+    }
+
+    /// The right-click menu, also the panel's ⋯ menu, so both match.
+    func makeMenu() -> NSMenu? {
+        guard let store else { return nil }
         let menu = NSMenu()
         menu.addItem(ClosureMenuItem(title: "Open PullPing", key: "1") { MainWindow.shared.show() })
         menu.addItem(ClosureMenuItem(title: "Activity") { MainWindow.shared.showActivity() })
@@ -184,10 +194,6 @@ final class StatusItem: NSObject, NSPopoverDelegate {
         menu.addItem(ClosureMenuItem(title: "Support on Ko-fi ☕") { NSWorkspace.shared.open(AboutInfo.kofi) })
         menu.addItem(.separator())
         menu.addItem(ClosureMenuItem(title: "Quit PullPing", key: "q") { NSApp.terminate(nil) })
-        // shortcut: set-then-clear `menu` is the community way to open a status menu (popUpStatusItemMenu is deprecated);
-        // re-test on each macOS.
-        item.menu = menu
-        item.button?.performClick(nil)
-        item.menu = nil
+        return menu
     }
 }
