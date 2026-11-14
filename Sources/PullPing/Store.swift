@@ -53,13 +53,22 @@ enum Filter: String, CaseIterable {
         }
     }
 
-    /// The row's badge counts only its "your turn" sections (Waiting on Others, Reviewed and the rest never count).
-    func badges(_ pr: TrackedPR) -> Bool {
+    /// The row's number and dot from a scope's `Store.signals` map. The number counts only the row's "your turn" sections
+    /// (Waiting on Others, Reviewed and the rest never count); the dot covers every item the row lists, so Needs Me's is
+    /// `newNeeds`. Muted & Hidden has neither.
+    func signal(_ map: [Bucket: Signal]) -> Signal {
+        func sum(_ buckets: [Bucket]) -> Signal { buckets.compactMap { map[$0] }.reduce(Signal(), +) }
+        let reviews: [Bucket] = [.review, .reReview, .teamReview], issues: [Bucket] = [.issueAssigned, .issueMine, .issueMentioned]
         switch self {
-        case .needsMe, .issues: true
-        case .myPRs: [.fix, .merge].contains(Attention.bucket(pr))
-        case .reviews: [.review, .reReview, .teamReview].contains(Attention.bucket(pr))
-        case .watching, .closed, .mutedHidden: false
+        case .needsMe:
+            let all = sum(Bucket.allCases)
+            return Signal(needs: all.needs, new: all.newNeeds)
+        case .myPRs: return Signal(needs: sum([.fix, .merge]).needs, new: sum([.fix, .merge, .waitingReview, .waitingCI, .waitingMerge, .draft]).new)
+        case .reviews: return Signal(needs: sum(reviews).needs, new: sum(reviews + [.reviewed]).new)
+        case .issues: return Signal(needs: sum(issues).needs, new: sum(issues).new)
+        case .watching: return Signal(new: sum([.watching]).new)
+        case .closed: return Signal(new: sum([.closed]).new)
+        case .mutedHidden: return Signal()
         }
     }
 
@@ -295,7 +304,7 @@ final class Store {
 
     /// The menu-bar number (Settings > General > Menu bar count).
     var badgeCount: Int { Attention.badgeCount(Array(tracked.prs.values), enabledAccounts: enabledIDs, mode: settings.badgeMode, counting: settings.badgeReasons) }
-    /// "2 to review · 1 ready to merge": status panel header and the status item's label.
+    /// "2 to review · 1 ready to merge": the status item's label (the panel header takes its segment's).
     var breakdown: String { Attention.breakdown(prs, counting: settings.badgeReasons) }
     var isPaused: Bool { settings.isPaused(now) }
 
@@ -303,15 +312,19 @@ final class Store {
         prs.filter { scope.matches($0) && filter.matches($0, counting: settings.badgeReasons) }
     }
 
-    /// Sidebar badges (the row's "your turn" sections) and panel segments (`filter` nil: every row), by the menu-bar measure
-    /// ("all unread" when the count is off).
-    func count(_ scope: Scope, _ filter: Filter? = nil) -> Int {
-        let enabled = enabledIDs, needsMe = settings.badgeMode == .needsMe, counting = settings.badgeReasons
-        return tracked.prs.values.filter { pr in
-            enabled.contains(pr.accountID) && scope.matches(pr) && (filter.map { $0.matches(pr, counting: counting) && $0.badges(pr) } ?? true)
-                && (needsMe ? Attention.needsMe(pr, counting: counting) : Attention.isAttention(pr))
-        }.count
+    /// The scope's indicators by bucket (enabled accounts only): read rows with `Filter.signal`, a whole scope (account
+    /// segment, header) with `values.reduce(Signal(), +)`. In the app the number always means "need you", whatever the
+    /// menu-bar count shows. Call once per view body.
+    func signals(_ scope: Scope) -> [Bucket: Signal] {
+        let enabled = enabledIDs
+        return Attention.signals(tracked.prs.values.lazy.filter { enabled.contains($0.accountID) && scope.matches($0) },
+                                 counting: settings.badgeReasons, now: now)
     }
+
+    /// Items new in any enabled account: the menu-bar dot and its "N new".
+    var newCount: Int { signals(.all).values.reduce(0) { $0 + $1.new } }
+    /// Settings > General: the menu-bar dot is on, and the count isn't All unread (that number already counts unread).
+    var menuBarDot: Bool { settings.menuBarDot && settings.badgeMode != .allUnread }
 
     /// The sidebar row the list shows: per-account layout has no All Accounts rows, a removed account falls back.
     var listSelection: SidebarItem {
@@ -351,6 +364,8 @@ final class Store {
         case .allUnread where badgeCount > 0: parts.append("\(badgeCount) need attention")
         default: break
         }
+        let new = menuBarDot ? newCount : 0
+        if new > 0 { parts.append("\(new) new") }
         if let until = settings.pausedUntil, isPaused { parts.append("notifications paused until \(until.formatted(date: .omitted, time: .shortened))") }
         return parts.joined(separator: ", ")
     }

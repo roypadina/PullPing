@@ -38,7 +38,13 @@ struct StatusPanelView: View {
     }
 
     private func header(_ scope: Scope) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let map = store.signals(scope), new = map.values.reduce(0) { $0 + $1.new }
+        let breakdown = Attention.breakdown(store.prs(scope, .needsMe), counting: store.settings.badgeReasons)
+        let filters = Filter.allCases.filter { $0 != .issues || store.settings.trackIssues }
+        // Filters other than the current one with new items: the dot beside the menu hints to open it.
+        let elsewhere = filters.filter { $0 != filter && $0.signal(map).new > 0 }.map(\.title).joined(separator: ", ")
+        let needs = filter.signal(map).needs
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Pull Requests").font(.headline)
@@ -48,26 +54,26 @@ struct StatusPanelView: View {
                         Text(store.freshness)
                     }
                     .font(.caption).foregroundStyle(.secondary)
-                    if !store.breakdown.isEmpty {
-                        Text(store.breakdown).font(.caption).foregroundStyle(Theme.needsYou).lineLimit(3)
+                    // Both cover the selected segment. The count of new shows only here, on its own line: appended, the
+                    // breakdown's truncation cut it off.
+                    if !breakdown.isEmpty {
+                        Text(breakdown).font(.caption).foregroundStyle(Theme.needsYou).lineLimit(3)
                     }
+                    if new > 0 { Text("\(new) new").font(.caption).foregroundStyle(.secondary) }
                 }
                 Spacer()
                 // In the title row (design §5.3), so the account segments get the whole row below.
                 Menu {  // a Menu, not a menu Picker: that one is as wide as its longest item
-                    Picker("Filter", selection: $filter) {
-                        ForEach(Filter.allCases.filter { $0 != .issues || store.settings.trackIssues }, id: \.self) {
-                            Label($0.title, systemImage: $0.symbol).tag($0)
-                        }
-                    }
-                    .pickerStyle(.inline)
-                    .labelsHidden()
+                    FilterOptions(filters: filters, map: map, filter: $filter)
                 } label: {
-                    Label(filter.title, systemImage: filter.symbol)
+                    Label(needs > 0 ? "\(filter.title) \(needs)" : filter.title, systemImage: filter.symbol)
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .help("Filter")
+                .help(elsewhere.isEmpty ? "Filter" : "Filter. New activity in \(elsewhere)")
+                .accessibilityValue([needs > 0 ? "\(needs) need you" : nil, elsewhere.isEmpty ? nil : "new activity in \(elsewhere)"]
+                    .compactMap { $0 }.joined(separator: ", "))
+                if !elsewhere.isEmpty { NewDot().accessibilityHidden(true) }  // the menu's value says it
                 buttons
             }
             if store.accounts.count > 1 {
@@ -83,16 +89,17 @@ struct StatusPanelView: View {
 
     private func scopePicker(_ scope: Scope) -> some View {
         Picker("Account", selection: Binding(get: { scope.key }, set: { account = $0 })) {
-            if store.settings.inboxLayout == .unified { Text(segment("All", .all)).tag("") }
-            ForEach(store.accounts) { Text(segment($0.displayName, .account($0.id))).tag($0.id.uuidString) }
+            if store.settings.inboxLayout == .unified { segment("All", .all).tag("") }
+            ForEach(store.accounts) { segment($0.displayName, .account($0.id)).tag($0.id.uuidString) }
         }
         .labelsHidden()
     }
 
-    /// "Work 2": the count uses the menu-bar measure.
-    private func segment(_ name: String, _ scope: Scope) -> String {
-        let count = store.count(scope)
-        return count > 0 ? "\(name) \(count)" : name
+    /// "Work 3 •": need you, and a dot when anything in it is new. Segments take plain text, so the dot is a glyph.
+    private func segment(_ name: String, _ scope: Scope) -> some View {
+        let signal = store.signals(scope).values.reduce(Signal(), +)
+        return Text(verbatim: signal.badge.map { "\(name) \($0)" } ?? name)
+            .accessibilityLabel(signal.spoken.isEmpty ? name : "\(name), \(signal.spoken)")
     }
 
     @ViewBuilder private var buttons: some View {
@@ -154,7 +161,10 @@ struct StatusPanelView: View {
                         Section(isExpanded: Binding(get: { opened.contains(section.title) }, set: { _ in opened.formSymmetricDifference([section.title]) })) {
                             PRRows(store: store, prs: section.prs)
                         } header: {
-                            Text("\(section.title) (\(section.prs.count))")
+                            HStack(spacing: 5) {
+                                Text("\(section.title) (\(section.prs.count))")
+                                if !opened.contains(section.title) && section.prs.contains(where: { Attention.isNew($0, now: store.now) }) { NewDot() }
+                            }
                         }
                     } else {
                         Section(section.title) { PRRows(store: store, prs: section.prs) }
@@ -178,5 +188,28 @@ struct StatusPanelView: View {
             }
             .onAppear { listFocused = true }
         }
+    }
+}
+
+/// The filter menu's options: the number = need you, • = new (`Filter.signal`), as menu-item badges. Its own view so a test
+/// can build the real NSMenu. AppKit reads a badged item as "Reviews, 3 •" and ignores `accessibilityLabel` here, so the
+/// words go in the tooltip.
+struct FilterOptions: View {
+    let filters: [Filter]
+    let map: [Bucket: Signal]
+    @Binding var filter: Filter
+
+    var body: some View {
+        Picker("Filter", selection: $filter) {
+            ForEach(filters, id: \.self) { option in
+                let signal = option.signal(map)
+                Label(option.title, systemImage: option.symbol)
+                    .badge(signal.badge.map { Text(verbatim: $0) })
+                    .help(signal.spoken)
+                    .tag(option)
+            }
+        }
+        .pickerStyle(.inline)
+        .labelsHidden()
     }
 }

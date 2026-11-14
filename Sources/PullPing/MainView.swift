@@ -58,24 +58,36 @@ struct SidebarView: View {
         let unified = store.settings.inboxLayout == .unified
         List(selection: Binding(get: { store.selection.map { _ in store.listSelection } }, set: { store.selection = $0 })) {
             if unified {
-                Section("All Accounts") { rows(.all) }
+                Section("All Accounts") { rows(.all, store.signals(.all)) }
             }
             ForEach(store.accounts) { account in
-                Section(isExpanded: Binding(get: { expanded[account.id] ?? !unified }, set: { expanded[account.id] = $0 })) {
-                    rows(.account(account.id))
+                let map = store.signals(.account(account.id)), open = expanded[account.id] ?? !unified
+                Section(isExpanded: Binding(get: { open }, set: { expanded[account.id] = $0 })) {
+                    rows(.account(account.id), map)
                 } header: {
-                    header(account)
+                    // Collapsed: the header carries the account's dot (expanded rows show their own).
+                    header(account, new: !open && map.values.contains { $0.new > 0 })
                 }
             }
         }
     }
 
     /// Issues only while tracked; Muted & Hidden only when it holds something.
-    @ViewBuilder private func rows(_ scope: Scope) -> some View {
+    /// Number = need you (system badge), dot = new (`Filter.signal`).
+    @ViewBuilder private func rows(_ scope: Scope, _ map: [Bucket: Signal]) -> some View {
         ForEach(Filter.allCases.filter { shown($0, scope) }, id: \.self) { filter in
-            Label(filter.title, systemImage: filter.symbol)
-                .badge(store.count(scope, filter))
-                .tag(SidebarItem(scope: scope, filter: filter))
+            let signal = filter.signal(map)
+            Label {
+                HStack(spacing: 5) {
+                    Text(filter.title)
+                    if signal.new > 0 { NewDot() }
+                }
+            } icon: {
+                Image(systemName: filter.symbol)
+            }
+            .badge(signal.needs)
+            .accessibilityLabel(signal.spoken.isEmpty ? filter.title : "\(filter.title), \(signal.spoken)")
+            .tag(SidebarItem(scope: scope, filter: filter))
         }
         Label("Activity", systemImage: "clock.arrow.circlepath")
             .badge(store.hasNewActivity(scope) ? Text(verbatim: "●").accessibilityLabel("New activity") : nil)
@@ -90,10 +102,11 @@ struct SidebarView: View {
         }
     }
 
-    private func header(_ account: Account) -> some View {
+    private func header(_ account: Account, new: Bool) -> some View {
         HStack(spacing: 6) {
             Avatar(url: account.avatarURL)
             Text(verbatim: account.displayName)
+            if new { NewDot() }
             Spacer(minLength: 0)
             if let status = store.statuses[account.id], status.isError {
                 Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.bad)
@@ -156,8 +169,15 @@ struct PRListView: View {
                         PRRows(store: store, prs: section.prs)
                     } header: {
                         Button { opened.formSymmetricDifference([section.title]) } label: {
-                            Label("\(section.title) (\(section.prs.count))", systemImage: open ? "chevron.down" : "chevron.right")
-                                .contentShape(Rectangle())
+                            Label {
+                                HStack(spacing: 5) {
+                                    Text("\(section.title) (\(section.prs.count))")
+                                    if !open && section.prs.contains(where: { Attention.isNew($0, now: store.now) }) { NewDot() }
+                                }
+                            } icon: {
+                                Image(systemName: open ? "chevron.down" : "chevron.right")
+                            }
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityValue(open ? "Expanded" : "Collapsed")
@@ -274,9 +294,7 @@ struct PRRow: View {
                 Text(verbatim: "\(pr.repo) #\(pr.number)").foregroundStyle(.secondary).lineLimit(1)
                 if let account { Chip(text: account, symbol: "person.crop.circle") }
                 Spacer(minLength: 4)
-                if unread {
-                    Circle().fill(.tint).frame(width: 7, height: 7).accessibilityLabel("Unread")
-                }
+                if unread { NewDot() }
             }
             .font(.caption)
             Text(pr.title)

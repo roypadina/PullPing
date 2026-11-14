@@ -82,6 +82,18 @@ struct Chip: View {
     }
 }
 
+/// "Something here is new": the one dot of list rows, sidebar rows, account headers and collapsed sections. Accent colour,
+/// white on an emphasized selection (it would vanish into the accent there); labelled, so it never rests on colour.
+struct NewDot: View {
+    @Environment(\.backgroundProminence) private var prominence
+
+    var body: some View {
+        Circle().fill(prominence == .increased ? AnyShapeStyle(.white) : AnyShapeStyle(.tint))
+            .frame(width: 6, height: 6)
+            .accessibilityLabel("New")
+    }
+}
+
 extension Attention.Lead.Tone {
     var color: Color {
         switch self {

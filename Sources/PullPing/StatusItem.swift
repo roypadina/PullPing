@@ -16,8 +16,11 @@ final class StatusItem: NSObject, NSPopoverDelegate {
     private var closeMonitors: [Any] = []
     private var resignObserver: NSObjectProtocol?
     private var activeObserver: NSObjectProtocol?
-    /// The packaged template glyph; the SF Symbol when running unbundled (`swift run`).
-    private let glyph = NSImage(named: "menubar") ?? NSImage(systemSymbolName: "arrow.triangle.pull", accessibilityDescription: nil)
+    /// The packaged template glyph (the SF Symbol when running unbundled, `swift run`): its "ping" dot shows only while
+    /// something is new (`glyphNew`).
+    private static let base = NSImage(named: "menubar") ?? NSImage(systemSymbolName: "arrow.triangle.pull", accessibilityDescription: nil)
+    private let glyph = base.map { StatusItem.glyph($0, dot: false) }
+    private let glyphNew = base.map { StatusItem.glyph($0, dot: true) }
 
     func install(store: Store) {
         self.store = store
@@ -53,11 +56,13 @@ final class StatusItem: NSObject, NSPopoverDelegate {
         if popover.isShown { popover.performClose(nil) }
     }
 
-    /// Shape carries the state (MBX-5): warning triangle on account errors, dimmed offline, count when something needs you.
+    /// Shape carries the state (MBX-5): warning triangle on account errors, dimmed offline, count when something needs you,
+    /// dot when something is new.
     private func render() {
         guard let store, let button = item?.button else { return }
         withObservationTracking {
-            let image = store.hasError ? NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: nil) : glyph
+            let image = store.hasError ? NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: nil)
+                : store.menuBarDot && store.newCount > 0 ? glyphNew : glyph
             image?.isTemplate = true
             button.image = image
             button.title = store.badgeCount > 0 ? "\(store.badgeCount)" : ""
@@ -67,6 +72,25 @@ final class StatusItem: NSObject, NSPopoverDelegate {
         } onChange: { [weak self] in
             Task { @MainActor in self?.render() }  // fires once, before the change lands: re-read and re-subscribe
         }
+    }
+
+    /// `base` with the asset's dot spot (centre 14.8, 3.4 of 18 × 18, top-down) cleared, plus a filled 5 pt dot there when
+    /// `dot`. A shape, not a colour: the bar tints the template (MBX-5).
+    static func glyph(_ base: NSImage, dot: Bool) -> NSImage {
+        let image = NSImage(size: base.size, flipped: false) { rect in
+            base.draw(in: rect)
+            let centre = NSPoint(x: rect.width * 14.8 / 18, y: rect.height * (1 - 3.4 / 18))
+            NSGraphicsContext.current?.compositingOperation = .clear
+            NSBezierPath(ovalIn: NSRect(x: centre.x - 2.7, y: centre.y - 2.7, width: 5.4, height: 5.4)).fill()
+            if dot {
+                NSGraphicsContext.current?.compositingOperation = .sourceOver
+                NSColor.black.setFill()
+                NSBezierPath(ovalIn: NSRect(x: centre.x - 2.5, y: centre.y - 2.5, width: 5, height: 5)).fill()
+            }
+            return true
+        }
+        image.isTemplate = true
+        return image
     }
 
     @objc private func clicked(_ sender: NSStatusBarButton) {

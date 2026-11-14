@@ -124,8 +124,25 @@ final class ScreenshotRenderTests: XCTestCase {
         XCTAssertEqual(sections(.closed), [": I_2 I_3 PR_7"])
         XCTAssertEqual(sections(.mutedHidden), ["Muted: PR_6", "Hidden: PR_16"])
         XCTAssertTrue(Filter.myPRs.sections(store.prs(.all, .myPRs)).last!.collapsed, "Drafts start collapsed")
-        XCTAssertEqual([store.count(.all, .needsMe), store.count(.all, .myPRs), store.count(.all, .reviews), store.count(.all, .watching)], [7, 2, 3, 0])
+        let map = store.signals(.all)
+        XCTAssertEqual(Filter.allCases.map { $0.signal(map).needs }, [7, 2, 3, 1, 0, 0, 0])
+        XCTAssertEqual(Filter.allCases.map { $0.signal(map).new }, [6, 2, 2, 1, 2, 1, 0], "PR_6 muted, PR_16 hidden: no dot")
         XCTAssertEqual(Set(NeedReason.notifyOrder), Set(NeedReason.allCases))
+    }
+
+    /// The status panel's filter menu as AppKit gets it (SwiftUI's menu bridge, `NSHostingMenu`, macOS 15+): every option
+    /// keeps its badge (number = need you, • = new), the words in the tooltip, the current filter checked.
+    func test_filterMenuBadges() throws {
+        guard #available(macOS 15, *) else { throw XCTSkip("NSHostingMenu needs macOS 15") }
+        let store = Fixtures.sampleStore()
+        let map = store.signals(.all)
+        let menu = NSHostingMenu(rootView: FilterOptions(filters: Filter.allCases, map: map, filter: .constant(.reviews)))
+        menu.update()
+        let items = menu.items.filter { !$0.title.isEmpty }
+        XCTAssertEqual(items.map(\.title), Filter.allCases.map(\.title))
+        XCTAssertEqual(items.map { $0.badge?.stringValue }, Filter.allCases.map { $0.signal(map).badge })
+        XCTAssertEqual(items.map { $0.toolTip ?? "" }, Filter.allCases.map { $0.signal(map).spoken })
+        XCTAssertEqual(items.map { $0.state == .on }, Filter.allCases.map { $0 == .reviews })
     }
 
     /// Dev-only review sheets (not docs): every row's list, the whole status panel, a panel per reason, Activity.
@@ -297,6 +314,46 @@ final class ScreenshotRenderTests: XCTestCase {
         XCTAssertEqual(store.handlerSections(store.tracked.prs["PR_3"]!).last?.items.map(\.title), ["Review in Background", "Summarize"])
         XCTAssertEqual(store.handlerSections(store.tracked.prs["PR_1"]!).last?.items.map(\.title), ["Summarize"], "my own pull request: no review")
         XCTAssertEqual(store.handlerSections(store.tracked.prs["I_1"]!), [], "issues: no background runs")
+    }
+
+    /// Dev-only: the attention indicators (number = need you, dot = new). Sidebar per account with Work read (3/0 rows),
+    /// the panel scrolled to its collapsed groups, General with All unread (dot toggle off), menu-bar glyphs.
+    /// RENDER_REVIEW=<dir> swift test --filter ScreenshotRenderTests/test_renderIndicators
+    func test_renderIndicators() throws {
+        guard let dir = ProcessInfo.processInfo.environment["RENDER_REVIEW"] else { throw XCTSkip("set RENDER_REVIEW=<dir> to render") }
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let asset = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Assets/icons/menubar@2x.png")
+        let base = try XCTUnwrap(NSImage(contentsOf: asset))
+        base.size = NSSize(width: 18, height: 18)
+        for dark in [false, true] {
+            let suffix = dark ? "-dark" : ""
+            func save(_ name: String, _ view: some View, _ size: NSSize, scrollToEnd: Bool = false) throws {
+                try render(view, size: size, dark: dark, scrollToEnd: scrollToEnd, to: URL(fileURLWithPath: dir).appendingPathComponent("\(name)\(suffix).png"))
+            }
+            let store = Fixtures.sampleStore()
+            store.selection = nil
+            store.settings.inboxLayout = .perAccount
+            store.markRead(Set(store.tracked.prs.values.filter { $0.accountID == Fixtures.work.id }.map(\.id)))
+            try save("indicators-sidebar", MainView(store: store), NSSize(width: 1100, height: 760))
+            let panel = Fixtures.sampleStore()
+            panel.setTracked {  // a comment on a pull request waiting on others: the collapsed group gets a dot
+                $0.prs["PR_10"]?.events.append(PREvent(id: "EN", prID: "PR_10", kind: .comment, actor: "bob", at: Date(), summary: "", url: nil, isOwn: false))
+            }
+            try save("indicators-panel", StatusPanelView(store: panel), NSSize(width: 380, height: 520), scrollToEnd: true)
+            store.settings.badgeMode = .allUnread
+            try save("indicators-general", GeneralTab(store: store), NSSize(width: 520, height: 420))
+            let bar = HStack(spacing: 24) {
+                ForEach([false, true], id: \.self) { dot in
+                    HStack(spacing: 9) {
+                        Image(nsImage: StatusItem.glyph(base, dot: dot)).renderingMode(.template).resizable().frame(width: 54, height: 54)
+                        Text("5").font(.system(size: 39)).monospacedDigit()
+                    }
+                }
+                Image(nsImage: base).renderingMode(.template).resizable().frame(width: 54, height: 54)  // the asset as it was
+            }
+            .foregroundStyle(.primary).frame(width: 420, height: 120)
+            try save("indicators-glyph", bar, NSSize(width: 420, height: 120))
+        }
     }
 
     /// The panel on a plain backdrop with room for its edge.

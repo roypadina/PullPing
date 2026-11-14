@@ -385,6 +385,12 @@ struct GeneralTab: View {
                     Text("Off").tag(BadgeMode.off)
                 }
                 .pickerStyle(.radioGroup)
+                Toggle(isOn: $store.settings.menuBarDot) {
+                    Text("Show a dot for new activity")
+                    if store.settings.badgeMode == .allUnread { Text("The count already shows unread") }
+                }
+                .controlSize(.mini)
+                .disabled(store.settings.badgeMode == .allUnread)
             } footer: {
                 Text("Icon missing? Check System Settings > Menu Bar. Opening PullPing again from Applications shows the window.").formFooter()
             }
@@ -400,7 +406,7 @@ struct GeneralTab: View {
                 } header: {
                     Text("Count in the Menu Bar")
                 } footer: {
-                    Text("Each pull request or issue counts once. Muted, hidden, merged and closed ones never count.").formFooter()
+                    Text("Each pull request or issue counts once. Muted, hidden, merged and closed ones never count. A dot marks new activity you have not opened yet.").formFooter()
                 }
             }
             Section {
