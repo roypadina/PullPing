@@ -343,4 +343,79 @@ final class AttentionTests: XCTestCase {
         XCTAssertEqual(Attention.badgeCount(prs, enabledAccounts: [id], mode: .needsMe), 1)
         XCTAssertEqual(Attention.badgeCount(prs, enabledAccounts: [id], mode: .off), 0)
     }
+
+    func event(_ kind: EventKind, own: Bool = false, at: Date = t0) -> PREvent {
+        PREvent(id: "\(kind)", prID: "X", kind: kind, actor: own ? "dana" : "alice", at: at, summary: "", url: nil, isOwn: own)
+    }
+
+    func testIsNew() {
+        XCTAssertTrue(Attention.isNew(pr(events: [(t0, false)]), now: t0))
+        XCTAssertFalse(Attention.isNew(pr(events: [(t0, true)]), now: t0), "my own actions are never new")
+        var seeded = pr(events: [(t0, false)])
+        seeded.lastReadAt = t0  // seeded history and the account baseline: read
+        XCTAssertFalse(Attention.isNew(seeded, now: t0))
+        var p = pr(events: [(t0, false)])
+        p.muted = true
+        XCTAssertFalse(Attention.isNew(p, now: t0))
+        p.muted = false
+        p.hidden = true
+        XCTAssertFalse(Attention.isNew(p, now: t0))
+        p.hidden = false
+        p.snoozedUntil = t0.addingTimeInterval(60)
+        XCTAssertFalse(Attention.isNew(p, now: t0), "snoozed: no group dot")
+        XCTAssertTrue(Attention.isNew(p, now: t0.addingTimeInterval(60)), "the snooze ended: back without a new event")
+        XCTAssertTrue(Attention.unread(p) > 0, "the row's own dot ignores the snooze")
+        var merged = minePR { $0.state = .merged }
+        merged.events = [event(.merged)]
+        XCTAssertTrue(Attention.isNew(merged, now: t0), "merged by someone else is news")
+    }
+
+    /// Every bucket keys its own items; a neutral unread event adds `new` without changing `needs`.
+    func testSignalsPerBucket() {
+        let fixtures: [(Bucket, TrackedPR, needs: Bool)] = [
+            (.fix, minePR("1") { $0.ci = .failure }, true), (.merge, minePR("2"), true),
+            (.waitingReview, minePR("3") { $0.reviewDecision = "REVIEW_REQUIRED" }, false),
+            (.waitingCI, minePR("4") { $0.ci = .pending }, false), (.waitingMerge, minePR("5") { $0.autoMerge = true }, false),
+            (.draft, minePR("6") { $0.isDraft = true }, false),
+            (.review, theirs([.reviewRequested], id: "7"), true), (.reReview, theirs([.reviewer], id: "8", review: "CHANGES_REQUESTED"), true),
+            (.teamReview, theirs([.teamReviewRequested], id: "9"), true), (.reviewed, theirs([.reviewer], id: "10", review: "APPROVED"), false),
+            (.issueAssigned, issue([.assigned]), false), (.issueMine, issue([.author]), false), (.issueMentioned, issue([.mentioned]), false),
+            (.watching, theirs([.commenter], id: "14"), false), (.closed, theirs([.commenter], id: "15") { $0.state = .closed }, false),
+        ]
+        XCTAssertEqual(Set(fixtures.map(\.0)), Set(Bucket.allCases))
+        for (bucket, read, needs) in fixtures {
+            XCTAssertEqual(Attention.bucket(read), bucket)
+            XCTAssertEqual(Attention.signals([read], now: t0), needs ? [bucket: Signal(needs: 1)] : [:], "\(bucket) read")
+            var labeled = read
+            labeled.events = [event(.labeled)]
+            XCTAssertEqual(Attention.signals([labeled], now: t0), [bucket: Signal(needs: needs ? 1 : 0, new: 1, newNeeds: needs ? 1 : 0)], "\(bucket) new")
+        }
+    }
+
+    func testSignalsNeedAndNewAreIndependent() {
+        var newReview = theirs([.reviewRequested], id: "R2")
+        newReview.events = [event(.reviewRequested)]
+        var watching = theirs([.commenter], id: "W")
+        watching.events = [event(.comment)]
+        var waiting = minePR("C") { $0.reviewDecision = "REVIEW_REQUIRED" }
+        waiting.events = [event(.comment)]  // my pull request, someone commented: counts (new comments) and is new
+        var muted = newReview
+        muted.muted = true
+        var snoozed = watching
+        snoozed.snoozedUntil = t0.addingTimeInterval(60)
+        let all = [theirs([.reviewRequested], id: "R"), newReview, watching, waiting, muted, snoozed, minePR("F") { $0.ci = .failure }]
+        XCTAssertEqual(Attention.signals(all, now: t0), [.review: Signal(needs: 2, new: 1, newNeeds: 1), .watching: Signal(new: 1),
+                                                          .waitingReview: Signal(needs: 1, new: 1, newNeeds: 1), .fix: Signal(needs: 1)])
+        XCTAssertEqual(Attention.signals(all, counting: [.ciFailed], now: t0), [.review: Signal(new: 1), .watching: Signal(new: 1),
+                                                                                 .waitingReview: Signal(new: 1), .fix: Signal(needs: 1)],
+                       "a reason switched off lowers needs only")
+        XCTAssertEqual(Attention.signals(all, now: t0.addingTimeInterval(60))[.watching], Signal(new: 2), "the snooze ended")
+    }
+
+    func testSignalBadgeSpokenAndSum() {
+        XCTAssertEqual([Signal(needs: 3, new: 2), Signal(needs: 3), Signal(new: 2), Signal()].map(\.badge), ["3 •", "3", "•", nil])
+        XCTAssertEqual([Signal(needs: 3, new: 2), Signal(needs: 3), Signal(new: 2), Signal()].map(\.spoken),
+                       ["3 need you, 2 new", "3 need you", "2 new", ""])
+        XCTAssertEqual(Signal(needs: 1, new: 2, newNeeds: 1) + Signal(needs: 2, new: 0), Signal(needs: 3, new: 2, newNeeds: 1))
+    }
 }

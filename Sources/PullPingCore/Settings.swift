@@ -46,6 +46,8 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var badgeMode = BadgeMode.needsMe
     /// What "Pull requests that need me" counts (Settings > General); all reasons by default.
     public var badgeReasons = Set(NeedReason.allCases)
+    /// The menu-bar icon shows a dot while something is new (`Attention.isNew`); not with the All unread count.
+    public var menuBarDot = true
     /// Panels, phone pushes and reminders stay quiet until then.
     public var pausedUntil: Date?
     /// ntfy server and topic; the access token and the fallback topic URL live in the keychain.
@@ -78,6 +80,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         inboxLayout = try value(.inboxLayout, inboxLayout)
         badgeMode = try value(.badgeMode, badgeMode)
         badgeReasons = try value(.badgeReasons, badgeReasons)
+        menuBarDot = try value(.menuBarDot, menuBarDot)
         pausedUntil = try c.decodeIfPresent(Date.self, forKey: .pausedUntil)
         ntfyServer = try value(.ntfyServer, ntfyServer)
         ntfyTopic = try value(.ntfyTopic, ntfyTopic)

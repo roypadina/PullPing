@@ -19,7 +19,58 @@ public enum Bucket: String, Sendable, CaseIterable {
     case watching, closed
 }
 
+/// A group's two indicators: how many items need me (a number), how many have activity I have not read (a dot).
+public struct Signal: Equatable, Sendable {
+    public var needs = 0, new = 0
+    /// Of `new`, the items that also need me: Needs Me's dot (its list shows only those).
+    public var newNeeds = 0
+
+    public init(needs: Int = 0, new: Int = 0, newNeeds: Int = 0) {
+        self.needs = needs
+        self.new = new
+        self.newNeeds = newNeeds
+    }
+
+    public static func + (a: Signal, b: Signal) -> Signal {
+        Signal(needs: a.needs + b.needs, new: a.new + b.new, newNeeds: a.newNeeds + b.newNeeds)
+    }
+
+    /// "3 •", "3", "•"; nil when both are zero. One badge string for menus, segments and tooltips.
+    public var badge: String? {
+        switch (needs > 0, new > 0) {
+        case (true, true): "\(needs) •"
+        case (true, false): "\(needs)"
+        case (false, true): "•"
+        case (false, false): nil
+        }
+    }
+
+    /// "3 need you, 2 new"; "" when both are zero. Accessibility text.
+    public var spoken: String {
+        [needs > 0 ? "\(needs) need you" : nil, new > 0 ? "\(new) new" : nil].compactMap { $0 }.joined(separator: ", ")
+    }
+}
+
 public enum Attention {
+    /// Lights a group's dot: unread, and not muted, hidden or snoozed. A row's own dot is plain `unread(pr) > 0`.
+    public static func isNew(_ pr: TrackedPR, now: Date) -> Bool {
+        !pr.muted && !pr.hidden && (pr.snoozedUntil ?? .distantPast) <= now && unread(pr) > 0
+    }
+
+    /// One pass: each item adds `needs` (it has a reason in `counting`) and `new` (`isNew`) to its bucket. Muted and hidden
+    /// items add nothing.
+    public static func signals(_ prs: some Sequence<TrackedPR>, counting: Set<NeedReason> = Set(NeedReason.allCases),
+                               now: Date) -> [Bucket: Signal] {
+        var map: [Bucket: Signal] = [:]
+        for pr in prs {
+            let needs = needReason(pr, counting: counting) != nil, new = isNew(pr, now: now)
+            guard needs || new else { continue }
+            let bucket = bucket(pr)
+            map[bucket] = (map[bucket] ?? Signal()) + Signal(needs: needs ? 1 : 0, new: new ? 1 : 0, newNeeds: needs && new ? 1 : 0)
+        }
+        return map
+    }
+
     /// Events by others newer than the last read. Baseline marks everything read (Poller).
     public static func unread(_ pr: TrackedPR) -> Int {
         pr.events.filter { !$0.isOwn && $0.at > (pr.lastReadAt ?? .distantPast) }.count

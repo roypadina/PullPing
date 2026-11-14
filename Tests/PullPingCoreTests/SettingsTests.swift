@@ -42,6 +42,7 @@ final class SettingsTests: XCTestCase {
         settings.phoneOthers = [.reviewRequested]
         settings.needStyles[.teamToReview] = .off
         settings.badgeReasons = [.toReview]
+        settings.menuBarDot = false
         XCTAssertEqual(try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings)), settings)
     }
 
@@ -77,5 +78,10 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(again.needStyle(.toReview), .alert)
         XCTAssertEqual(again.needStyle(.reReview), .off)
     }
-}
 
+    /// Saved before the menu-bar dot: it starts on.
+    func testMenuBarDotDefaultsOn() throws {
+        XCTAssertTrue(AppSettings().menuBarDot)
+        XCTAssertTrue(try JSONDecoder().decode(AppSettings.self, from: Data(#"{ "badgeMode": "needsMe" }"#.utf8)).menuBarDot)
+    }
+}
