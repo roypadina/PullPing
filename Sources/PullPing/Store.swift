@@ -395,6 +395,7 @@ final class Store {
             let offered = Set(prOffers.map(\.event.id))
             let quiet = group.map { ActivityEntry.Quiet.reason($0, pr: pr, settings: settings, offered: offered.contains($0.id), now: t) }
             let styled = zip(group, quiet).filter { $0.1 == nil }.map { ($0.0, settings.style(for: $0.0.kind, mine: pr.roles.contains(.author))) }
+            if persist { SupportPrompt.shared.observed(group, pr: pr, pinged: styled.map(\.0)) }
             let alert = !prOffers.isEmpty || styled.contains { $0.1 == .alert }
             let user = account(pr.accountID)?.login ?? ""
             logged += zip(group, quiet).map { event, quiet in
@@ -440,7 +441,10 @@ final class Store {
     func pause(until: Date?) { settings.pausedUntil = until }
 
     /// Adds to the activity log; `activity` follows once written.
-    func record(_ entries: [ActivityEntry]) { activityLog.append(entries, done: activitySetter) }
+    func record(_ entries: [ActivityEntry]) {
+        if persist, entries.contains(where: { $0.ok == false }) { SupportPrompt.shared.stressed() }  // a run failed
+        activityLog.append(entries, done: activitySetter)
+    }
 
     /// Re-reads the activity log (`pullping run` appends too) and drops what is past Keep activity for. Launch, daily, and when
     /// the Activity list appears.

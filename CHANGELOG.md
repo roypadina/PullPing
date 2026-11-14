@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Ko-fi support card.** Once in a while, after a pull request of yours is merged or approved, a small receipt card asks for a tip. It shows about 10 seconds after you close the menu-bar panel on a calm look: no account error, no review asked of you, nothing to fix on your pull requests, and in the last hour no failed CI or change request on yours and no failed run. It never shows before PullPing has pinged you more than 50 updates (counted from the version that added this card) and at least 7 days have passed, and at most 3 times a year. "Ask me in 2 weeks" snoozes it, "Nope, don't ask again" keeps it away until the next major version, and a tip keeps it quiet for 6 months. A new notification panel, a PullPing window, an update alert, sleep or a screen lock closes it as a snooze; so does leaving it unanswered for 5 minutes, or stepping away. It never takes keyboard focus: the same three answers are at the top of the right-click menu while it shows. Hold ⌥ in that menu for **Show Support Prompt Now**, a preview that changes nothing. The counts stay on your Mac.
+
 ## [0.6.1] - 2026-11-04
 
 ### Added

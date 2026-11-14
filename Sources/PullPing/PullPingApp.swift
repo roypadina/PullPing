@@ -32,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor func applicationDidFinishLaunching(_ notification: Notification) {
         if let store = Self.store { StatusItem.shared.install(store: store) }
+        SupportPrompt.shared.start()
         _ = Updates.controller  // starts the daily update check
         let center = NSWorkspace.shared.notificationCenter
         center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { _ in
