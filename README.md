@@ -130,7 +130,7 @@ still reaches you.
 | Mark as read or unread / Mark all as read | ⇧⌘U, or U / ⌥⇧⌘U |
 | Mute or unmute | ⌃⌘M, or M |
 | Hide or unhide | ⌃⌘H, or H |
-| Remind Me… | ⌃⌘R, or R |
+| Remind Me ▸ Custom… | ⌃⌘R, or R |
 | Stop tracking | ⌘⌫ |
 | Settings | ⌘, |
 

@@ -199,7 +199,7 @@ private let glyphSize: CGFloat = 18  // menubar.png is 18x18 pt; NSStatusBarButt
         return c.image
     }
 
-    // 3. a click on the icon opens the popover (StatusItem.togglePopover): To Review / Your Pull Requests / Mentions & Assigned with status chips; the cursor then heads for "Work"
+    // 3. a click on the icon opens the popover (StatusItem.togglePopover): To Review / Your Pull Requests / Mentions, Assigned & Reminders with status chips; the cursor then heads for "Work"
     let open3 = 0.90
     let path3 = CursorPath(start: dismissAt, moves: [.init(t0: 0.10, t1: 0.75, to: itemCenter), .init(t0: 2.05, t1: 2.75, to: workSegment)],
                            clicks: [open3])
