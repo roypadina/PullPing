@@ -60,8 +60,8 @@ struct ActivityView: View {
         .safeAreaInset(edge: .top) {
             // Segments while the column is wide enough, else a menu (five segments clipped a 400 pt column).
             ViewThatFits(in: .horizontal) {
-                filterPicker.pickerStyle(.segmented)
-                filterPicker.pickerStyle(.menu).fixedSize()
+                filterPicker.pickerStyle(.segmented).labelsHidden()
+                filterPicker.pickerStyle(.menu).fixedSize()  // "Show: All": a lone "All" said nothing
             }
             .padding(.horizontal, 12).padding(.vertical, 6)
         }
@@ -106,7 +106,6 @@ struct ActivityView: View {
         Picker("Show", selection: $filter) {
             ForEach(ActivityFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
         }
-        .labelsHidden()
     }
 
     /// The row's pull request while PullPing still tracks it.

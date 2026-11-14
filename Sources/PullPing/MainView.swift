@@ -568,9 +568,9 @@ struct PRDetailView: View {
                     Divider()
                     Button("Stop Tracking") { store.stopTracking([pr.id]) }
                 } label: {
-                    Label("More", systemImage: "ellipsis.circle").labelStyle(.iconOnly)
+                    Label("More", systemImage: "ellipsis").labelStyle(.iconOnly)
                 }
-                .menuStyle(.borderlessButton)
+                .menuStyle(.button)  // bordered like its neighbours
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .help("More: Mute, Hide, Snooze, Stop Tracking")

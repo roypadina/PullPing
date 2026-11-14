@@ -367,7 +367,7 @@ struct PhoneTab: View {
 
 /// The icon, its count and dot, and what the count counts (was part of General; split so neither pane scrolls, SET-8).
 struct MenuBarTab: View {
-    static let height: CGFloat = 640
+    static let height: CGFloat = 700
     @Bindable var store: Store
     @AppStorage(DefaultsKey.showMenuBarIcon) private var showIcon = true
 
@@ -415,7 +415,7 @@ struct MenuBarTab: View {
 // MARK: General
 
 struct GeneralTab: View {
-    static let height: CGFloat = 600
+    static let height: CGFloat = 690
     @Bindable var store: Store
 
     var body: some View {
@@ -1074,7 +1074,8 @@ struct RuleEditorSheet: View {
             let blocked = handler ? nil : store.prs.first.flatMap { store.runBlocked(edited, $0) }  // the handler has no caps
             let last = store.automationFile.runs.last(where: { $0.automationID == rule.id })
             // Above the buttons, whole: an error names the folder it tried.
-            if let status = blocked ?? last.map({ $0.ok ? "Started" : $0.detail }) {
+            // A block names the pull request Try would use ("octo-org/widgets #12: No linked session").
+            if let status = blocked.flatMap({ b in store.prs.first.map { "\($0.repo) #\($0.number): \(b)" } }) ?? last.map({ $0.ok ? "Started" : $0.detail }) {
                 Text(verbatim: status).font(.callout).foregroundStyle(blocked != nil ? .secondary : last?.ok == true ? Theme.good : Theme.bad)
                     .lineLimit(3).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
