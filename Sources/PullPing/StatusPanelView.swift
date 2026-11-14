@@ -204,9 +204,9 @@ enum FilterMenu {
     }
 }
 
-/// A borderless button that opens an AppKit menu below itself on click. A SwiftUI `Menu` in the status popover opened on
-/// mouse down, and when that first click was what activated PullPing (`NSApp.activate()` is only a request on macOS 14+),
-/// the activation closed the menu at once; a button acts on mouse up, after the activation.
+/// A borderless button that opens an AppKit menu below itself on click, once PullPing's activation has landed
+/// (`StatusItem.whenActivationSettles`): the activation from the panel's first click arrives ~100 ms after it and re-keys the
+/// popover, which closed a menu opened sooner (seen in a trace, 0.7.0 dev builds).
 struct PopUpMenuButton<Label: View>: View {
     let chevron: Bool
     let menu: () -> NSMenu
@@ -215,8 +215,10 @@ struct PopUpMenuButton<Label: View>: View {
 
     var body: some View {
         Button {
-            guard let view = anchor.view else { return }
-            menu().popUp(positioning: nil, at: NSPoint(x: 0, y: view.isFlipped ? view.bounds.maxY + 4 : -4), in: view)
+            StatusItem.shared.whenActivationSettles {
+                guard let view = anchor.view else { return }
+                menu().popUp(positioning: nil, at: NSPoint(x: 0, y: view.isFlipped ? view.bounds.maxY + 4 : -4), in: view)
+            }
         } label: {
             HStack(spacing: 3) {
                 label()

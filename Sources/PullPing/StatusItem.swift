@@ -16,6 +16,10 @@ final class StatusItem: NSObject, NSPopoverDelegate {
     private var closeMonitors: [Any] = []
     private var resignObserver: NSObjectProtocol?
     private var activeObserver: NSObjectProtocol?
+    /// `NSApp.activate()` is only a request: `isActive` reads true at once, but the real activation lands on the first click
+    /// in the panel (didBecomeActive ~100 ms later) and re-keys the popover, which closed any menu opened by that click.
+    private var activationPending = false
+    private var afterActivation: [() -> Void] = []
     /// The packaged template glyph (the SF Symbol when running unbundled, `swift run`): its "ping" dot shows only while
     /// something is new (`glyphNew`).
     private static let base = NSImage(named: "menubar") ?? NSImage(systemSymbolName: "arrow.triangle.pull", accessibilityDescription: nil)
@@ -104,6 +108,7 @@ final class StatusItem: NSObject, NSPopoverDelegate {
         let host = NSHostingController(rootView: StatusPanelView(store: store))
         host.sizingOptions = .preferredContentSize
         popover.contentViewController = host
+        activationPending = !NSApp.isActive
         NSApp.activate()  // user click only: arrows and Return need a key window
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
@@ -126,8 +131,26 @@ final class StatusItem: NSObject, NSPopoverDelegate {
         }
         // Activation lands after show(): key the panel then, or the first click only makes it key and dismisses the menu it opened.
         activeObserver = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.makePanelKey() }
+            Task { @MainActor in
+                self?.makePanelKey()
+                self?.activationSettled()
+            }
         }
+    }
+
+    /// Runs `body` once PullPing's activation has really landed (at once when it already has), so a menu opened from the
+    /// panel isn't closed by it; a fallback after 0.5 s in case didBecomeActive never comes.
+    func whenActivationSettles(_ body: @escaping () -> Void) {
+        guard activationPending else { return body() }
+        afterActivation.append(body)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.activationSettled() }
+    }
+
+    private func activationSettled() {
+        activationPending = false
+        let pending = afterActivation
+        afterActivation = []
+        pending.forEach { $0() }
     }
 
     private func makePanelKey() {
@@ -142,6 +165,8 @@ final class StatusItem: NSObject, NSPopoverDelegate {
     /// A closed popover drops its SwiftUI view, so it stops re-rendering on every store change.
     func popoverDidClose(_ notification: Notification) {
         popover.contentViewController = nil
+        activationPending = false
+        afterActivation = []
         closeMonitors.forEach(NSEvent.removeMonitor)
         closeMonitors = []
         for observer in [resignObserver, activeObserver].compactMap({ $0 }) { NotificationCenter.default.removeObserver(observer) }
