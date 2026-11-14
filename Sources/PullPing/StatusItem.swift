@@ -15,6 +15,7 @@ final class StatusItem: NSObject, NSPopoverDelegate {
     /// (`.transient` and `onExitCommand` alone missed clicks in other apps and Escape without a focused view).
     private var closeMonitors: [Any] = []
     private var resignObserver: NSObjectProtocol?
+    private var activeObserver: NSObjectProtocol?
     /// The packaged template glyph; the SF Symbol when running unbundled (`swift run`).
     private let glyph = NSImage(named: "menubar") ?? NSImage(systemSymbolName: "arrow.triangle.pull", accessibilityDescription: nil)
 
@@ -99,6 +100,19 @@ final class StatusItem: NSObject, NSPopoverDelegate {
         resignObserver = NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.closePopover() }
         }
+        // Activation lands after show(): key the panel then, or the first click only makes it key and dismisses the menu it opened.
+        activeObserver = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.makePanelKey() }
+        }
+    }
+
+    private func makePanelKey() {
+        guard popover.isShown, let window = popover.contentViewController?.view.window, !window.isKeyWindow else { return }
+        window.makeKey()
+    }
+
+    func popoverDidShow(_ notification: Notification) {
+        makePanelKey()
     }
 
     /// A closed popover drops its SwiftUI view, so it stops re-rendering on every store change.
@@ -106,8 +120,9 @@ final class StatusItem: NSObject, NSPopoverDelegate {
         popover.contentViewController = nil
         closeMonitors.forEach(NSEvent.removeMonitor)
         closeMonitors = []
-        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
+        for observer in [resignObserver, activeObserver].compactMap({ $0 }) { NotificationCenter.default.removeObserver(observer) }
         resignObserver = nil
+        activeObserver = nil
     }
 
     /// Order per MBX-11: actions, status, Settings / About, Quit last. Rebuilt per click so Pause shows its state.
