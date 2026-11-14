@@ -13,7 +13,8 @@ final class AccessoryWindows: NSObject, NSWindowDelegate {
         StatusItem.shared.closePopover()  // every window entry point: status panel, menus, links, Welcome
         window.delegate = self
         NSApp.setActivationPolicy(.regular)
-        NSApp.activate()
+        // Forceful, as the status panel: a user action, and macOS 14+ often refused the `activate()` request (window behind).
+        NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }
 
