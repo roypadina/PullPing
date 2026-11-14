@@ -29,7 +29,8 @@ import Sparkle
         func standardUserDriverWillHandleShowingUpdate(_ handleShowingUpdate: Bool, forUpdate update: SUAppcastItem, state: SPUUserUpdateState) {
             MainActor.assumeIsolated {
                 NSApp.setActivationPolicy(.regular)
-                NSApp.activate()
+                // Check for Updates… is a click: come to the front; a scheduled check only asks (never steals focus).
+                if state.userInitiated { NSApp.activate(ignoringOtherApps: true) } else { NSApp.activate() }
             }
         }
 
