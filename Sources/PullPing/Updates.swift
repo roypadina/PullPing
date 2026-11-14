@@ -28,6 +28,7 @@ import Sparkle
 
         func standardUserDriverWillHandleShowingUpdate(_ handleShowingUpdate: Bool, forUpdate update: SUAppcastItem, state: SPUUserUpdateState) {
             MainActor.assumeIsolated {
+                SupportPrompt.shared.makeWay()  // the update alert comes first, also when activation is refused
                 NSApp.setActivationPolicy(.regular)
                 NSApp.activate()
             }

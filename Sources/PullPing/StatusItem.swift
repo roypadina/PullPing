@@ -39,6 +39,10 @@ final class StatusItem: NSObject, NSPopoverDelegate {
         render()
     }
 
+    var popoverShown: Bool { popover.isShown }
+    /// The icon's window, where a snoozed support card flies to; nil while the icon is hidden.
+    var iconWindow: NSWindow? { item?.isVisible == true ? item?.button?.window : nil }
+
     func setVisible(_ visible: Bool) {
         if let item, item.isVisible != visible { item.isVisible = visible }
     }
@@ -80,9 +84,14 @@ final class StatusItem: NSObject, NSPopoverDelegate {
         popover.contentViewController?.view.window?.makeKey()
     }
 
+    func popoverDidShow(_ notification: Notification) {
+        SupportPrompt.shared.popoverShown()
+    }
+
     /// A closed popover drops its SwiftUI view, so it stops re-rendering on every store change.
     func popoverDidClose(_ notification: Notification) {
         popover.contentViewController = nil
+        SupportPrompt.shared.popoverClosed()
     }
 
     /// Order per MBX-11: actions, status, Settings / About, Quit last. Rebuilt per click so Pause shows its state.
@@ -90,6 +99,13 @@ final class StatusItem: NSObject, NSPopoverDelegate {
         guard let store, let item else { return }
         closePopover()
         let menu = NSMenu()
+        if SupportPrompt.shared.showing {  // the receipt card is mouse-only; same three answers here
+            menu.addItem(.sectionHeader(title: "Support PullPing"))
+            menu.addItem(ClosureMenuItem(title: "Tip a Coffee on Ko-fi ☕") { SupportPrompt.shared.answerFromMenu(.support) })
+            menu.addItem(ClosureMenuItem(title: "Ask Me in 2 Weeks") { SupportPrompt.shared.answerFromMenu(.snooze) })
+            menu.addItem(ClosureMenuItem(title: "Don't Ask Again") { SupportPrompt.shared.answerFromMenu(.never) })
+            menu.addItem(.separator())
+        }
         menu.addItem(ClosureMenuItem(title: "Open PullPing", key: "1") { MainWindow.shared.show() })
         menu.addItem(ClosureMenuItem(title: "Activity") { MainWindow.shared.showActivity() })
         menu.addItem(ClosureMenuItem(title: "Refresh Now") { store.refresh() })
@@ -117,7 +133,13 @@ final class StatusItem: NSObject, NSPopoverDelegate {
         menu.addItem(.separator())
         menu.addItem(ClosureMenuItem(title: "Settings…", key: ",") { SettingsWindow.shared.show() })
         menu.addItem(ClosureMenuItem(title: "About PullPing") { AboutWindow.show() })
-        menu.addItem(ClosureMenuItem(title: "Support on Ko-fi ☕") { NSWorkspace.shared.open(AboutInfo.kofi) })
+        let kofi = ClosureMenuItem(title: "Support on Ko-fi ☕") { SupportPrompt.shared.openKofi() }
+        kofi.keyEquivalentModifierMask = []  // no modifier, so ⌥ swaps in the alternate below
+        menu.addItem(kofi)
+        let preview = ClosureMenuItem(title: "Show Support Prompt Now") { SupportPrompt.shared.present(record: false) }  // never recorded
+        preview.keyEquivalentModifierMask = .option
+        preview.isAlternate = true
+        menu.addItem(preview)
         menu.addItem(.separator())
         menu.addItem(ClosureMenuItem(title: "Quit PullPing", key: "q") { NSApp.terminate(nil) })
         // shortcut: set-then-clear `menu` is the community way to open a status menu (popUpStatusItemMenu is deprecated);

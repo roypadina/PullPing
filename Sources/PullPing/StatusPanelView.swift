@@ -120,7 +120,7 @@ struct StatusPanelView: View {
             Divider()
             Button("Settings…") { SettingsWindow.shared.show() }.keyboardShortcut(",")
             Button("About PullPing") { AboutWindow.show() }
-            Button("Support on Ko-fi ☕") { NSWorkspace.shared.open(AboutInfo.kofi) }
+            Button("Support on Ko-fi ☕") { SupportPrompt.shared.openKofi() }
             Divider()
             Button("Quit PullPing") { NSApp.terminate(nil) }.keyboardShortcut("q")
         } label: {
