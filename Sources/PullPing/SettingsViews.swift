@@ -537,7 +537,7 @@ struct RepositoriesTab: View {
                 if muted.isEmpty { Text("No Muted Repositories").foregroundStyle(.secondary) }
                 ForEach(muted, id: \.self) { repo in
                     LabeledContent {
-                        Button("Unmute") { store.setReposMuted([repo], false) }.accessibilityLabel("Unmute \(repo)")
+                        Button("Unmute") { store.setReposMuted([repo], false) }.accessibilityLabel(Text(verbatim: "Unmute \(repo)"))
                     } label: {
                         Text(verbatim: repo)
                     }
@@ -617,7 +617,7 @@ struct GeneralTab: View {
                 Text("Activity, in the window's sidebar, lists every event and run, at most 5000.").formFooter()
             }
             Section("About") {
-                // Two per row: four in one row truncated at 520 pt.
+                // Two per row: four in one row truncated when the panes were 520 pt.
                 HStack {
                     Button("About PullPing…") { AboutWindow.show() }
                     Button("Check for Updates…") { Updates.check() }

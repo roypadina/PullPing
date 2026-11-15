@@ -89,7 +89,7 @@ struct StatusPanelView: View {
                 HStack {
                     Label { Text(verbatim: repo) } icon: { Image(systemName: "book.closed.fill") }
                         .lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
-                        .accessibilityLabel("Showing only \(repo)")
+                        .accessibilityLabel(Text(verbatim: "Showing only \(repo)"))
                     Spacer(minLength: 4)
                     Button("Show All") { store.panelRepoFilter = "" }.buttonStyle(.link)
                 }
