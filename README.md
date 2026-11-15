@@ -31,7 +31,7 @@ brew install --cask roypadina/tap/pullping
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/status-panel-dark.png">
-<img src="docs/screenshots/status-panel.png" alt="PullPing status panel: what needs you, in To Review, Your Pull Requests and Mentions, Assigned and Reminders, each row with a status chip such as Re-review, Changes requested or Ready to merge" width="320">
+<img src="docs/screenshots/status-panel.png" alt="PullPing status panel: the Needs Me filter, a summary of what needs you, All, Personal and Work account tabs, then To Review and Your Pull Requests, each row with a status chip such as Review requested, Re-review, Requested from team or Changes requested" width="320">
 </picture>
 &nbsp;
 <img src="docs/screenshots/main-window.png" alt="PullPing main window: a sidebar with Needs Me, My Pull Requests, Reviews, Issues, Watching, Closed and Activity per account, the Needs Me list, and the details of the selected pull request" width="620">
@@ -145,7 +145,7 @@ Add a personal access token in **Settings → Accounts → Add Account…**. Pul
 one token each.
 
 - **Classic token:** scopes `repo` (private repositories) and `read:org` (team review requests). Public repositories only: `public_repo`. Organizations with SAML SSO: click "Configure SSO" on the token and authorize each organization.
-- **Fine-grained token:** Resource owner = your user or the organization (one token per organization); Repository access = All repositories (or select); Permissions: Pull requests: Read, Issues: Read, Commit statuses: Read, Checks: Read (Metadata: Read is implied). Organizations may require admin approval; until approved the token sees only public data. CI status may be incomplete with fine-grained tokens (GitHub lists the Checks API as a gap); use a classic token when CI matters.
+- **Fine-grained token:** Resource owner = your user or the organization (one token per organization); Repository access = All repositories (or select); Permissions: Pull requests: Read, Issues: Read, Commit statuses: Read, Checks: Read (Metadata: Read is implied). Organizations may require admin approval; until approved the token sees only public data. CI status may be incomplete with fine-grained tokens (GitHub lists the Checks API as a gap); use a classic token when CI matters. Posting a draft review ([Background runs and drafts](#background-runs-and-drafts)) needs Pull requests: Read and write; a classic token with `repo` already covers it.
 
 If a classic token lacks `repo` and `public_repo`, PullPing still adds the account and shows
 "Missing repo scope" next to it.
@@ -225,9 +225,9 @@ your version; it never turns on automatic runs or the search through your agent 
   "resume this session when the pull request is approved or commented on". A hook runs once and is then removed;
   an unused one expires after 14 days.
 
-<img src="docs/screenshots/settings-automations.png" alt="Settings, Automations tab: the Copy Setup Prompt note, Run Automations on, Handle with Agent on, three rules, and Open With with Terminal (the default) and Ghostex" width="340">
+<img src="docs/screenshots/settings-automations.png" alt="Settings, Automations tab: the Copy Setup Prompt note, Run Automations on, Handle with Agent on, three rules, Open With with Terminal (the default) and Ghostex, and Background Runs off" width="340">
 &nbsp;
-<img src="docs/screenshots/rule-editor.png" alt="The rule editor: agent, command, where it opens, working directory {worktree_dir}, the pull request's linked session as the session, and the prompt" width="420">
+<img src="docs/screenshots/rule-editor.png" alt="The rule editor from the top: name, events, which pull requests (Mine, octo-org/widgets), Ask mode, then agent, command, where it opens, working directory {worktree_dir} and the pull request's linked session as the session" width="420">
 
 **Ask or run.** An automation asks by default: the notification gets a **Run …** button (and stays until you act),
 and the pull request's right-click menu and the main window's toolbar get **Run Automation**. **Run automatically**
