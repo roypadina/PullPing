@@ -480,7 +480,7 @@ struct ShortcutsTab: View {
 
 /// Every repository-level setting on one pane: which repositories' issues are tracked, and the muted repositories.
 struct RepositoriesTab: View {
-    static let height: CGFloat = 630  // five muted repositories and the footer (render); more scroll
+    static let height: CGFloat = 470  // one muted repository and the footer (render); more scroll
     @Bindable var store: Store
     /// Other Repositories and Excluded Repositories as typed; parsed and saved on Return, when the field loses focus (SET-4)
     /// and when Settings closes.

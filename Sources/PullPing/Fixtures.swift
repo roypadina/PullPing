@@ -13,7 +13,7 @@ enum Fixtures {
         let store = Store(state: StateStore(url: nil), accounts: [personal, work], settings: settings, persist: false)
         store.setTracked { state in
             for pr in samplePRs(now: now) { state.prs[pr.id] = pr }
-            state.mutedRepos = ["octo-org/gadgets"]  // for Settings → Repositories; only PR_6 keeps it, so the lists stay full
+            state.mutedRepos = ["octo-org/playground"]  // for Settings → Repositories; PR_6 is its only item, so the lists stay full
             state.lastPollAt = [personal.id: now.addingTimeInterval(-120), work.id: now.addingTimeInterval(-120)]
             state.baselinedAccounts = [personal.id, work.id]
         }
@@ -118,7 +118,7 @@ enum Fixtures {
                 $0.ci = .success
                 $0.events = [event("E8", "PR_5", .comment, "bob", 180, "Moved the Homebrew section up.")]
             },
-            pr("PR_6", work, "octo-org/gadgets", 49, "Cache parsed manifests between runs", author: "alice", roles: [.commenter]) {
+            pr("PR_6", work, "octo-org/playground", 49, "Cache parsed manifests between runs", author: "alice", roles: [.commenter]) {
                 $0.muted = true
                 $0.mutedByRepo = true
                 $0.ci = .success

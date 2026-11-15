@@ -154,7 +154,7 @@ final class ScreenshotRenderTests: XCTestCase {
                                     select: { _ in }, selectRepo: { chosen = $0 })
         XCTAssertEqual(repos.items.suffix(2).map(\.title), ["", "Repository"])
         let sub = repos.items.last?.submenu
-        XCTAssertEqual(sub?.items.map(\.title), ["All Repositories", "", "octo-org/docs", "octo-org/gadgets", "octo-org/widgets"])
+        XCTAssertEqual(sub?.items.map(\.title), ["All Repositories", "", "octo-org/docs", "octo-org/gadgets", "octo-org/playground", "octo-org/widgets"])
         XCTAssertEqual(sub?.items.filter { $0.state == .on }.map(\.title), ["octo-org/gadgets"])
         sub?.items.first.map { _ = $0.target?.perform($0.action) }
         XCTAssertEqual(chosen, "")
@@ -547,7 +547,7 @@ final class ScreenshotRenderTests: XCTestCase {
             }.padding(12), NSSize(width: 3 * 592 + 12, height: NotificationsTab.height + 24))
             try save("settings-general", GeneralTab(store: settings), NSSize(width: 580, height: GeneralTab.height))
             try save("settings-menu-bar", MenuBarTab(store: settings), NSSize(width: 580, height: MenuBarTab.height))
-            // Repositories: the fixtures' muted repository and exclusion; five muted ones with rejected entries (the room it plans for).
+            // Repositories: the fixtures' muted repository and exclusion; five muted ones with rejected entries (they scroll).
             let manyMuted = Fixtures.sampleStore()
             manyMuted.setTracked { $0.mutedRepos = ["octo-org/gadgets", "octo-org/legacy", "octo-org/docs", "alice/dotfiles", "octo-org/widgets"] }
             try save("settings-repositories", HStack(alignment: .top, spacing: 12) {
