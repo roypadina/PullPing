@@ -24,7 +24,8 @@ final class ScreenshotRenderTests: XCTestCase {
                 try render(view, size: size, dark: dark, to: URL(fileURLWithPath: dir).appendingPathComponent("\(name)\(suffix).png"))
             }
             try save("status-panel", StatusPanelView(store: store), NSSize(width: 380, height: 520))
-            try save("main-window", MainView(store: store), NSSize(width: 1100, height: 680))
+            // Light only: offscreen, the dark sidebar's vibrant text renders black on near-black.
+            if !dark { try save("main-window", MainView(store: store), NSSize(width: 1100, height: 680)) }
             try save("notification-banner", panel(PanelModel(pr: pr("PR_1"), events: Array(pr("PR_1").events.suffix(1)), alert: false, account: "@dana")),
                      NSSize(width: Theme.panelWidth + 40, height: Theme.panelHeight + 40))
             try save("notification-alert", panel(PanelModel(pr: pr("PR_2"), events: pr("PR_2").events, alert: true, account: "@dana")),
@@ -79,9 +80,9 @@ final class ScreenshotRenderTests: XCTestCase {
         }
         store.setFindSessions(false)  // reloads the store's copy
         store.mutateRepoFolders { $0.roots = ["~/Code", "~/src"] }  // also reloads the store's copy
-        try save("settings-automations", AutomationsTab(store: store), NSSize(width: 520, height: 1010))  // down to the rules and Open With
-        // Scrolled to its end (agent, session, prompt); 32 pt taller than the sheet so the top edge falls between sections.
-        try render(RuleEditorSheet(store: store, rule: review), size: NSSize(width: 560, height: 672), dark: false, scrollToEnd: true,
+        try save("settings-automations", AutomationsTab(store: store), NSSize(width: 520, height: 1070))  // down to the rules, Open With and the Background Runs group
+        // From the top (title, events, scope) down to the agent and session rows; the bottom edge falls before Prompt.
+        try render(RuleEditorSheet(store: store, rule: review), size: NSSize(width: 560, height: 960), dark: false,
                    to: URL(fileURLWithPath: dir).appendingPathComponent("rule-editor.png"))
         let pr = { store.tracked.prs[$0]! }
         let handle = PanelModel(pr: pr("PR_9"), events: Array(pr("PR_9").events.suffix(1)), alert: false, account: "@dana",
