@@ -33,6 +33,8 @@ public struct PollReport: Sendable {
 public actor Poller {
     static let log = Logger(subsystem: "com.padina.pullping", category: "poller")
     static let minRemaining = 300
+    /// New watched issues refreshed per poll (newest first); the rest follow on the next polls.
+    static let maxFreshWatched = 100
     static let maxBackoff: TimeInterval = 30 * 60
     static let manualGap: TimeInterval = 10
 
@@ -194,6 +196,13 @@ public actor Poller {
             stats.discoverCost = client.cost
             let before = store.state
             let since = before.watchedSince?[account.id] ?? [:]
+            // Every account's patterns decide what is watched: an issue two accounts see is one entry, refreshed by either.
+            let others = trackIssues ? (before.watchedSince ?? [:]).filter { $0.key != account.id }.map(\.value) : []
+            let watchPatterns = patterns + others.flatMap(\.keys).filter { !patterns.contains($0) }
+            let watchSince = others.reduce(since) { $0.merging($1) { min($0, $1) } }
+            // Only issues opened since this account's last poll notify, so one that comes back (Reset Ignored, pruned then
+            // reopened, past `maxFreshWatched`) is not new again. 5 min of slack for search-index lag and clock skew.
+            let lastPoll = before.lastPollAt[account.id].map { $0.addingTimeInterval(-300) } ?? .distantPast
             var stamps = found.stamps.filter { !before.ignoredIDs.contains($0.key) }
 
             // 2. Stamps for tracked PRs the searches missed (closed ones in retention, search lag).
@@ -215,7 +224,12 @@ public actor Poller {
                     || (old.state == .open && old.roles.contains(.author) && old.mergeState == "UNKNOWN")
                     || (old.state == .open && !old.isIssue && old.autoMerge == nil)
             }.map(\.id).sorted()
-            let fresh = changed.filter { before.prs[$0] == nil }
+            var fresh = changed.filter { before.prs[$0] == nil }
+            // New watched issues I am not part of: the newest 100 per poll (a first sync can find 500, and one failed batch
+            // throws the whole poll away). The rest follow on the next polls, silent: they were open before this one.
+            let backlog = Set(fresh.filter { stamps[$0]?.watchedRank != nil && stamps[$0]?.inIssues == false }
+                .sorted { stamps[$0]!.watchedRank! < stamps[$1]!.watchedRank! }.dropFirst(Self.maxFreshWatched))
+            fresh.removeAll { backlog.contains($0) }
             let known = changed.filter { before.prs[$0] != nil }
             stats.changed = changed.count
             stats.new = fresh.count
@@ -249,13 +263,14 @@ public actor Poller {
                     let stamp = stamps[snapshot.id]
                     let (pr, new) = EventEngine.diff(old: state.prs[snapshot.id], snapshot: snapshot, me: found.login, accountID: account.id,
                                                      inRequestedSearch: stamp?.inRequested ?? false, inReviewedSearch: stamp?.inReviewed ?? false,
-                                                     watchedSince: snapshot.isIssue ? IssueWatch.since(snapshot.repo, patterns: patterns, since: since, now: t) : nil,
+                                                     watchedSince: snapshot.isIssue ? IssueWatch.since(snapshot.repo, patterns: watchPatterns, since: watchSince, now: t)
+                                                        .map { max($0, lastPoll) } : nil,
                                                      now: t)
                     state.prs[snapshot.id] = pr
                     events += new
                 }
                 for (id, pr) in state.prs where pr.isIssue && pr.accountID == account.id {
-                    let watched = IssueWatch.matches(pr.repo, patterns)
+                    let watched = IssueWatch.matches(pr.repo, watchPatterns)
                     // Left the watch list and I am not part of it: it goes (not ignored, so watching again brings it back).
                     if pr.watched && !watched && pr.state == .open && stamps[id]?.inIssues != true { state.prs[id] = nil; continue }
                     state.prs[id]?.watched = watched

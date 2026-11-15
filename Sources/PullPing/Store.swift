@@ -1362,6 +1362,7 @@ final class Store {
             state.prs = state.prs.filter { $0.value.accountID != id }
             state.baselinedAccounts.remove(id)
             state.lastPollAt[id] = nil
+            state.watchedSince?[id] = nil  // its patterns no longer mark other accounts' issues watched
         }
     }
 

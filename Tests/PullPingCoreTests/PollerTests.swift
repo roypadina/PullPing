@@ -481,6 +481,97 @@ final class PollerTests: XCTestCase {
         XCTAssertEqual(store.state.watchedSince?[account.id], [:])
     }
 
+    /// Two accounts: dana watches dana/*, erin is mentioned in a new issue there. Whichever account refreshes it, the issue is
+    /// watched (every account's patterns count), and opening it notifies once, from the account that saw it first.
+    func testWatchedThroughAnyAccount() async throws {
+        seed()
+        let erin = Account(login: "erin"), other = FakeGitHub()
+        other.login = "erin"
+        let erinPoller = poller(other.transport)
+        _ = try await polled(poller())
+        _ = await erinPoller.poll(account: erin)
+        func issue(_ updated: TimeInterval) {
+            other.prs["I_1"] = .init(updatedAt: t0.addingTimeInterval(updated), node: issueNode(
+                "I_1", number: 1, author: "alice", updatedAt: t0.addingTimeInterval(updated), body: "@erin can you look?", repo: "dana/app",
+                createdAt: t0.addingTimeInterval(100)), issue: true)
+            github.prs["I_1"] = other.prs["I_1"]
+        }
+        issue(100)
+        (other.issues, github.watched) = (["I_1"], ["I_1"])
+        clock.now = t0.addingTimeInterval(180)
+        let first = await erinPoller.poll(account: erin)
+        XCTAssertEqual(opened(try XCTUnwrap(first)), ["I_1"], "dana's repository, seen first by erin")
+        XCTAssertEqual(store.state.prs["I_1"]?.watched, true)
+        let again = try await polled(poller())
+        XCTAssertTrue(opened(again).isEmpty, "once")
+
+        // dana refreshes it, then erin last: still watched.
+        issue(200)
+        clock.now = t0.addingTimeInterval(360)
+        _ = try await polled(poller())
+        XCTAssertEqual(store.state.prs["I_1"]?.accountID, account.id)
+        issue(400)
+        clock.now = t0.addingTimeInterval(540)
+        _ = await erinPoller.poll(account: erin)
+        let entry = try XCTUnwrap(store.state.prs["I_1"])
+        XCTAssertEqual(entry.accountID, erin.id)
+        XCTAssertTrue(entry.watched)
+        XCTAssertEqual(Attention.bucket(entry), .issueWatched)
+        XCTAssertEqual(store.state.watchedSince?[erin.id], ["erin/*": t0], "erin's baseline stays its own")
+    }
+
+    /// An issue that comes back is not new again: after Stop Tracking and Reset Ignored, or pruned and found again.
+    func testIssueComingBackDoesNotNotifyAgain() async throws {
+        seed()
+        _ = try await polled(poller())
+        clock.now = t0.addingTimeInterval(600)
+        watchedIssue("I_1", 1, created: t0.addingTimeInterval(500), updatedAt: t0.addingTimeInterval(500))
+        let opening = try await polled(poller())
+        XCTAssertEqual(opened(opening), ["I_1"])
+        store.update { $0.prs["I_1"] = nil; $0.ignoredIDs.insert("I_1") }  // Stop Tracking
+        clock.now = t0.addingTimeInterval(1200)
+        _ = try await polled(poller())
+        XCTAssertNil(store.state.prs["I_1"])
+
+        store.update { $0.ignoredIDs = [] }  // Reset Ignored
+        clock.now = t0.addingTimeInterval(1800)
+        let reset = try await polled(poller())
+        XCTAssertTrue(opened(reset).isEmpty)
+        XCTAssertNil(Attention.needReason(try XCTUnwrap(store.state.prs["I_1"])))
+
+        store.update { $0.prs["I_1"] = nil }  // pruned
+        clock.now = t0.addingTimeInterval(2400)
+        let found = try await polled(poller())
+        XCTAssertTrue(opened(found).isEmpty)
+        XCTAssertNotNil(store.state.prs["I_1"])
+    }
+
+    /// A first sync of a big scope refreshes the newest 100 new watched issues; the rest follow on the next poll, silent, and
+    /// a newer issue in that poll still notifies.
+    func testFreshWatchedIssuesPerPollAreCapped() async throws {
+        seed()
+        _ = try await polled(poller())
+        let old = (1...150).map { "I_\($0)" }  // newest first, as the search returns them
+        for (i, id) in old.enumerated() { watchedIssue(id, i + 1, repo: "octo-org/tools", created: t0.addingTimeInterval(-3600 * Double(i + 1))) }
+        clock.now = t0.addingTimeInterval(180)
+        let added = try await polled(poller(watch: ["octo-org/*"]))
+        XCTAssertEqual(added.stats.new, 100)
+        XCTAssertTrue(opened(added).isEmpty)
+        XCTAssertNotNil(store.state.prs["I_100"])
+        XCTAssertNil(store.state.prs["I_101"])
+        XCTAssertEqual(store.state.watchedSince?[account.id]?["octo-org/*"], clock.now)
+
+        clock.now = t0.addingTimeInterval(360)
+        watchedIssue("I_151", 151, repo: "octo-org/tools", created: t0.addingTimeInterval(300), updatedAt: t0.addingTimeInterval(300))
+        github.watched = ["I_151"] + old
+        let next = try await polled(poller(watch: ["octo-org/*"]))
+        XCTAssertEqual(next.stats.new, 51)
+        XCTAssertEqual(opened(next), ["I_151"])
+        XCTAssertEqual(store.state.prs.values.filter(\.watched).count, 151)
+        XCTAssertEqual(store.state.prs.values.filter { Attention.needReason($0) == .toTriage }.map(\.id), ["I_151"])
+        XCTAssertEqual(store.state.watchedSince?[account.id]?["octo-org/*"], t0.addingTimeInterval(180), "kept")
+    }
+
     /// Track Issues off drops them and forgets when watching began; on again, they come back silently.
     func testTrackIssuesOffForgetsTheWatchBaseline() async throws {
         seed()

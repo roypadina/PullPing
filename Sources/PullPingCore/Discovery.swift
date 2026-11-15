@@ -8,6 +8,8 @@ public struct PRStamp: Sendable, Equatable {
     public var inReviewed = false
     /// Found by the `involves` issue search (`SearchQueries.issues`).
     public var inIssues = false
+    /// Position in the watched search (`IssueWatch.query`, newest first); nil = not found by it.
+    public var watchedRank: Int?
 }
 
 public struct Discovered: Sendable, Equatable {
@@ -32,6 +34,7 @@ extension GitHubClient {
                                 issues: data.issues?.issueCount ?? 0, watched: data.watched?.issueCount ?? 0)
         let searches = [(data.involved, SearchQueries.involved), (data.requested, SearchQueries.requested), (data.reviewed, SearchQueries.reviewed)]
             + (data.issues.map { [($0, SearchQueries.issues)] } ?? []) + (data.watched.map { [($0, watched ?? "")] } ?? [])
+        var rank = 0
         for (first, query) in searches {
             var page = first, count = 1
             while true {
@@ -40,6 +43,7 @@ extension GitHubClient {
                     stamp.inRequested = stamp.inRequested || query == SearchQueries.requested
                     stamp.inReviewed = stamp.inReviewed || query == SearchQueries.reviewed
                     stamp.inIssues = stamp.inIssues || query == SearchQueries.issues
+                    if query == watched && stamp.watchedRank == nil { (stamp.watchedRank, rank) = (rank, rank + 1) }
                     result.stamps[node.id] = stamp
                 }
                 result.pages += 1

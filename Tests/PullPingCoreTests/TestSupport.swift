@@ -58,6 +58,7 @@ final class FakeGitHub: @unchecked Sendable {
     var issues: [String] = []
     var watched: [String] = []
     var watchedPage2: [String] = []
+    var login = "dana"
     var remaining = 4000
     var failing = false
     lazy var transport = FakeTransport { [unowned self] in self.reply($0) }
@@ -76,7 +77,7 @@ final class FakeGitHub: @unchecked Sendable {
         case "Discover":
             let issuesAlias = variables["withIssues"] as? Bool == true ? #""issues": \#(search(issues)),"# : ""  // @include
             let watchedAlias = variables["withWatched"] as? Bool == true ? #""watched": \#(search(watched, next: !watchedPage2.isEmpty)),"# : ""
-            body = #"{ "data": { "viewer": { "login": "dana" }, "involved": \#(search(involved)), "requested": \#(search(requested)), "reviewed": \#(search([])), \#(issuesAlias) \#(watchedAlias) \#(rate) } }"#
+            body = #"{ "data": { "viewer": { "login": "\#(login)" }, "involved": \#(search(involved)), "requested": \#(search(requested)), "reviewed": \#(search([])), \#(issuesAlias) \#(watchedAlias) \#(rate) } }"#
         case "Page":
             body = #"{ "data": { "search": \#(search(watchedPage2)), \#(rate) } }"#
         case "Stamps":

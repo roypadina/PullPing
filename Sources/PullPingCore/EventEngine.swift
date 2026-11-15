@@ -5,7 +5,7 @@ public enum EventEngine {
     static let seenCap = 300
     static let eventCap = 50
 
-    /// `watchedSince`: when watching the issue's repository began (`IssueWatch.since`); nil = not watched.
+    /// `watchedSince`: when watching the issue's repository began (`IssueWatch.since`), or the last poll if later; nil = not watched.
     public static func diff(old: TrackedPR?, snapshot s: PRSnapshot, me: String, accountID: UUID,
                             inRequestedSearch: Bool, inReviewedSearch: Bool, watchedSince: Date? = nil, now: Date) -> (pr: TrackedPR, events: [PREvent]) {
         let isNew = old == nil
