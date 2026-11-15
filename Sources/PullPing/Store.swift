@@ -219,7 +219,7 @@ final class Store {
     /// Earlier sessions found per pull request (`SessionFinder`), misses too; kept 10 minutes.
     private(set) var found: [String: (candidate: SessionCandidate?, scanned: Int, at: Date)] = [:]
 
-    var accounts: [Account] { didSet { if persist { Account.save(accounts) } } }
+    var accounts: [Account] { didSet { if persist { Account.save(accounts) }; pruneRepoFilters() } }
     var settings: AppSettings { didSet { if persist { settings.save() } } }
     private(set) var tracked: TrackedState
     /// Re-read from disk with `tracked` (no cache): a CLI change shows within one clock tick.
@@ -328,10 +328,22 @@ final class Store {
     }
 
     /// The Repository choices: the repositories of every tracked item in the scope (closed, muted and hidden ones too).
-    func repos(_ scope: Scope) -> [String] { RepoFilter.repos(prs.lazy.filter { scope.matches($0) }) }
+    func repos(_ scope: Scope) -> [String] {
+        let enabled = enabledIDs  // not `prs`: a name list needs no `Attention.sorted` pass
+        return RepoFilter.repos(tracked.prs.values.lazy.filter { enabled.contains($0.accountID) && scope.matches($0) })
+    }
 
     /// A stored Repository choice in the scope's spelling; nil (All Repositories) when the scope has no such repository.
     func activeRepo(_ stored: String, _ scope: Scope) -> String? { stored.isEmpty ? nil : RepoFilter.active(stored, in: repos(scope)) }
+
+    /// A Repository choice no enabled account tracks any more goes back to All Repositories, so a new item there weeks later
+    /// does not narrow the list again on its own. A scope switch keeps it (another account may still have it).
+    private func pruneRepoFilters() {
+        guard !repoFilter.isEmpty || !panelRepoFilter.isEmpty else { return }
+        let all = repos(.all)
+        if !repoFilter.isEmpty, RepoFilter.active(repoFilter, in: all) == nil { repoFilter = "" }
+        if !panelRepoFilter.isEmpty, RepoFilter.active(panelRepoFilter, in: all) == nil { panelRepoFilter = "" }
+    }
 
     /// The scope's indicators by bucket (enabled accounts only): read rows with `Filter.signal`, a whole scope (account
     /// segment, header) with `values.reduce(Signal(), +)`. In the app the number always means "need you", whatever the
@@ -457,6 +469,7 @@ final class Store {
         tracked = state.state
         automationFile = automationStore.load()
         now = Date()
+        pruneRepoFilters()
         noticeCLIAutomations()
         noticeCLIBackground()
     }

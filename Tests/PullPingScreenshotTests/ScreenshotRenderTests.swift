@@ -164,6 +164,21 @@ final class ScreenshotRenderTests: XCTestCase {
                                        select: { _ in }, selectRepo: { _ in }).items.last?.title, "Repository", "a choice shows even alone")
     }
 
+    /// A Repository choice that no enabled account tracks any more resets to All Repositories; a scope without it keeps it.
+    func test_repoFilterReset() {
+        let store = Fixtures.sampleStore()
+        store.repoFilter = "octo-org/docs"
+        store.panelRepoFilter = "Octo-Org/Docs"
+        XCTAssertNil(store.activeRepo(store.repoFilter, .account(Fixtures.personal.id)), "only Work tracks docs")
+        store.setTracked { _ in }
+        XCTAssertEqual([store.repoFilter, store.panelRepoFilter], ["octo-org/docs", "Octo-Org/Docs"], "still tracked: kept")
+        store.setTracked { $0.prs = $0.prs.filter { $0.value.repo != "octo-org/docs" } }
+        XCTAssertEqual([store.repoFilter, store.panelRepoFilter], ["", ""])
+        store.repoFilter = "octo-org/gadgets"
+        store.accounts[1].enabled = false  // Work, the only account with gadgets
+        XCTAssertEqual(store.repoFilter, "")
+    }
+
     /// Dev-only review sheets (not docs): every row's list, the whole status panel, a panel per reason, Activity.
     /// RENDER_REVIEW=<dir> swift test --filter ScreenshotRenderTests/test_renderReview
     func test_renderReview() throws {
