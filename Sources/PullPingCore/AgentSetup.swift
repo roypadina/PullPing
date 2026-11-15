@@ -206,11 +206,19 @@ pullping rule edit <its id> --auto --by "<your agent> setup"
 New issues: PullPing also tracks every open issue in the repositories the user's accounts own (Settings → General),
 and someone else opening one raises `issueOpened` ("New issue"). Its task text is the `issueTriage` prompt
 (`pullping prompts show issueTriage`); Triage in Background drafts a reply the user can edit and post as a comment,
-nothing else. Only after the yes above, ask: "Draft a triage reply whenever someone opens an issue in your
-repositories? (default: no)". On a yes:
+nothing else. Only after the yes to background runs, ask: "Add a Triage in Background button to the notification
+when someone opens an issue in your repositories? (default: no)". On a yes:
 
 ```bash
 pullping rule add --name "Triage new issues" --on issueOpened --background triage --by "<your agent> setup"
+```
+
+Then ask: "Run it automatically for every new issue? At most <the cap> a day; anyone who can open an issue there can
+start one, and its text goes to the agent (it can only read, it writes a draft, and nothing posts). (default: no)".
+On a yes:
+
+```bash
+pullping rule edit <its id> --auto --by "<your agent> setup"
 ```
 
 Check: `pullping background status` and `pullping rule list`. To show the user what a run would do, ask for a pull

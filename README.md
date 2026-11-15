@@ -375,9 +375,10 @@ whenever yours is requested; it then drafts one review per head commit.
 
 **Triage in Background** is in the same menu on open issues: the agent reads the issue, its discussion and the
 repository's labels (no diff), and the run ends in **Triage draft ready**. Review Draft… opens the reply; edit it and
-**Post Comment** posts it as one comment on the issue (the same one-time question per account). Labels, assignment and
-closing stay suggestions in the draft text. A rule can triage every new issue (`--on issueOpened --background triage`,
-**Triage a new issue in the background** in the rule editor); it triages each issue once.
+**Post Comment** posts it as one comment on the issue (the same one-time question per account). The kind of issue and
+the suggested labels show above the reply in the draft window; labels, assignment and closing stay suggestions. A rule
+can triage every new issue (`--on issueOpened --background triage`, **Triage a new issue in the background** in the
+rule editor); it triages each issue once.
 
 Limits: at most 2 runs at once and 10 waiting, 20 runs a day (Settings; automatic and manual together), 10 minutes
 per run (then it stops: "timed out"). Cancel Background Review in the same menu stops one; quitting PullPing
