@@ -43,7 +43,7 @@ brew install --cask roypadina/tap/pullping
 ## Features
 
 - **Every pull request you are involved in, in one place.** Ones you opened, ones assigned to you, ones where your review is requested (directly or through a team), and ones where you commented, reviewed or were mentioned. Merged and closed ones stay listed for a few days.
-- **Issues too.** Open issues you opened, are assigned to, are mentioned in or commented on appear in the same lists with an **Issue** chip, and so does every open issue in the repositories your accounts own (plus any others you add): when someone opens a new one there, you get a **New issue** notification and it needs you until you read it. Comments, mentions, assignments, label changes, renames, reopening and closing (shown as completed or not planned) are tracked like pull request events: mentions, assignments and comments on your issues (and on issues in your repositories) notify, the rest is listed in Activity. Settings → General → Track Issues turns issues off.
+- **Issues too.** Open issues you opened, are assigned to, are mentioned in or commented on appear in the same lists with an **Issue** chip, and so does every open issue in the repositories your accounts own (plus any others you add): when someone opens a new one there, you get a **New issue** notification and it needs you until you read it. Comments, mentions, assignments, label changes, renames, reopening and closing (shown as completed or not planned) are tracked like pull request events: mentions, assignments and comments on your issues (and on issues in your repositories) notify, the rest is listed in Activity. Settings → Repositories → Track Issues turns issues off.
 - **Several GitHub accounts at once.** Personal and work, each with its own token and a label you choose.
 - **Sorted by whose turn it is.** **Needs Me** lists what waits on you, oldest first: reviews and re-reviews asked of you, your pull requests to fix (changes requested, CI failed, conflicts) or to merge, mentions, assignments and new comments. **My Pull Requests** splits into Your Turn, Waiting on Others (reviewers, CI, auto-merge) and Drafts; **Reviews** into Needs Your Review, Team Requests and Reviewed; then **Issues**, **Watching**, **Closed** and **Muted & Hidden**. Each row has one status chip that says why it is there ("Re-review · 2 pushes since your review", "Changes requested by @carol", "Approved · Ready to merge", "Waiting on @alice, @bob"), plus CI, an unread dot and the latest activity.
 - **Re-reviews you would miss.** A pull request you reviewed comes back to Needs Me when you are asked again, or when you requested changes and the author pushed since, even if they forgot to ask.
@@ -60,6 +60,7 @@ brew install --cask roypadina/tap/pullping
 - **Remind Me.** Put any pull request off until later (in an hour, tomorrow at 9:00, next week, or a time you pick): when it is due, it is new and in Needs Me again, with a notification.
 - **Select several, mark as unread.** Select many rows at once and act on all of them; Mark as Read turns into Mark as Unread to bring an item back.
 - **Snooze, mute, hide, mark as read, stop tracking.** All of them from the panel, the menu bar and the main window, with Undo for Hide and Stop Tracking. Hidden pull requests leave every list and count but still notify you.
+- **Repositories.** Mute a whole repository (its new pull requests and issues too), leave repositories out of Issues in My Repositories, and narrow the window or the panel to one repository without changing any count.
 - **Keyboard friendly.** Arrow keys and Return in the panel, menu commands with shortcuts, single keys on a focused list (O, U, M, H, R; Settings → Shortcuts), VoiceOver announcements for new notifications and for what a key did.
 - **`pullping://` links** for Shortcuts and Raycast.
 - Universal binary, no third-party dependencies, no analytics.
@@ -113,8 +114,11 @@ open dist/PullPing.app
    [Accounts and tokens](#accounts-and-tokens).
 3. Click the menu-bar icon. **↩** opens the selected pull request in your browser, **⌘↩** opens it in the
    main window, **Esc** closes the panel. Right-click a row for Open in Browser, Mark as Read (or Unread),
-   Remind Me, Mute, Hide, Snooze Notifications and Stop Tracking; ⌘-click or ⇧-click to act on several rows. Right-click the menu-bar icon, or click **⋯** in the panel, for the same menu (Pause Notifications included).
-4. The first sync of an account is silent: PullPing learns what already exists, and only tells
+   Remind Me, Mute, Mute owner/name, Hide, Snooze Notifications and Stop Tracking; ⌘-click or ⇧-click to act on several rows. Right-click the menu-bar icon, or click **⋯** in the panel, for the same menu (Pause Notifications included).
+4. To see one repository only, pick it under **Repository** in the main window's toolbar (or View → Repository) or
+   **Repository ▸** in the panel's filter menu; a bar above the list says so, with **Show All**. Counts, dots and
+   notifications keep covering every repository.
+5. The first sync of an account is silent: PullPing learns what already exists, and only tells
    you about what happens afterwards (plus review requests, assignments and mentions it finds).
 
 Which pull requests are tracked: open pull requests that you opened, that are assigned to you,
@@ -123,8 +127,11 @@ were mentioned in. Merged and closed ones stay for 1, 3 (default), 7 or 14 days,
 still reaches you.
 
 Which issues are tracked: open issues you opened, are assigned to, are mentioned in or commented on, plus every open
-issue in the repositories your accounts own (**Settings → General → Track Issues in My Repositories**, on by default)
+issue in the repositories your accounts own (**Settings → Repositories → Track Issues in My Repositories**, on by default)
 and in **Other Repositories** (`owner/name`, or `owner/*` for every repository of a user or organization; at most 20).
+**Excluded Repositories** (`owner/name`, at most 20) leaves repositories out of both; issues you are part of there stay
+tracked. To watch only some of your own repositories, exclude the rest, or turn Track Issues in My Repositories off and
+list the ones you want under Other Repositories.
 They stay under **Issues** while they are open (In My Repositories for the ones you only watch). Issues that were
 already open when PullPing started watching a repository are listed quietly; only issues opened after that notify.
 
@@ -175,7 +182,9 @@ app is never interrupted. Everything else is listed in [Activity](#activity) wit
 - **On each panel:** **Open** (opens the pull request and marks it read), **Snooze** (15 minutes, 1 hour, 3 hours, tomorrow 9:00), **Mute PR** (**Mute Issue** on an issue), and a close button.
 - **Review reminders:** while a review or re-review waits on you (a team request too, while its notification is on), the panel shows again every 15, 30, 60 (default), 120 or 240 minutes, or never. It stops when you review, the request is removed, the pull request is merged or closed, or you mute or snooze it.
 - **Remind Me** (row menu, Pull Request menu, ⌃⌘R or R): at the time you pick, the pull request is new and in Needs Me again, with an Alert panel titled **Reminder** (and your phone, if you tick Reminder in Settings → Phone). Reading it ends the reminder.
-- **Mute** keeps a pull request listed but silences its panels and reminders and leaves it out of the menu-bar count. **Snooze Notifications** silences them for a while and does nothing when it ends; Remind Me brings the item back. **Stop Tracking** removes the pull request and ignores it from then on (Edit → Undo brings it back).
+- **Mute** keeps a pull request listed but silences its panels and reminders and leaves it out of the menu-bar count.
+  **Mute owner/name** (row menu, Pull Request menu) does that for every pull request and issue of the repository, new ones too; unmute
+  it the same way or in Settings → Repositories, or unmute one of its items on its own. **Snooze Notifications** silences them for a while and does nothing when it ends; Remind Me brings the item back. **Stop Tracking** removes the pull request and ignores it from then on (Edit → Undo brings it back).
 - **Pause:** right-click the menu-bar icon → **Pause Notifications** for 1 hour, 3 hours or until tomorrow 9:00. Panels, phone notifications and reminders stay quiet until then.
 - **Phone (ntfy):** in **Settings → Phone**, enter a server (default `https://ntfy.sh`) and a topic, subscribe to the same topic in the ntfy phone app, then tick the kinds of event to send, for your own pull requests and for others. Nothing is sent until you tick one. Sends follow the same rules as panels (never your own actions, never muted, snoozed or paused pull requests) but are chosen per kind of event, not per reason, so a merge can still go to your phone. An optional access token (for a protected server) and a fallback topic URL (used when the server fails) are kept in your login keychain. **Send Test Notification** checks the setup.
 - Your own actions never notify you. An optional sound plays once when panels appear. Every action on a panel also exists in the menu-bar panel and the menus, for keyboard and VoiceOver use.
@@ -490,7 +499,7 @@ An automation lets an event on GitHub start a process on your Mac, so PullPing k
   successful runs per pull request, and at most 3 automatic starts per check; the rest wait for a Run click.
 - **Agents' automations show.** Automations written by agents are marked CLI in Settings, and the first time one is
   set to run automatically PullPing tells you.
-- **The usual switches apply.** Pause, mute, snooze, hide and turning an account off stop automations too. An automatic
+- **The usual switches apply.** Pause, mute (a muted repository too), snooze, hide and turning an account off stop automations too. An automatic
   rule with no logins in "Only from" runs for anyone who can comment on the repository; add logins to narrow it.
 
 #### What a background agent can and cannot do
@@ -538,7 +547,7 @@ only through the toggle you turn on yourself.
 - **Fine-grained tokens and CI.** CI status may be incomplete with fine-grained tokens; use a classic token when CI matters.
 - **Sign in with GitHub** tokens can be blocked by organizations that restrict OAuth apps until an owner approves PullPing. Personal access tokens always work.
 - **GitHub.com only.** GitHub Enterprise Server is not supported yet.
-- **Issues in your repositories.** At most 20 Other Repositories. When the watched repositories hold more than 500 open issues, PullPing starts with the 500 newest and then follows every newer one; older ones are not listed.
+- **Issues in your repositories.** At most 20 Other Repositories and 20 Excluded Repositories. When the watched repositories hold more than 500 open issues, PullPing starts with the 500 newest and then follows every newer one; older ones are not listed.
 - **Rate limit.** GitHub gives each token a budget of 5,000 API points per hour; PullPing uses a small fraction. When a token runs low it pauses refreshing until the limit resets and shows "Rate limited" on the account.
 - **Not notarized.** See [First launch](#first-launch).
 
