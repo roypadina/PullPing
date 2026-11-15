@@ -322,6 +322,7 @@ final class BackgroundTests: XCTestCase {
         XCTAssertNil(DraftPost.refusal(.comment, body: "x", draftHead: "a", head: "b", open: false))  // a comment stays pinned to the draft's commit
         XCTAssertEqual(DraftPost.refusal(.comment, body: " \n", draftHead: "a", head: "a", open: true),
                        "Write the review first: GitHub needs text for a comment or a change request.")
+        XCTAssertEqual(DraftPost.refusal(.comment, body: "", draftHead: "", head: "", open: true, issue: true), "Write the reply first: GitHub needs text for a comment.")
         XCTAssertEqual(DraftPost.refusal(.approve, body: "x", draftHead: "abc1234", head: "def56789", open: true),
                        "The pull request changed since this draft (now at def5678). Run the review again to approve or request changes.")
         XCTAssertNotNil(DraftPost.refusal(.requestChanges, body: "x", draftHead: "abc1234", head: "def5678", open: true))

@@ -245,6 +245,8 @@ public struct Automation: Identifiable, Codable, Sendable, Equatable {
     public var isHook: Bool { pr != nil }
     /// A rule's background action; hooks are never background runs.
     public var backgroundAction: BackgroundAction? { isHook ? nil : background }
+    /// What the run cap counts: "issue" for a rule that only runs on issues (background triage, or New issue only).
+    public var itemNoun: String { background == .triage || kinds == [.issueOpened] ? "issue" : "pull request" }
 
     public init(id: UUID = UUID(), name: String, kinds: Set<EventKind>, prompt: String = Automation.defaultPrompt,
                 workingDirectory: String, createdAt: Date = Date()) {

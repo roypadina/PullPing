@@ -855,7 +855,7 @@ public enum AutomationCLI {
         let repos = a.repos.isEmpty ? "" : " (\(a.repos.joined(separator: ", ")))"
         let runs = a.background.map { "\(agentWord(a)) \($0 == .review ? "reviews" : $0 == .triage ? "triages" : "summarizes") in the background (a draft)" }
             ?? "\(agentWord(a))\(a.usesLinkedSession ? " (linked session)" : "") in \(a.launcher.title)"
-        return "\(verb) rule \(shortID(a)): \(a.name) — \(names.joined(separator: ", ")) on \(a.scope.rawValue)\(repos) → \(runs), \(a.mode.rawValue), \(a.maxRunsPerPR) \(a.maxRunsPerPR == 1 ? "run" : "runs") per pull request" + end
+        return "\(verb) rule \(shortID(a)): \(a.name) — \(names.joined(separator: ", ")) on \(a.scope.rawValue)\(repos) → \(runs), \(a.mode.rawValue), \(a.maxRunsPerPR) \(a.maxRunsPerPR == 1 ? "run" : "runs") per \(a.itemNoun)" + end
     }
 
     private static func kindList(_ args: [String]) throws -> String {

@@ -55,7 +55,7 @@ struct DraftView: View {
 
     private var pr: TrackedPR? { store.tracked.prs[draft.prID] }
     private var head: String { pr.map { $0.headOID.isEmpty ? draft.head : $0.headOID } ?? draft.head }
-    private var refusal: String? { DraftPost.refusal(event, body: text, draftHead: draft.head, head: head, open: (pr?.state ?? .open) == .open) }
+    private var refusal: String? { DraftPost.refusal(event, body: text, draftHead: draft.head, head: head, open: (pr?.state ?? .open) == .open, issue: triage) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -74,6 +74,9 @@ struct DraftView: View {
                 if let cut = draft.discussionCut {
                     Text("The discussion was cut: the agent saw \(kb(cut.kept)) of \(kb(cut.total)).").font(.callout).foregroundStyle(.secondary)
                 }
+            }
+            if triage && !draft.summary.isEmpty {  // the kind of issue and the suggested labels; not posted
+                Text(verbatim: draft.summary).font(.callout).foregroundStyle(.secondary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             }
             if draft.action != .summarize {
                 TextEditor(text: $text)

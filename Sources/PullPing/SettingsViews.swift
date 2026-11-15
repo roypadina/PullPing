@@ -481,7 +481,7 @@ struct ShortcutsTab: View {
 struct GeneralTab: View {
     static let height: CGFloat = 830
     @Bindable var store: Store
-    /// Other Repositories as typed; parsed and saved on Return and when the field loses focus (SET-4).
+    /// Other Repositories as typed; parsed and saved on Return, when the field loses focus (SET-4) and when Settings closes.
     @State private var repos: String
     @State private var rejected: [String] = []
     @FocusState private var reposFocused: Bool
@@ -521,11 +521,15 @@ struct GeneralTab: View {
                 Toggle("Track Issues in My Repositories", isOn: $store.settings.watchOwnedIssues).controlSize(.mini)
                     .disabled(!store.settings.trackIssues)
                     .onChange(of: store.settings.watchOwnedIssues) { store.refresh() }
-                TextField("Other Repositories", text: $repos, prompt: Text(verbatim: "octo-org/widgets, octo-org/*"))
+                TextField("Other Repositories", text: $repos, prompt: Text(verbatim: "owner/name, owner/*"))  // a format, not repositories already watched
                     .disabled(!store.settings.trackIssues)
                     .focused($reposFocused)
                     .onSubmit(commitRepos)
                     .onChange(of: reposFocused) { if !reposFocused { commitRepos() } }
+                    // Closing Settings (red button, ⌘W) ends no editing and keeps this view: commit what was typed.
+                    .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { note in
+                        if (note.object as? NSWindow)?.contentViewController is SettingsTabs { commitRepos() }
+                    }
                 if !rejected.isEmpty {
                     Text(verbatim: "Not added: \(rejected.joined(separator: ", ")). Use owner/name, or owner/* for every repository of an owner (at most \(IssueWatch.maxRepos)).")
                         .font(.subheadline).foregroundStyle(Theme.bad)
@@ -1156,7 +1160,7 @@ struct RuleEditorSheet: View {
                         Toggle("Use the scenario's prompt", isOn: Binding(get: { rule.prompt.contains("{task}") }, set: { rule.prompt = Self.withTask(rule.prompt, $0) }))
                             .toggleStyle(.checkbox)
                             .help("Adds or removes the {task} line: the task of the scenario (Settings → Automations → Prompts)")
-                        Stepper("Runs per pull request: \(rule.maxRunsPerPR)", value: $rule.maxRunsPerPR, in: 1...10)
+                        Stepper("Runs per \(rule.itemNoun): \(rule.maxRunsPerPR)", value: $rule.maxRunsPerPR, in: 1...10)
                     }
                 } header: {
                     Text("Prompt")

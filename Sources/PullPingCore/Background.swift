@@ -527,9 +527,11 @@ public enum DraftPost {
     public static let bodyLimit = 65_536
 
     /// Why this post is refused, or nil. Approve and Request Changes need the pull request open and still at the draft's commit;
-    /// a comment is pinned to that commit even when it moved.
-    public static func refusal(_ event: Event, body: String, draftHead: String, head: String, open: Bool) -> String? {
-        if event != .approve && body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "Write the review first: GitHub needs text for a comment or a change request." }
+    /// a comment is pinned to that commit even when it moved. `issue`: a triage reply.
+    public static func refusal(_ event: Event, body: String, draftHead: String, head: String, open: Bool, issue: Bool = false) -> String? {
+        if event != .approve && body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return issue ? "Write the reply first: GitHub needs text for a comment." : "Write the review first: GitHub needs text for a comment or a change request."
+        }
         if body.count > bodyLimit { return "GitHub takes at most \(bodyLimit.formatted()) characters." }
         guard event != .comment else { return nil }
         if !open { return "The pull request is not open any more." }

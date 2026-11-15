@@ -249,7 +249,7 @@ final class AutomationCLITests: XCTestCase {
         let added = run(["rule", "add", "--name", "Triage new issues", "--on", "issueOpened", "--repos", "octo-org/*"])
         XCTAssertEqual(added.status, 0, added.error)
         XCTAssertEqual(hooks.first?.kinds, [.issueOpened])
-        XCTAssertTrue(added.output.contains("Triage new issues — issueOpened on any (octo-org/*) → claude in Terminal, ask"), added.output)
+        XCTAssertTrue(added.output.contains("Triage new issues — issueOpened on any (octo-org/*) → claude in Terminal, ask, 3 runs per issue."), added.output)
         XCTAssertTrue(AutomationCLI.ruleHelp.contains(#"pullping rule add --name "Triage new issues" --on issueOpened --repos 'octo-org/*'"#))
         let shown = run(["prompts", "show", "issueTriage"])
         XCTAssertEqual(shown.status, 0, shown.error)
