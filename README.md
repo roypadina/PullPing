@@ -43,17 +43,17 @@ brew install --cask roypadina/tap/pullping
 ## Features
 
 - **Every pull request you are involved in, in one place.** Ones you opened, ones assigned to you, ones where your review is requested (directly or through a team), and ones where you commented, reviewed or were mentioned. Merged and closed ones stay listed for a few days.
-- **Issues too.** Open issues you opened, are assigned to, are mentioned in or commented on appear in the same lists with an **Issue** chip. Comments, mentions, assignments, label changes, renames, reopening and closing (shown as completed or not planned) are tracked like pull request events: mentions, assignments and comments on your issues notify, the rest is listed in Activity. Settings → General → Track Issues turns issues off.
+- **Issues too.** Open issues you opened, are assigned to, are mentioned in or commented on appear in the same lists with an **Issue** chip, and so does every open issue in the repositories your accounts own (plus any others you add): when someone opens a new one there, you get a **New issue** notification and it needs you until you read it. Comments, mentions, assignments, label changes, renames, reopening and closing (shown as completed or not planned) are tracked like pull request events: mentions, assignments and comments on your issues (and on issues in your repositories) notify, the rest is listed in Activity. Settings → General → Track Issues turns issues off.
 - **Several GitHub accounts at once.** Personal and work, each with its own token and a label you choose.
 - **Sorted by whose turn it is.** **Needs Me** lists what waits on you, oldest first: reviews and re-reviews asked of you, your pull requests to fix (changes requested, CI failed, conflicts) or to merge, mentions, assignments and new comments. **My Pull Requests** splits into Your Turn, Waiting on Others (reviewers, CI, auto-merge) and Drafts; **Reviews** into Needs Your Review, Team Requests and Reviewed; then **Issues**, **Watching**, **Closed** and **Muted & Hidden**. Each row has one status chip that says why it is there ("Re-review · 2 pushes since your review", "Changes requested by @carol", "Approved · Ready to merge", "Waiting on @alice, @bob"), plus CI, an unread dot and the latest activity.
 - **Re-reviews you would miss.** A pull request you reviewed comes back to Needs Me when you are asked again, or when you requested changes and the author pushed since, even if they forgot to ask.
 - **Menu-bar panel.** Needs Me by default, with what waits on others and what you reviewed one click away; the filter picks any other row. Switch between All accounts and each account. Right-click the icon for Refresh, Mark All as Read, Pause Notifications, Settings and Quit.
-- **A count that means something.** By default the menu-bar number is the Needs Me list: review and re-review requests, unread assignments and mentions, your own pull requests with changes requested, failed CI, conflicts, new comments, or ready to merge, and new comments on issues you opened or are assigned to. The panel header spells it out ("2 to review · 1 ready to merge"). Settings → Menu Bar → Count in the Menu Bar picks which of these count (team review requests have their own switch), or count everything unread, or show no number.
+- **A count that means something.** By default the menu-bar number is the Needs Me list: review and re-review requests, unread assignments and mentions, your own pull requests with changes requested, failed CI, conflicts, new comments, or ready to merge, new issues in your repositories, and new comments on issues you opened, are assigned to or that are in your repositories. The panel header spells it out ("2 to review · 1 ready to merge"). Settings → Menu Bar → Count in the Menu Bar picks which of these count (team review requests have their own switch), or count everything unread, or show no number.
 - **Numbers and dots.** Every account, filter and sidebar row shows how many items need you (a number) and whether something there happened that you haven't opened yet (a dot), and so does the menu-bar icon. Opening an item clears its dot; opening the panel doesn't.
 - **Main window.** Mail-style sidebar: the same rows for All Accounts and for each account, with counts of what is your turn and a dot for new activity, search across every row, and a detail view with whose turn it is, reviewers (and the commit each reviewed), checks and the recent activity of the selected pull request. Prefer one inbox per account? Settings → General → Inbox → Per account.
 - **Phone notifications** through [ntfy](https://ntfy.sh), chosen per kind of event, separately from the desktop panels.
 - **Agent automations.** Start Claude Code or Codex in a terminal when a pull request event arrives: rules you write in Settings, or hooks an agent attaches from the command line ("resume this session when the pull request is approved"). Asks first by default.
-- **Background reviews, posted only by you.** Optionally, your agent reviews or summarizes a pull request without a terminal, with read-only tools, and hands you a draft: you edit it and click Post (comment, request changes or approve). Nothing reaches GitHub without that click.
+- **Background reviews, posted only by you.** Optionally, your agent reviews or summarizes a pull request (or triages a new issue) without a terminal, with read-only tools, and hands you a draft: you edit it and click Post (comment, request changes or approve; a comment on an issue). Nothing reaches GitHub without that click.
 - **Notifications only when something needs you.** A small panel appears at the top right when a review is asked of you, your pull request needs a fix or is ready to merge, or you are mentioned or assigned. It never takes keyboard focus and is grouped per pull request. Merges, passing CI, new commits and the rest go to Activity without a notification. Pick Off, Banner (hides itself) or Alert (stays) for each reason.
 - **Activity.** Everything PullPing saw and did, in one list: every event, whether it notified you or went to your phone, plus every automation run. Filter it, and see what is new since your last look.
 - **Review reminders.** While a review or re-review waits on you, PullPing nudges you again every so often until you review, the request is removed, or the pull request is merged or closed.
@@ -122,6 +122,12 @@ that request your review (directly or through a team), or that you commented on,
 were mentioned in. Merged and closed ones stay for 1, 3 (default), 7 or 14 days, so a late comment
 still reaches you.
 
+Which issues are tracked: open issues you opened, are assigned to, are mentioned in or commented on, plus every open
+issue in the repositories your accounts own (**Settings → General → Track Issues in My Repositories**, on by default)
+and in **Other Repositories** (`owner/name`, or `owner/*` for every repository of a user or organization; at most 20).
+They stay under **Issues** while they are open (In My Repositories for the ones you only watch). Issues that were
+already open when PullPing started watching a repository are listed quietly; only issues opened after that notify.
+
 | Command | Shortcut |
 |---|---|
 | Refresh now | ⌘R |
@@ -145,7 +151,7 @@ Add a personal access token in **Settings → Accounts → Add Account…**. Pul
 one token each.
 
 - **Classic token:** scopes `repo` (private repositories) and `read:org` (team review requests). Public repositories only: `public_repo`. Organizations with SAML SSO: click "Configure SSO" on the token and authorize each organization.
-- **Fine-grained token:** Resource owner = your user or the organization (one token per organization); Repository access = All repositories (or select); Permissions: Pull requests: Read, Issues: Read, Commit statuses: Read, Checks: Read (Metadata: Read is implied). Organizations may require admin approval; until approved the token sees only public data. CI status may be incomplete with fine-grained tokens (GitHub lists the Checks API as a gap); use a classic token when CI matters. Posting a draft review ([Background runs and drafts](#background-runs-and-drafts)) needs Pull requests: Read and write; a classic token with `repo` already covers it.
+- **Fine-grained token:** Resource owner = your user or the organization (one token per organization); Repository access = All repositories (or select); Permissions: Pull requests: Read, Issues: Read, Commit statuses: Read, Checks: Read (Metadata: Read is implied). Organizations may require admin approval; until approved the token sees only public data. CI status may be incomplete with fine-grained tokens (GitHub lists the Checks API as a gap); use a classic token when CI matters. Posting a draft review ([Background runs and drafts](#background-runs-and-drafts)) needs Pull requests: Read and write, posting a triage reply on an issue Issues: Read and write; a classic token with `repo` already covers both.
 
 If a classic token lacks `repo` and `public_repo`, PullPing still adds the account and shows
 "Missing repo scope" next to it.
@@ -161,9 +167,9 @@ When something on a pull request you are tracking needs you, PullPing shows a sm
 top right of the screen your mouse is on. It never takes keyboard focus, so typing in another
 app is never interrupted. Everything else is listed in [Activity](#activity) without a panel.
 
-- **What notifies:** a review requested from you or your team, a re-review (requested again, or the author pushed after you requested changes), and on your own pull requests changes requested, CI failed, conflicts with the base branch, new comments, and ready to merge (approved, checks green, mergeable); plus mentions and assignments anywhere. Merges, closes, CI passed (unless it makes your pull request ready to merge), new commits, labels, title changes and comments on other people's pull requests are **Activity only**.
+- **What notifies:** a review requested from you or your team, a re-review (requested again, or the author pushed after you requested changes), and on your own pull requests changes requested, CI failed, conflicts with the base branch, new comments, and ready to merge (approved, checks green, mergeable); a new issue someone opens in your repositories, and new comments on your issues and on issues in your repositories; plus mentions and assignments anywhere. Merges, closes, CI passed (unless it makes your pull request ready to merge), new commits, labels, title changes and comments on other people's pull requests are **Activity only**.
 - **Styles, per reason:** Off, Banner (hides after 5, 8, 12 or 20 seconds; hovering pauses it) or Alert (stays until you act), in **Settings → Notifications**.
-- **Defaults:** Alert for review requested, re-review, changes requested, CI failed, mentioned and assigned; Banner for team review, conflicts, new comments and ready to merge.
+- **Defaults:** Alert for review requested, re-review, changes requested, CI failed, mentioned, assigned and new issue; Banner for team review, conflicts, new comments and ready to merge.
 - **The panel's title says what is asked of you:** "Review requested", "Re-review needed", "Changes requested", "CI failed", "Ready to merge"…
 - **One panel per pull request.** Several events on the same pull request merge into one panel; up to four panels are shown, the rest collapse into "+N more".
 - **On each panel:** **Open** (opens the pull request and marks it read), **Snooze** (15 minutes, 1 hour, 3 hours, tomorrow 9:00), **Mute PR** (**Mute Issue** on an issue), and a close button.
@@ -282,7 +288,7 @@ default, and Recent Runs says so.
 
 What the agent is asked to do depends on what the pull request needs from you, its **scenario**: Review requested,
 Re-review, Changes requested, New comments or a mention, CI failed, Conflicts or behind base, Ready to merge, Assigned to
-me, or Anything else. It comes from the notification's reason (the most important one when a panel holds several), else
+me, New issue (triage an issue someone opened in your repository and draft a reply), or Anything else. It comes from the notification's reason (the most important one when a panel holds several), else
 from the pull request's place in Needs Me. A prompt is a frame (the Handle with Agent prompt, or a rule's) whose `{task}`
 line becomes the scenario's task text. The built-in texts ask the agent to explain and propose, then wait for your OK:
 for a review, draft it and don't post it; for changes requested, explain each request, say whether it agrees and propose
@@ -367,6 +373,12 @@ Draft**), and so does its Activity line (right-click → Review Draft…), for 7
 too (**Run: Review in the background** in the rule editor, `--background review`), for example to draft a review
 whenever yours is requested; it then drafts one review per head commit.
 
+**Triage in Background** is in the same menu on open issues: the agent reads the issue, its discussion and the
+repository's labels (no diff), and the run ends in **Triage draft ready**. Review Draft… opens the reply; edit it and
+**Post Comment** posts it as one comment on the issue (the same one-time question per account). Labels, assignment and
+closing stay suggestions in the draft text. A rule can triage every new issue (`--on issueOpened --background triage`,
+**Triage a new issue in the background** in the rule editor); it triages each issue once.
+
 Limits: at most 2 runs at once and 10 waiting, 20 runs a day (Settings; automatic and manual together), 10 minutes
 per run (then it stops: "timed out"). Cancel Background Review in the same menu stops one; quitting PullPing
 interrupts running runs, and they are not restarted. A run uses Handle with Agent's agent and command, or the rule's.
@@ -384,6 +396,13 @@ A rule, the same as one written in Settings:
 
 ```bash
 pullping rule add --name "Fix failing CI" --on ciFailed --scope mine --repos octo-org/\*
+```
+
+A rule on new issues in your repositories (`issueOpened` fires only on issues opened by someone else, so `--scope mine`
+never matches it):
+
+```bash
+pullping rule add --name "Triage new issues" --on issueOpened --repos 'octo-org/*'
 ```
 
 A rule that resumes the pull request's linked session when someone comments:
@@ -408,7 +427,7 @@ With), `pullping prompts list|show|set|reset` (Prompts), `pullping setup guide|p
 Runs), `pullping automations on|off|status`, `pullping automations folders|fallback|repos` (Repository Folders),
 `pullping kinds` (the event names), `pullping launchers` (where it can open), `pullping background
 on|off|status|set|run|list|cancel` and `pullping drafts list|show|discard` ([background runs](#background-runs-and-drafts);
-`background run review --pr <ref> --dry-run` prints the agent's command line and prompt; no command posts a draft) and
+`background run review|summarize|triage --pr <ref> --dry-run` prints the agent's command line and prompt; no command posts a draft) and
 `pullping activity` (the [Activity](#activity) list). Every reader takes `--json` and
 prints what `automations.json` stores, so an agent can read an automation and write it back with flags.
 `pullping --help`, `pullping rule --help` and `pullping hook --help` list every option (Codex: `--agent codex --session
@@ -505,8 +524,8 @@ Rules, hooks, Handle with Agent and linked sessions (session ids and their folde
 
 ## Permissions
 
-None. (On GitHub, PullPing only reads, except one review per click on Post in a background run's draft window, with
-the account's own token.) PullPing asks macOS for no permission: no Accessibility, no notification
+None. (On GitHub, PullPing only reads, except what you post from a background run's draft window: one review, or one
+comment on an issue, per click, with the account's own token.) PullPing asks macOS for no permission: no Accessibility, no notification
 authorization (the panels are PullPing's own), no Full Disk Access. Tokens are stored in your login keychain
 through macOS's `security` tool, which does not prompt either. Launch at login is optional, and
 only through the toggle you turn on yourself.
@@ -518,6 +537,7 @@ only through the toggle you turn on yourself.
 - **Fine-grained tokens and CI.** CI status may be incomplete with fine-grained tokens; use a classic token when CI matters.
 - **Sign in with GitHub** tokens can be blocked by organizations that restrict OAuth apps until an owner approves PullPing. Personal access tokens always work.
 - **GitHub.com only.** GitHub Enterprise Server is not supported yet.
+- **Issues in your repositories.** At most 20 Other Repositories. When the watched repositories hold more than 500 open issues, PullPing starts with the 500 newest and then follows every newer one; older ones are not listed.
 - **Rate limit.** GitHub gives each token a budget of 5,000 API points per hour; PullPing uses a small fraction. When a token runs low it pauses refreshing until the limit resets and shows "Rate limited" on the account.
 - **Not notarized.** See [First launch](#first-launch).
 
