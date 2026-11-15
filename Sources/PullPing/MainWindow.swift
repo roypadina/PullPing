@@ -20,10 +20,13 @@ final class AccessoryWindows: NSObject, NSWindowDelegate {
     }
 
     /// shortcut: ~0.5 s after the .accessory → .regular switch macOS hands activation back to the previous app (traced:
-    /// Settings behind Ghostex, no click). Take it back once unless the user clicked elsewhere meanwhile; drop when macOS stops.
+    /// Settings behind Ghostex, no click). Take it back once unless the user acted meanwhile (a click elsewhere, or a click or
+    /// key in PullPing that opened another app: a link, Open in Browser); drop when macOS stops.
     private func keepFront(_ window: NSWindow) {
         var clicked = false, done = false
-        let monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { _ in clicked = true }
+        let clicks: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        let global = NSEvent.addGlobalMonitorForEvents(matching: clicks) { _ in clicked = true }
+        let local = NSEvent.addLocalMonitorForEvents(matching: clicks.union(.keyDown)) { event in clicked = true; return event }
         let observer = NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated {
                 guard !clicked, !done, window.isVisible else { return }
@@ -33,7 +36,7 @@ final class AccessoryWindows: NSObject, NSWindowDelegate {
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            monitor.map(NSEvent.removeMonitor)
+            [global, local].compactMap { $0 }.forEach(NSEvent.removeMonitor)
             NotificationCenter.default.removeObserver(observer)
         }
     }
