@@ -76,6 +76,8 @@ final class CompatibilityTests: XCTestCase {
         XCTAssertEqual([mine.markedUnread, theirs.markedUnread], [false, false])
         XCTAssertEqual([mine.watched, issue.watched], [false, false])  // set by the next poll
         XCTAssertNil(state.watchedSince)
+        XCTAssertNil(state.mutedRepos)
+        XCTAssertEqual([mine.mutedByRepo, theirs.mutedByRepo, issue.mutedByRepo], [false, false, false])
         // Remind Me and Mark as Unread survive a save and a reload.
         let store = StateStore(url: url)
         store.update { $0.prs["PR_2"]?.remindAt = t0; $0.prs["PR_2"]?.markedUnread = true }
@@ -83,12 +85,23 @@ final class CompatibilityTests: XCTestCase {
         let reloaded = try XCTUnwrap(StateStore(url: url).state.prs["PR_2"])
         XCTAssertEqual(reloaded.remindAt, t0)
         XCTAssertTrue(reloaded.markedUnread)
+        // A muted repository survives too.
+        store.update { RepoMute.mute(["octo-org/widgets"], in: &$0) }
+        store.save()
+        let muted = StateStore(url: url).state
+        XCTAssertEqual(muted.mutedRepos, ["octo-org/widgets"])
+        XCTAssertEqual(muted.prs.values.filter(\.mutedByRepo).count, 3)
+        XCTAssertEqual(muted, store.state)
 
         let settings = try JSONDecoder().decode(AppSettings.self, from: fixture("v061-settings"))
         XCTAssertEqual(settings.needStyles, AppSettings.defaultNeedStyles)
         XCTAssertEqual(settings.badgeReasons, Set(NeedReason.allCases))
         XCTAssertEqual(settings.phoneMine, [.merged, .ciFailed])
         XCTAssertEqual(settings.style(for: .comment, mine: false), .off)  // kept for a downgrade and phone priority
+        XCTAssertEqual(settings.excludedIssueRepos, [])
+        var excluded = settings
+        excluded.excludedIssueRepos = ["octo-org/legacy"]
+        XCTAssertEqual(try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(excluded)).excludedIssueRepos, ["octo-org/legacy"])
     }
 
     /// A 0.6.1 automations file shaped like a real one (handler in Ghostex with a wrapper, `{repo_root}`, its own prompt, Look

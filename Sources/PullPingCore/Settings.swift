@@ -59,12 +59,14 @@ public struct AppSettings: Codable, Sendable, Equatable {
     /// Kinds pushed to the phone, for my pull requests and for others. Empty until the user opts in.
     public var phoneMine: Set<EventKind> = []
     public var phoneOthers: Set<EventKind> = []
-    /// Open issues I'm involved in are tracked alongside pull requests (Settings > General > Tracking).
+    /// Open issues I'm involved in are tracked alongside pull requests (Settings > Repositories).
     public var trackIssues = true
     /// With `trackIssues`: every open issue in repositories the account owns (`IssueWatch`).
     public var watchOwnedIssues = true
     /// With `trackIssues`: more repositories, `owner/name` or `owner/*` (`IssueWatch.parse`d patterns).
     public var watchedIssueRepos: [String] = []
+    /// With `trackIssues`: repositories left out of the watched search (`IssueWatch.parse(_, wildcards: false)`).
+    public var excludedIssueRepos: [String] = []
     /// Days the activity log keeps (`ActivityLog`, also capped at 5000 entries).
     public var activityDays = 30
     /// Settings > General > Mark as read when selected (`markReadOptions`).
@@ -100,6 +102,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         trackIssues = try value(.trackIssues, trackIssues)
         watchOwnedIssues = try value(.watchOwnedIssues, watchOwnedIssues)
         watchedIssueRepos = try value(.watchedIssueRepos, watchedIssueRepos)
+        excludedIssueRepos = try value(.excludedIssueRepos, excludedIssueRepos)
         activityDays = try value(.activityDays, activityDays)
         markReadSeconds = try value(.markReadSeconds, markReadSeconds)
         singleKeyShortcuts = try value(.singleKeyShortcuts, singleKeyShortcuts)

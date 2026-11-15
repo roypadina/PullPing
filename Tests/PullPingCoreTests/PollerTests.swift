@@ -7,11 +7,11 @@ final class PollerTests: XCTestCase {
     let clock = Clock()
     var store = StateStore(url: nil)
 
-    func poller(_ transport: GraphQLTransport? = nil, trackIssues: Bool = true, owned: Bool = true, watch: [String] = []) -> Poller {
+    func poller(_ transport: GraphQLTransport? = nil, trackIssues: Bool = true, owned: Bool = true, watch: [String] = [], exclude: [String] = []) -> Poller {
         let clock = clock
         var settings = AppSettings()
         settings.trackIssues = trackIssues
-        (settings.watchOwnedIssues, settings.watchedIssueRepos) = (owned, watch)
+        (settings.watchOwnedIssues, settings.watchedIssueRepos, settings.excludedIssueRepos) = (owned, watch, exclude)
         return Poller(transport: transport ?? github.transport, tokenProvider: { _ in "test-token" }, state: store, settings: { settings }, now: { clock.now })
     }
 
@@ -591,5 +591,84 @@ final class PollerTests: XCTestCase {
         XCTAssertTrue(on.events.filter { !$0.isOwn }.isEmpty)
         XCTAssertEqual(store.state.prs["I_1"]?.watched, true)
         XCTAssertEqual(store.state.watchedSince?[account.id], ["dana/*": clock.now])
+    }
+
+    // MARK: Repositories
+
+    func discoverWatched() -> String? {
+        github.transport.requests.map(FakeTransport.operation).last { $0.name == "Discover" }?.variables["watched"] as? String
+    }
+
+    /// Excluded Repositories: the search leaves the repository out; a watched issue there I am not part of goes, one assigned
+    /// to me stays, no longer watched.
+    func testExcludedRepositoryLeavesTheWatch() async throws {
+        seed()
+        _ = try await polled(poller(watch: ["octo-org/*"]))
+        clock.now = t0.addingTimeInterval(180)
+        watchedIssue("I_1", 1, repo: "octo-org/legacy", created: t0.addingTimeInterval(-86_400))
+        github.prs["I_2"] = .init(updatedAt: t0, node: issueNode("I_2", number: 2, author: "alice", updatedAt: t0, assignees: [me], repo: "octo-org/legacy",
+                                                                 createdAt: t0.addingTimeInterval(-86_400)), issue: true)
+        (github.issues, github.watched) = (["I_2"], github.watched + ["I_2"])
+        _ = try await polled(poller(watch: ["octo-org/*"]))
+        XCTAssertEqual([store.state.prs["I_1"]?.watched, store.state.prs["I_2"]?.watched], [true, true])
+
+        clock.now = t0.addingTimeInterval(360)
+        github.watched = []  // GitHub applies the -repo:
+        let excluded = try await polled(poller(watch: ["octo-org/*"], exclude: ["octo-org/legacy"]))
+        XCTAssertEqual(discoverWatched(), "is:issue is:open archived:false sort:created-desc user:@me user:octo-org -repo:octo-org/legacy")
+        XCTAssertTrue(excluded.events.filter { !$0.isOwn }.isEmpty)
+        XCTAssertNil(store.state.prs["I_1"])
+        XCTAssertEqual(store.state.prs["I_2"]?.watched, false)
+        XCTAssertEqual(Attention.bucket(store.state.prs["I_2"]!), .issueAssigned)
+        XCTAssertEqual(store.state.watchedSince?[account.id]?["octo-org/*"], t0, "the baseline is not touched")
+    }
+
+    /// Removed from Excluded Repositories: its open issues come back read and silent; one opened after the last poll notifies.
+    func testReincludedRepositoryComesBackSilently() async throws {
+        seed()
+        _ = try await polled(poller(watch: ["octo-org/*"]))
+        clock.now = t0.addingTimeInterval(180)
+        watchedIssue("I_1", 1, repo: "octo-org/legacy", created: t0.addingTimeInterval(-86_400))
+        _ = try await polled(poller(watch: ["octo-org/*"]))
+        clock.now = t0.addingTimeInterval(360)
+        github.watched = []
+        _ = try await polled(poller(watch: ["octo-org/*"], exclude: ["octo-org/legacy"]))
+        XCTAssertNil(store.state.prs["I_1"])
+
+        clock.now = t0.addingTimeInterval(600)
+        github.watched = ["I_1"]
+        watchedIssue("I_3", 3, repo: "octo-org/legacy", created: t0.addingTimeInterval(20), updatedAt: t0.addingTimeInterval(20))  // while excluded
+        watchedIssue("I_2", 2, repo: "octo-org/legacy", created: t0.addingTimeInterval(500), updatedAt: t0.addingTimeInterval(500))  // after the last poll
+        let back = try await polled(poller(watch: ["octo-org/*"]))
+        XCTAssertEqual(opened(back), ["I_2"])
+        for id in ["I_1", "I_3"] {
+            let issue = try XCTUnwrap(store.state.prs[id])
+            XCTAssertTrue(issue.watched)
+            XCTAssertNil(Attention.needReason(issue))
+        }
+        XCTAssertEqual(store.state.watchedSince?[account.id]?["octo-org/*"], t0)
+    }
+
+    /// A muted repository: a new pull request there starts muted (its events still go out, the App keeps them quiet); one of
+    /// its items unmuted by hand stays unmuted.
+    func testMutedRepositoryMutesNewItems() async throws {
+        seed()
+        _ = try await polled(poller())
+        store.update { state in
+            RepoMute.mute(["Octo-Org/Widgets"], in: &state)
+            state.prs["PR_1"]?.muted = false  // Unmute by hand (`Store.setMuted`)
+            state.prs["PR_1"]?.mutedByRepo = false
+        }
+        clock.now = t0.addingTimeInterval(180)
+        github.prs["PR_3"] = .init(updatedAt: t0.addingTimeInterval(100), node: prNode("PR_3", number: 3, author: "bob", updatedAt: t0.addingTimeInterval(100), requested: [me]))
+        github.prs["PR_1"] = .init(updatedAt: t0.addingTimeInterval(100), node: prNode("PR_1", number: 1, updatedAt: t0.addingTimeInterval(100), ci: "SUCCESS"))
+        (github.involved, github.requested) = (["PR_1", "PR_2", "PR_3"], ["PR_2", "PR_3"])
+        let next = try await polled(poller())
+        let pr3 = try XCTUnwrap(store.state.prs["PR_3"])
+        XCTAssertEqual([pr3.muted, pr3.mutedByRepo], [true, true])
+        XCTAssertEqual(next.events.filter { $0.prID == "PR_3" }.map(\.kind), [.reviewRequested])
+        XCTAssertNil(Attention.needReason(pr3))
+        XCTAssertEqual([store.state.prs["PR_1"]?.muted, store.state.prs["PR_1"]?.mutedByRepo], [false, false])
+        XCTAssertEqual([store.state.prs["PR_2"]?.muted, store.state.prs["PR_2"]?.mutedByRepo], [true, true])
     }
 }

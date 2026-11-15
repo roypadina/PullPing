@@ -476,20 +476,105 @@ struct ShortcutsTab: View {
     }
 }
 
-// MARK: General
+// MARK: Repositories
 
-struct GeneralTab: View {
-    static let height: CGFloat = 830
+/// Every repository-level setting on one pane: which repositories' issues are tracked, and the muted repositories.
+struct RepositoriesTab: View {
+    static let height: CGFloat = 630  // five muted repositories and the footer (render); more scroll
     @Bindable var store: Store
-    /// Other Repositories as typed; parsed and saved on Return, when the field loses focus (SET-4) and when Settings closes.
+    /// Other Repositories and Excluded Repositories as typed; parsed and saved on Return, when the field loses focus (SET-4)
+    /// and when Settings closes.
     @State private var repos: String
     @State private var rejected: [String] = []
     @FocusState private var reposFocused: Bool
+    @State private var excluded: String
+    @State private var rejectedExcluded: [String] = []
+    @FocusState private var excludedFocused: Bool
 
     init(store: Store) {
         self.store = store
         _repos = State(initialValue: store.settings.watchedIssueRepos.joined(separator: ", "))
+        _excluded = State(initialValue: store.settings.excludedIssueRepos.joined(separator: ", "))
     }
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Track Issues", isOn: $store.settings.trackIssues).controlSize(.mini)
+                    .onChange(of: store.settings.trackIssues) { store.refresh() }  // the next poll adds or drops them
+                Toggle("Track Issues in My Repositories", isOn: $store.settings.watchOwnedIssues).controlSize(.mini)
+                    .disabled(!store.settings.trackIssues)
+                    .onChange(of: store.settings.watchOwnedIssues) { store.refresh() }
+                TextField("Other Repositories", text: $repos, prompt: Text(verbatim: "owner/name, owner/*"))  // a format, not repositories already watched
+                    .disabled(!store.settings.trackIssues)
+                    .focused($reposFocused)
+                    .onSubmit(commitRepos)
+                    .onChange(of: reposFocused) { if !reposFocused { commitRepos() } }
+                    // Closing Settings (red button, ⌘W) ends no editing and keeps this view: commit what was typed.
+                    .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { note in
+                        if (note.object as? NSWindow)?.contentViewController is SettingsTabs { commitRepos(); commitExcluded() }
+                    }
+                if !rejected.isEmpty {
+                    Text(verbatim: "Not added: \(rejected.joined(separator: ", ")). Use owner/name, or owner/* for every repository of an owner (at most \(IssueWatch.maxRepos)).")
+                        .font(.subheadline).foregroundStyle(Theme.bad)
+                }
+                TextField("Excluded Repositories", text: $excluded, prompt: Text(verbatim: "owner/name"))
+                    .disabled(!store.settings.trackIssues)
+                    .focused($excludedFocused)
+                    .onSubmit(commitExcluded)
+                    .onChange(of: excludedFocused) { if !excludedFocused { commitExcluded() } }
+                if !rejectedExcluded.isEmpty {
+                    Text(verbatim: "Not excluded: \(rejectedExcluded.joined(separator: ", ")). Use owner/name (at most \(IssueWatch.maxRepos)).")
+                        .font(.subheadline).foregroundStyle(Theme.bad)
+                }
+            } header: {
+                Text("Issues")
+            } footer: {
+                Text("Track Issues adds open issues you opened, are assigned to, are mentioned in or comment on. Track Issues in My Repositories adds every open issue in repositories your accounts own, and tells you when someone opens a new one; Other Repositories adds more. Excluded Repositories leaves repositories out of both. To watch only some of your own, exclude the rest, or turn Track Issues in My Repositories off and list them under Other Repositories. All three need Track Issues. Issues you are part of stay tracked.").formFooter()
+            }
+            Section {
+                let muted = store.mutedRepos
+                if muted.isEmpty { Text("No Muted Repositories").foregroundStyle(.secondary) }
+                ForEach(muted, id: \.self) { repo in
+                    LabeledContent {
+                        Button("Unmute") { store.setReposMuted([repo], false) }.accessibilityLabel("Unmute \(repo)")
+                    } label: {
+                        Text(verbatim: repo)
+                    }
+                }
+            } header: {
+                Text("Muted Repositories")
+            } footer: {
+                Text("Pull requests and issues in a muted repository stay listed, but never notify, never count and never start automations on their own, new ones included. To mute one, right-click a pull request or issue and choose Mute owner/name. Edit > Undo reverses it.").formFooter()
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func commitRepos() {
+        let parsed = IssueWatch.parse(repos)
+        rejected = parsed.rejected
+        repos = parsed.patterns.joined(separator: ", ")
+        guard parsed.patterns != store.settings.watchedIssueRepos else { return }
+        store.settings.watchedIssueRepos = parsed.patterns
+        store.refresh()
+    }
+
+    private func commitExcluded() {
+        let parsed = IssueWatch.parse(excluded, wildcards: false)
+        rejectedExcluded = parsed.rejected
+        excluded = parsed.patterns.joined(separator: ", ")
+        guard parsed.patterns != store.settings.excludedIssueRepos else { return }
+        store.settings.excludedIssueRepos = parsed.patterns
+        store.refresh()
+    }
+}
+
+// MARK: General
+
+struct GeneralTab: View {
+    static let height: CGFloat = 660
+    @Bindable var store: Store
 
     var body: some View {
         Form {
@@ -516,24 +601,6 @@ struct GeneralTab: View {
                 Text("Unified lists all accounts together, then each account. Per account lists each account on its own. Selecting a pull request in the window marks it read; with Never, use Mark as Read (⇧⌘U).").formFooter()
             }
             Section {
-                Toggle("Track Issues", isOn: $store.settings.trackIssues).controlSize(.mini)
-                    .onChange(of: store.settings.trackIssues) { store.refresh() }  // the next poll adds or drops them
-                Toggle("Track Issues in My Repositories", isOn: $store.settings.watchOwnedIssues).controlSize(.mini)
-                    .disabled(!store.settings.trackIssues)
-                    .onChange(of: store.settings.watchOwnedIssues) { store.refresh() }
-                TextField("Other Repositories", text: $repos, prompt: Text(verbatim: "owner/name, owner/*"))  // a format, not repositories already watched
-                    .disabled(!store.settings.trackIssues)
-                    .focused($reposFocused)
-                    .onSubmit(commitRepos)
-                    .onChange(of: reposFocused) { if !reposFocused { commitRepos() } }
-                    // Closing Settings (red button, ⌘W) ends no editing and keeps this view: commit what was typed.
-                    .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { note in
-                        if (note.object as? NSWindow)?.contentViewController is SettingsTabs { commitRepos() }
-                    }
-                if !rejected.isEmpty {
-                    Text(verbatim: "Not added: \(rejected.joined(separator: ", ")). Use owner/name, or owner/* for every repository of an owner (at most \(IssueWatch.maxRepos)).")
-                        .font(.subheadline).foregroundStyle(Theme.bad)
-                }
                 Picker("Keep merged and closed pull requests for", selection: $store.settings.retentionDays) {
                     ForEach(AppSettings.retentionOptions, id: \.self) { Text($0 == 1 ? "1 day" : "\($0) days").tag($0) }
                 }
@@ -547,7 +614,7 @@ struct GeneralTab: View {
             } header: {
                 Text("Tracking")
             } footer: {
-                Text("Track Issues adds open issues you opened, are assigned to, are mentioned in or comment on. Track Issues in My Repositories adds every open issue in repositories your accounts own, and tells you when someone opens a new one; Other Repositories adds more. Both need Track Issues. Turning one off removes its issues from the lists. Activity, in the window's sidebar, lists every event and run, at most 5000.").formFooter()
+                Text("Activity, in the window's sidebar, lists every event and run, at most 5000.").formFooter()
             }
             Section("About") {
                 // Two per row: four in one row truncated at 520 pt.
@@ -562,15 +629,6 @@ struct GeneralTab: View {
             }
         }
         .formStyle(.grouped)
-    }
-
-    private func commitRepos() {
-        let parsed = IssueWatch.parse(repos)
-        rejected = parsed.rejected
-        repos = parsed.patterns.joined(separator: ", ")
-        guard parsed.patterns != store.settings.watchedIssueRepos else { return }
-        store.settings.watchedIssueRepos = parsed.patterns
-        store.refresh()
     }
 }
 

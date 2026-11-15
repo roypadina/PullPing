@@ -38,7 +38,8 @@ struct StatusPanelView: View {
     }
 
     private func header(_ scope: Scope) -> some View {
-        let map = store.signals(scope), new = map.values.reduce(0) { $0 + $1.new }
+        // Counts, dots and the breakdown never follow the Repository choice (the number is what needs you).
+        let map = store.signals(scope), new = map.values.reduce(0) { $0 + $1.new }, repo = store.activeRepo(store.panelRepoFilter, scope)
         let breakdown = Attention.breakdown(store.prs(scope, .needsMe), counting: store.settings.badgeReasons)
         let filters = Filter.allCases.filter { $0 != .issues || store.settings.trackIssues }
         // Filters other than the current one with new items: the dot beside the menu hints to open it.
@@ -53,13 +54,14 @@ struct StatusPanelView: View {
                     Spacer()
                     // In the title row (design §5.3), so the account segments get the whole row below.
                     PopUpMenuButton(chevron: true) {
-                        FilterMenu.make(filters: filters, map: map, current: filter) { filter = $0 }
+                        FilterMenu.make(filters: filters, map: map, current: filter, repos: store.repos(scope), repo: repo,
+                                        select: { filter = $0 }, selectRepo: { store.panelRepoFilter = $0 })
                     } label: {
                         Label(needs > 0 ? "\(filter.title) \(needs)" : filter.title, systemImage: filter.symbol)
                     }
-                    .help(elsewhere.isEmpty ? "Filter" : "Filter. New activity in \(elsewhere)")
-                    .accessibilityValue([needs > 0 ? "\(needs) need you" : nil, elsewhere.isEmpty ? nil : "new activity in \(elsewhere)"]
-                        .compactMap { $0 }.joined(separator: ", "))
+                    .help((elsewhere.isEmpty ? "Filter" : "Filter. New activity in \(elsewhere)") + (repo.map { ". Showing only \($0)" } ?? ""))
+                    .accessibilityValue([needs > 0 ? "\(needs) need you" : nil, elsewhere.isEmpty ? nil : "new activity in \(elsewhere)",
+                                         repo.map { "repository \($0)" }].compactMap { $0 }.joined(separator: ", "))
                     if !elsewhere.isEmpty { NewDot().accessibilityHidden(true) }  // the menu's value says it
                     buttons
                 }
@@ -82,6 +84,16 @@ struct StatusPanelView: View {
                     scopePicker(scope).pickerStyle(.segmented)
                     scopePicker(scope).pickerStyle(.menu).fixedSize()
                 }
+            }
+            if let repo {  // right above the list: the Repository choice shows itself, with the way back (PRN-2)
+                HStack {
+                    Label { Text(verbatim: repo) } icon: { Image(systemName: "book.closed.fill") }
+                        .lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
+                        .accessibilityLabel("Showing only \(repo)")
+                    Spacer(minLength: 4)
+                    Button("Show All") { store.panelRepoFilter = "" }.buttonStyle(.link)
+                }
+                .font(.caption)
             }
         }
         .padding(12)
@@ -116,15 +128,25 @@ struct StatusPanelView: View {
         .help("More: Open Window, Pause Notifications, Settings, Quit")
     }
 
-    /// The filter's sections; Needs Me adds what waits on others and what I reviewed, collapsed.
-    @ViewBuilder private func content(_ scope: Scope) -> some View {
-        let sections = filter.sections(store.prs(scope, filter)) + (filter == .needsMe ? [
-            ListSection(title: "Waiting on Others", prs: Filter.myPRs.sections(store.prs(scope, .myPRs)).first { $0.title == "Waiting on Others" }?.prs ?? [], collapsed: true),
-            ListSection(title: "Reviewed", prs: Filter.reviews.sections(store.prs(scope, .reviews)).first { $0.title == "Reviewed" }?.prs ?? [], collapsed: true),
+    /// The filter's sections, of one repository (`repo`) or all; Needs Me adds what waits on others and what I reviewed, collapsed.
+    private func sections(_ scope: Scope, repo: String?) -> [ListSection] {
+        filter.sections(store.prs(scope, filter, repo: repo)) + (filter == .needsMe ? [
+            ListSection(title: "Waiting on Others", prs: Filter.myPRs.sections(store.prs(scope, .myPRs, repo: repo)).first { $0.title == "Waiting on Others" }?.prs ?? [], collapsed: true),
+            ListSection(title: "Reviewed", prs: Filter.reviews.sections(store.prs(scope, .reviews, repo: repo)).first { $0.title == "Reviewed" }?.prs ?? [], collapsed: true),
         ].filter { !$0.prs.isEmpty } : [])
+    }
+
+    @ViewBuilder private func content(_ scope: Scope) -> some View {
+        let repo = store.activeRepo(store.panelRepoFilter, scope)
+        let sections = sections(scope, repo: repo)
         let ids = sections.flatMap(\.prs).map(\.id)
         if ids.isEmpty {
-            EmptyState(store: store, filter: filter, scope: scope).frame(maxWidth: .infinity, maxHeight: .infinity)
+            let hidden = repo == nil ? 0 : self.sections(scope, repo: nil).reduce(0) { $0 + $1.prs.count }
+            if let repo, hidden > 0 {
+                RepoEmptyState(repo: repo, row: filter.title, hidden: hidden) { store.panelRepoFilter = "" }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                EmptyState(store: store, filter: filter, scope: scope).frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         } else {
             List(selection: $selection) {
                 if !sections.contains(where: { !$0.collapsed }) {  // Needs Me is empty: say so above the collapsed groups
@@ -167,8 +189,10 @@ struct StatusPanelView: View {
 
 /// The filter menu: the number = need you (a menu-item badge), a coloured dot = new, the words in the tooltip. AppKit, so
 /// both always render (SwiftUI's `.badge` on menu options dropped some) and `PopUpMenuButton` can open it after the click.
+/// Then Repository ▸ (the scope's `repos`, `repo` checked; "" = All Repositories) while there is a choice to make.
 enum FilterMenu {
-    @MainActor static func make(filters: [Filter], map: [Bucket: Signal], current: Filter, select: @escaping (Filter) -> Void) -> NSMenu {
+    @MainActor static func make(filters: [Filter], map: [Bucket: Signal], current: Filter, repos: [String], repo: String?,
+                                select: @escaping (Filter) -> Void, selectRepo: @escaping (String) -> Void) -> NSMenu {
         let menu = NSMenu()
         for option in filters {
             let signal = option.signal(map)
@@ -179,6 +203,19 @@ enum FilterMenu {
             item.toolTip = signal.spoken
             menu.addItem(item)
         }
+        guard repos.count > 1 || repo != nil else { return menu }
+        let choices = NSMenu()
+        for (title, value) in [("All Repositories", "")] + repos.map({ ($0, $0) }) {
+            let item = ClosureMenuItem(title: title) { selectRepo(value) }
+            item.state = value == (repo ?? "") ? .on : .off
+            choices.addItem(item)
+            if value.isEmpty { choices.addItem(.separator()) }
+        }
+        let parent = NSMenuItem(title: "Repository", action: nil, keyEquivalent: "")
+        parent.image = NSImage(systemSymbolName: repo == nil ? "book.closed" : "book.closed.fill", accessibilityDescription: nil)
+        parent.submenu = choices
+        menu.addItem(.separator())
+        menu.addItem(parent)
         return menu
     }
 

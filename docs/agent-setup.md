@@ -188,7 +188,7 @@ pullping rule add --name "Draft my reviews" --on reviewRequested --scope others 
 pullping rule edit <its id> --auto --by "<your agent> setup"
 ```
 
-New issues: PullPing also tracks every open issue in the repositories the user's accounts own (Settings → General),
+New issues: PullPing also tracks every open issue in the repositories the user's accounts own (Settings → Repositories),
 and someone else opening one raises `issueOpened` ("New issue"). Its task text is the `issueTriage` prompt
 (`pullping prompts show issueTriage`); Triage in Background drafts a reply the user can edit and post as a comment,
 nothing else. Only after the yes to background runs, ask: "Add a Triage in Background button to the notification

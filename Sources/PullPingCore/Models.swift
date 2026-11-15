@@ -176,6 +176,8 @@ public struct TrackedPR: Identifiable, Codable, Sendable, Equatable {
     @FalseIfMissing public var markedUnread = false
     /// An issue in a repository I watch (`IssueWatch`). Set by the Poller every poll, so `Attention.bucket` stays settings-free.
     @FalseIfMissing public var watched = false
+    /// Muted by its repository's mute (`RepoMute`), not one by one: Unmute Repository clears it.
+    @FalseIfMissing public var mutedByRepo = false
 
     public init(id: String, accountID: UUID, firstTrackedAt: Date) {
         self.id = id
@@ -269,5 +271,7 @@ public struct TrackedState: Codable, Sendable, Equatable {
     public var lastPollAt: [UUID: Date] = [:]
     /// Per account, watch pattern → when PullPing first polled it (`IssueWatch.since`); nil in files from before.
     public var watchedSince: [UUID: [String: Date]]?
+    /// Muted repositories, `owner/name` lowercased (`RepoMute`); nil in files from before.
+    public var mutedRepos: Set<String>?
     public init() {}
 }

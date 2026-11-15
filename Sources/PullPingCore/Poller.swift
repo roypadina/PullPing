@@ -190,8 +190,8 @@ public actor Poller {
         do {
             // 1. Discover open PRs (and open issues, mine and in repositories I watch, unless tracking them is off).
             let s = settings(), trackIssues = s.trackIssues
-            let found = try await client.discover(issues: trackIssues,
-                                                  watched: trackIssues ? IssueWatch.query(owned: s.watchOwnedIssues, extra: s.watchedIssueRepos) : nil)
+            let found = try await client.discover(issues: trackIssues, watched: trackIssues
+                ? IssueWatch.query(owned: s.watchOwnedIssues, extra: s.watchedIssueRepos, excluded: s.excludedIssueRepos) : nil)
             let patterns = trackIssues ? IssueWatch.patterns(login: found.login, owned: s.watchOwnedIssues, extra: s.watchedIssueRepos) : []
             stats.login = found.login
             (stats.involved, stats.requested, stats.reviewed, stats.issues, stats.watched, stats.pages)
@@ -263,17 +263,20 @@ public actor Poller {
             stats.baseline = store.update { state -> Bool in
                 for id in dropped { state.prs[id] = nil }
                 for snapshot in snapshots where !state.ignoredIDs.contains(snapshot.id) {
-                    let stamp = stamps[snapshot.id]
+                    let stamp = stamps[snapshot.id], isNew = state.prs[snapshot.id] == nil
                     let (pr, new) = EventEngine.diff(old: state.prs[snapshot.id], snapshot: snapshot, me: found.login, accountID: account.id,
                                                      inRequestedSearch: stamp?.inRequested ?? false, inReviewedSearch: stamp?.inReviewed ?? false,
-                                                     watchedSince: snapshot.isIssue ? IssueWatch.since(snapshot.repo, patterns: watchPatterns, since: watchSince, now: t)
+                                                     watchedSince: snapshot.isIssue ? IssueWatch.since(snapshot.repo, patterns: watchPatterns, since: watchSince,
+                                                                                                       excluded: s.excludedIssueRepos, now: t)
                                                         .map { max($0, lastPoll) } : nil,
                                                      ownLogins: ownLogins, now: t)
                     state.prs[snapshot.id] = pr
+                    // A muted repository's new item starts muted; its events still go out (the App logs them "not shown: muted").
+                    if isNew { RepoMute.apply(&state.prs[snapshot.id]!, muted: state.mutedRepos) }
                     events += new
                 }
                 for (id, pr) in state.prs where pr.isIssue && pr.accountID == account.id {
-                    let watched = IssueWatch.matches(pr.repo, watchPatterns)
+                    let watched = IssueWatch.matches(pr.repo, watchPatterns, excluded: s.excludedIssueRepos)
                     // Left the watch list and I am not part of it: it goes (not ignored, so watching again brings it back).
                     if pr.watched && !watched && pr.state == .open && stamps[id]?.inIssues != true { state.prs[id] = nil; continue }
                     state.prs[id]?.watched = watched

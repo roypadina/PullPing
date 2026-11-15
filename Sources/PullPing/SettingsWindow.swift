@@ -20,6 +20,7 @@ final class SettingsWindow {
             tabs.tabStyle = .toolbar
             // Each pane gets its own height (SET-8): grouped forms have no intrinsic height.
             add(tabs, "Accounts", "person.2", AccountsTab(store: store), height: AccountsTab.height)
+            add(tabs, "Repositories", "book.closed", RepositoriesTab(store: store), height: RepositoriesTab.height)
             add(tabs, "Notifications", "bell.badge", NotificationsTab(store: store), height: NotificationsTab.height)
             add(tabs, "Menu Bar", "menubar.rectangle", MenuBarTab(store: store), height: MenuBarTab.height)
             add(tabs, "Phone", "iphone", PhoneTab(store: store), height: PhoneTab.height)
@@ -48,7 +49,8 @@ final class SettingsWindow {
     }
 
     private func add(_ tabs: NSTabViewController, _ label: String, _ symbol: String, _ pane: some View, height: CGFloat) {
-        let host = NSHostingController(rootView: pane.frame(width: 520, height: height))
+        // 580: eight tabs fit the toolbar (at 520 Shortcuts and General went into its » overflow menu on macOS 27).
+        let host = NSHostingController(rootView: pane.frame(width: 580, height: height))
         host.sizingOptions = .preferredContentSize  // the window follows the selected pane
         host.title = label
         let item = NSTabViewItem(viewController: host)

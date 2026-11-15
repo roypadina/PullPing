@@ -8,6 +8,7 @@ struct MainView: View {
 
     var body: some View {
         let activity = store.listSelection.activity
+        let repo = store.activeRepo(store.repoFilter, store.listSelection.scope)
         NavigationSplitView {
             SidebarView(store: store)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 280)
@@ -20,6 +21,21 @@ struct MainView: View {
                 }
             }
             .navigationSplitViewColumnWidth(min: 300, ideal: 380, max: 560)
+            // The Repository choice (TBR-2), for the lists and Activity alike: a view filter that always shows itself (PRN-2).
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if let repo { RepoFilterBar(repo: repo) { store.repoFilter = "" } }
+            }
+            .toolbar {
+                ToolbarItem {
+                    Menu {
+                        RepoFilterPicker(store: store)
+                    } label: {
+                        Label("Repository", systemImage: repo == nil ? "book.closed" : "book.closed.fill")
+                    }
+                    .help(repo.map { "Showing only \($0)" } ?? "Show one repository")
+                    .accessibilityValue(repo ?? "All Repositories")
+                }
+            }
         } detail: {
             if !activity && store.selectedIDs.count > 1 {
                 SelectionSummaryView(store: store, ids: store.selectedIDs)
@@ -165,6 +181,7 @@ struct PRListView: View {
     /// The selected row's sections; while searching, every row's items under their row's name.
     private var sections: [ListSection] {
         let item = store.listSelection
+        let repo = store.activeRepo(store.repoFilter, item.scope)
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         if q.isEmpty && item.filter == .needsMe && shown.item == item {
             // Reading an item (a mention, a comment, a reminder) can end its reason: the selected row stays, in place, until
@@ -173,14 +190,15 @@ struct PRListView: View {
             let kept = store.selectedIDs.compactMap { store.tracked.prs[$0] }.filter { pr in
                 var unread = pr
                 unread.lastReadAt = nil
-                return shown.ids.contains(pr.id) && item.scope.matches(pr) && item.filter.matches(unread, counting: store.settings.badgeReasons)
+                return shown.ids.contains(pr.id) && item.scope.matches(pr) && RepoFilter.matches(pr.repo, repo)
+                    && item.filter.matches(unread, counting: store.settings.badgeReasons)
             }
-            let shownOrder = item.filter.sections(store.prs(item.scope, item.filter)).flatMap(\.prs)
+            let shownOrder = item.filter.sections(store.prs(item.scope, item.filter, repo: repo)).flatMap(\.prs)
             return item.filter.sections(Attention.keeping(shownOrder, kept, order: shown.ids))
         }
-        guard !q.isEmpty else { return item.filter.sections(store.prs(item.scope, item.filter)) }
+        guard !q.isEmpty else { return item.filter.sections(store.prs(item.scope, item.filter, repo: repo)) }
         let hits = store.prs.filter { pr in
-            item.scope.matches(pr) && "\(pr.repo) #\(pr.number) \(pr.title) \(pr.authorLogin)".lowercased().contains(q)
+            item.scope.matches(pr) && RepoFilter.matches(pr.repo, repo) && "\(pr.repo) #\(pr.number) \(pr.title) \(pr.authorLogin)".lowercased().contains(q)
         }
         let byRow = Dictionary(grouping: hits, by: Filter.home)
         return Filter.allCases.compactMap { row in byRow[row].map { ListSection(title: row.title, prs: $0) } }
@@ -225,10 +243,13 @@ struct PRListView: View {
         .prKeys(store: store, ids: store.selectedIDs)
         .overlay {
             if ids.isEmpty {
+                let scope = store.listSelection.scope, all = store.prs(scope, filter).count
                 if !query.isEmpty {
                     ContentUnavailableView.search(text: query)
+                } else if let repo = store.activeRepo(store.repoFilter, scope), all > 0 {
+                    RepoEmptyState(repo: repo, row: filter.title, hidden: all) { store.repoFilter = "" }
                 } else {
-                    EmptyState(store: store, filter: filter, scope: store.listSelection.scope)
+                    EmptyState(store: store, filter: filter, scope: scope)
                 }
             }
         }
@@ -323,6 +344,59 @@ struct EmptyState: View {
     }
 }
 
+/// The main window's Repository choice (toolbar and View ▸ Repository): All Repositories, then each repository of the
+/// sidebar row's accounts (every tracked item: closed, muted and hidden ones too).
+struct RepoFilterPicker: View {
+    let store: Store
+
+    var body: some View {
+        let scope = store.listSelection.scope
+        Picker("Repository", selection: Binding(get: { store.activeRepo(store.repoFilter, scope) ?? "" }, set: { store.repoFilter = $0 })) {
+            Text("All Repositories").tag("")
+            ForEach(store.repos(scope), id: \.self) { Text(verbatim: $0).tag($0) }
+        }
+        .pickerStyle(.inline)
+        .labelsHidden()
+    }
+}
+
+/// Above the window's list while a repository is chosen: what it shows and the way back, styled like the offline bar.
+struct RepoFilterBar: View {
+    let repo: String
+    let clear: () -> Void
+
+    var body: some View {
+        HStack {
+            Label { Text(verbatim: "Showing \(repo) only") } icon: { Image(systemName: "book.closed.fill") }
+                .lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
+            Spacer(minLength: 4)
+            Button("Show All", action: clear).buttonStyle(.link)
+        }
+        .font(.callout).padding(6).background(.bar)
+    }
+}
+
+/// A list empty only because of the Repository choice (FLW-14), in the window and the panel: how much the other
+/// repositories hold, and the way back.
+struct RepoEmptyState: View {
+    let repo: String
+    /// The sidebar row's or the panel filter's title.
+    let row: String
+    /// What the list holds without the choice.
+    let hidden: Int
+    let clear: () -> Void
+
+    var body: some View {
+        ContentUnavailableView {
+            Label { Text(verbatim: "Nothing in \(repo)") } icon: { Image(systemName: "book.closed") }
+        } description: {
+            Text(verbatim: "\(row) has \(hidden) \(hidden == 1 ? "item" : "items") in other repositories.")
+        } actions: {
+            Button("Show All Repositories", action: clear)
+        }
+    }
+}
+
 /// List rows of one section.
 struct PRRows: View {
     let store: Store
@@ -384,6 +458,7 @@ struct PRMenuItems: View {
             Button(store.readTitle(ids)) { store.toggleRead(ids) }
             RemindMenu(store: store, ids: ids)
             Button(muted ? "Unmute" : "Mute") { store.setMuted(ids, !muted) }
+            Button(store.repoMuteTitle(ids)) { store.toggleReposMuted(ids) }
             Button(hidden ? "Unhide" : "Hide") { store.setHidden(ids, !hidden) }
             Menu("Snooze Notifications") {
                 ForEach(Snooze.allCases, id: \.self) { option in
@@ -738,6 +813,7 @@ struct PRDetailView: View {
                 Menu {
                     RemindMenu(store: store, ids: [pr.id])
                     Button(pr.muted ? "Unmute" : "Mute") { store.setMuted([pr.id], !pr.muted) }
+                    Button(store.repoMuteTitle([pr.id])) { store.toggleReposMuted([pr.id]) }
                     Button(pr.hidden ? "Unhide" : "Hide") { store.setHidden([pr.id], !pr.hidden) }
                     Menu("Snooze Notifications") {
                         ForEach(Snooze.allCases, id: \.self) { option in Button(option.title) { store.snooze([pr.id], option) } }

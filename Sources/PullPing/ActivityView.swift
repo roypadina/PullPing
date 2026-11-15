@@ -22,10 +22,10 @@ struct ActivityView: View {
     /// New first, then by day, newest first; rows newest first. Rows carry their entry: compaction shifts `store.activity`
     /// while SwiftUI still renders old rows, so a row must never look its entry up by index (crash in 0.7.0 dev builds).
     private var days: [(title: String, rows: [(index: Int, entry: ActivityEntry)])] {
-        let scope = store.listSelection.scope
+        let scope = store.listSelection.scope, repo = store.activeRepo(store.repoFilter, scope)
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         let rows = store.activity.enumerated().reversed().filter { _, e in
-            scope.matches(e) && matches(e) && (q.isEmpty || "\(e.repo) #\(e.number) \(e.title) \(e.actor ?? "") \(e.automation ?? "")".lowercased().contains(q))
+            scope.matches(e) && RepoFilter.matches(e.repo, repo) && matches(e) && (q.isEmpty || "\(e.repo) #\(e.number) \(e.title) \(e.actor ?? "") \(e.automation ?? "")".lowercased().contains(q))
         }.map { (index: $0.offset, entry: $0.element) }
         let seen = seenAt ?? store.activitySeenAt
         let new = rows.filter { $0.entry.at > seen }
@@ -93,6 +93,12 @@ struct ActivityView: View {
             if days.isEmpty {
                 if !query.isEmpty {
                     ContentUnavailableView.search(text: query)
+                } else if let repo = store.activeRepo(store.repoFilter, store.listSelection.scope) {  // the window's Repository choice
+                    ContentUnavailableView {
+                        Label { Text(verbatim: "No Activity in \(repo)") } icon: { Image(systemName: "book.closed") }
+                    } actions: {
+                        Button("Show All Repositories") { store.repoFilter = "" }
+                    }
                 } else if filter != .all {  // the toolbar's filter is easy to miss: say it and offer the way back
                     ContentUnavailableView {
                         Label("No \(filter.rawValue) Activity", systemImage: "line.3.horizontal.decrease.circle")

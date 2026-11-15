@@ -37,4 +37,37 @@ final class IssueWatchTests: XCTestCase {
         XCTAssertEqual(IssueWatch.since("dana/app", patterns: patterns, since: since, now: t0), t0, "a pattern not polled yet: now")
         XCTAssertNil(IssueWatch.since("alice/app", patterns: patterns, since: since, now: t0))
     }
+
+    // MARK: Excluded Repositories
+
+    func testParseWithoutWildcards() {
+        let parsed = IssueWatch.parse("octo-org/*, Octo-Org/Legacy foo", wildcards: false)
+        XCTAssertEqual(parsed.patterns, ["octo-org/legacy"])
+        XCTAssertEqual(parsed.rejected, ["octo-org/*", "foo"])
+        let capped = IssueWatch.parse((1...21).map { "octo-org/repo\($0)" }.joined(separator: " "), wildcards: false)
+        XCTAssertEqual(capped.patterns.count, IssueWatch.maxRepos)
+        XCTAssertEqual(capped.rejected, ["octo-org/repo21"])
+    }
+
+    func testQueryWithExcluded() {
+        let base = "is:issue is:open archived:false sort:created-desc"
+        XCTAssertEqual(IssueWatch.query(owned: true, extra: ["octo-org/*"], excluded: ["octo-org/legacy", "alice/dotfiles"]),
+                       "\(base) user:@me user:octo-org -repo:octo-org/legacy -repo:alice/dotfiles")
+        XCTAssertEqual(IssueWatch.query(owned: false, extra: ["octo-org/widgets", "Octo-Org/Legacy"], excluded: ["octo-org/legacy"]),
+                       "\(base) repo:octo-org/widgets -repo:octo-org/legacy", "an entry in both lists: no repo: for it")
+        // repo:X -repo:X cancels the scope and searches all of GitHub: never sent.
+        XCTAssertNil(IssueWatch.query(owned: false, extra: ["octo-org/legacy"], excluded: ["octo-org/legacy"]))
+        XCTAssertNil(IssueWatch.query(owned: false, extra: [], excluded: ["octo-org/legacy"]), "negatives alone: no search")
+        XCTAssertEqual(IssueWatch.query(owned: true, extra: [], excluded: []), IssueWatch.query(owned: true, extra: []))
+        XCTAssertEqual(IssueWatch.query(owned: true, extra: ["octo-org/widgets"], excluded: []), "\(base) user:@me repo:octo-org/widgets")
+    }
+
+    func testMatchesAndSinceSkipExcluded() {
+        let patterns = ["dana/*", "octo-org/*"], since = ["octo-org/*": t0.addingTimeInterval(-60)]
+        XCTAssertFalse(IssueWatch.matches("Octo-Org/Legacy", patterns, excluded: ["octo-org/legacy"]))
+        XCTAssertTrue(IssueWatch.matches("octo-org/widgets", patterns, excluded: ["octo-org/legacy"]))
+        XCTAssertNil(IssueWatch.since("OCTO-ORG/legacy", patterns: patterns, since: since, excluded: ["octo-org/legacy"], now: t0))
+        XCTAssertEqual(IssueWatch.since("octo-org/widgets", patterns: patterns, since: since, excluded: ["octo-org/legacy"], now: t0),
+                       t0.addingTimeInterval(-60))
+    }
 }

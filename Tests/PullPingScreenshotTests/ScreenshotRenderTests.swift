@@ -32,12 +32,13 @@ final class ScreenshotRenderTests: XCTestCase {
                      NSSize(width: Theme.panelWidth + 40, height: Theme.panelHeight + 40))
             try save("notification-issue", panel(PanelModel(pr: pr("I_1"), events: pr("I_1").events, alert: false, account: "@dana")),
                      NSSize(width: Theme.panelWidth + 40, height: Theme.panelHeight + 40))
-            try save("settings-accounts", AccountsTab(store: store), NSSize(width: 520, height: AccountsTab.height))
-            try save("settings-notifications", NotificationsTab(store: store), NSSize(width: 520, height: NotificationsTab.height))
-            try save("settings-phone", PhoneTab(store: store), NSSize(width: 520, height: PhoneTab.height))
-            try save("settings-general", GeneralTab(store: store), NSSize(width: 520, height: GeneralTab.height))
-            try save("settings-menu-bar", MenuBarTab(store: store), NSSize(width: 520, height: MenuBarTab.height))
-            try save("settings-shortcuts", ShortcutsTab(store: store), NSSize(width: 520, height: ShortcutsTab.height))
+            try save("settings-accounts", AccountsTab(store: store), NSSize(width: 580, height: AccountsTab.height))
+            try save("settings-notifications", NotificationsTab(store: store), NSSize(width: 580, height: NotificationsTab.height))
+            try save("settings-phone", PhoneTab(store: store), NSSize(width: 580, height: PhoneTab.height))
+            try save("settings-general", GeneralTab(store: store), NSSize(width: 580, height: GeneralTab.height))
+            try save("settings-repositories", RepositoriesTab(store: store), NSSize(width: 580, height: RepositoriesTab.height))
+            try save("settings-menu-bar", MenuBarTab(store: store), NSSize(width: 580, height: MenuBarTab.height))
+            try save("settings-shortcuts", ShortcutsTab(store: store), NSSize(width: 580, height: ShortcutsTab.height))
         }
     }
 
@@ -80,7 +81,7 @@ final class ScreenshotRenderTests: XCTestCase {
         }
         store.setFindSessions(false)  // reloads the store's copy
         store.mutateRepoFolders { $0.roots = ["~/Code", "~/src"] }  // also reloads the store's copy
-        try save("settings-automations", AutomationsTab(store: store), NSSize(width: 520, height: 1070))  // down to the rules, Open With and the Background Runs group
+        try save("settings-automations", AutomationsTab(store: store), NSSize(width: 580, height: 1070))  // down to the rules, Open With and the Background Runs group
         // From the top (title, events, scope) down to the agent and session rows; the bottom edge falls before Prompt.
         try render(RuleEditorSheet(store: store, rule: review), size: NSSize(width: 560, height: 960), dark: false,
                    to: URL(fileURLWithPath: dir).appendingPathComponent("rule-editor.png"))
@@ -141,12 +142,26 @@ final class ScreenshotRenderTests: XCTestCase {
     @MainActor func test_filterMenuBadges() {
         let store = Fixtures.sampleStore()
         let map = store.signals(.all)
-        let menu = FilterMenu.make(filters: Filter.allCases, map: map, current: .reviews) { _ in }
-        XCTAssertEqual(menu.items.map(\.title), Filter.allCases.map(\.title))
+        let menu = FilterMenu.make(filters: Filter.allCases, map: map, current: .reviews, repos: ["octo-org/widgets"], repo: nil, select: { _ in }, selectRepo: { _ in })
+        XCTAssertEqual(menu.items.map(\.title), Filter.allCases.map(\.title), "one repository: no Repository submenu")
         XCTAssertEqual(menu.items.map { $0.badge?.itemCount ?? 0 }, Filter.allCases.map { $0.signal(map).needs })
         XCTAssertEqual(menu.items.map { $0.image?.isTemplate == false }, Filter.allCases.map { $0.signal(map).new > 0 }, "dot icons only for new")
         XCTAssertEqual(menu.items.map { $0.toolTip ?? "" }, Filter.allCases.map { $0.signal(map).spoken })
         XCTAssertEqual(menu.items.map { $0.state == .on }, Filter.allCases.map { $0 == .reviews })
+        // Two or more repositories, or one chosen: a separator, then Repository ▸ with All Repositories first.
+        var chosen = ""
+        let repos = FilterMenu.make(filters: Filter.allCases, map: map, current: .reviews, repos: store.repos(.all), repo: "octo-org/gadgets",
+                                    select: { _ in }, selectRepo: { chosen = $0 })
+        XCTAssertEqual(repos.items.suffix(2).map(\.title), ["", "Repository"])
+        let sub = repos.items.last?.submenu
+        XCTAssertEqual(sub?.items.map(\.title), ["All Repositories", "", "octo-org/docs", "octo-org/gadgets", "octo-org/widgets"])
+        XCTAssertEqual(sub?.items.filter { $0.state == .on }.map(\.title), ["octo-org/gadgets"])
+        sub?.items.first.map { _ = $0.target?.perform($0.action) }
+        XCTAssertEqual(chosen, "")
+        sub?.items.last.map { _ = $0.target?.perform($0.action) }
+        XCTAssertEqual(chosen, "octo-org/widgets")
+        XCTAssertEqual(FilterMenu.make(filters: Filter.allCases, map: map, current: .reviews, repos: [], repo: "octo-org/gadgets",
+                                       select: { _ in }, selectRepo: { _ in }).items.last?.title, "Repository", "a choice shows even alone")
     }
 
     /// Dev-only review sheets (not docs): every row's list, the whole status panel, a panel per reason, Activity.
@@ -199,7 +214,7 @@ final class ScreenshotRenderTests: XCTestCase {
             file.scenarioPrompts = [Scenario.review.rawValue: "Review it with the team checklist. Do not post anything."]
             file.automations = [rule]
         }
-        try save("settings-automations-tall", AutomationsTab(store: store), NSSize(width: 520, height: 1500))
+        try save("settings-automations-tall", AutomationsTab(store: store), NSSize(width: 580, height: 1500))
         try save("target-editor", TargetEditorSheet(store: store, target: store.automationFile.targets[0]).frame(width: 460), NSSize(width: 460, height: 260))
         try save("scenario-prompt", ScenarioPromptSheet(store: store, scenario: .changesRequested), NSSize(width: 560, height: 600))
         try save("rule-editor-target", RuleEditorSheet(store: store, rule: rule), NSSize(width: 560, height: 672), scrollToEnd: true)
@@ -289,7 +304,7 @@ final class ScreenshotRenderTests: XCTestCase {
         rule.background = .review
         rule.scope = .others
         store.mutateAutomationFile { $0.background.enabled = true; $0.automations = [rule] }
-        try save("settings-automations-background", AutomationsTab(store: store), NSSize(width: 520, height: 1800))
+        try save("settings-automations-background", AutomationsTab(store: store), NSSize(width: 580, height: 1800))
         try save("rule-editor-background", RuleEditorSheet(store: store, rule: rule), NSSize(width: 560, height: 672), scrollToEnd: true)
         rule.agent = .codex
         try save("rule-editor-background-codex", RuleEditorSheet(store: store, rule: rule), NSSize(width: 560, height: 672), scrollToEnd: true)
@@ -352,7 +367,7 @@ final class ScreenshotRenderTests: XCTestCase {
             }
             try save("indicators-panel", StatusPanelView(store: panel), NSSize(width: 380, height: 520), scrollToEnd: true)
             store.settings.badgeMode = .allUnread
-            try save("indicators-menu-bar", MenuBarTab(store: store), NSSize(width: 520, height: 420))
+            try save("indicators-menu-bar", MenuBarTab(store: store), NSSize(width: 580, height: 420))
             let bar = HStack(spacing: 24) {
                 ForEach([false, true], id: \.self) { dot in
                     HStack(spacing: 9) {
@@ -420,6 +435,26 @@ final class ScreenshotRenderTests: XCTestCase {
                 ForEach(4..<7, id: \.self) { list($0) }
                 ActivityView(store: store, query: .constant(""), selection: .constant(nil)).frame(width: 400).border(Color.secondary.opacity(0.4))
             }.padding(12), NSSize(width: 4 * 412 + 12, height: 760))
+            // Repository choice: lists of one repository (Needs Me, an empty My Pull Requests, Activity), the panel's line and empty
+            // state, and the whole window at its minimum width (the bar in the split view).
+            let repoStore = Fixtures.sampleStore(), repoEmpty = Fixtures.sampleStore()
+            (repoStore.repoFilter, repoStore.panelRepoFilter) = ("octo-org/widgets", "octo-org/widgets")
+            (repoEmpty.repoFilter, repoEmpty.panelRepoFilter) = ("octo-org/docs", "octo-org/docs")
+            repoEmpty.selection = SidebarItem(scope: .all, filter: .myPRs)
+            repoStore.activityLog.flush()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+            try save("list-repo", HStack(spacing: 12) {
+                PRListView(store: repoStore, query: .constant("")).frame(width: 400).border(Color.secondary.opacity(0.4))
+                PRListView(store: repoEmpty, query: .constant("")).frame(width: 400).border(Color.secondary.opacity(0.4))
+                ActivityView(store: repoStore, query: .constant(""), selection: .constant(nil)).frame(width: 400).border(Color.secondary.opacity(0.4))
+            }.padding(12), NSSize(width: 3 * 412 + 12, height: 760))
+            for (name, s, filter) in [("status-panel-repo", repoStore, Filter.needsMe), ("status-panel-repo-empty", repoEmpty, .myPRs)] {
+                defaults.register(defaults: [DefaultsKey.panelFilter: filter.rawValue, DefaultsKey.panelAccount: ""])
+                try save(name, StatusPanelView(store: s).defaultAppStorage(defaults), NSSize(width: 380, height: 520))
+            }
+            repoStore.selection = nil
+            try save("main-repo", MainView(store: repoStore), NSSize(width: 1180, height: 720))
+            try save("main-repo-min", MainView(store: repoStore), NSSize(width: 900, height: 520))
             // Detail pane: my pull request (CI failed), a review request with a linked session and a draft, an issue.
             let detailStore = Fixtures.sampleStore()
             detailStore.mutateAutomationFile { $0.handler.enabled = true; $0.background.enabled = true }
@@ -455,9 +490,9 @@ final class ScreenshotRenderTests: XCTestCase {
             let keysOff = Fixtures.sampleStore()
             keysOff.settings.singleKeyShortcuts = false
             try save("settings-shortcuts", HStack(alignment: .top, spacing: 12) {
-                ShortcutsTab(store: triage).frame(width: 520, height: ShortcutsTab.height).border(Color.secondary.opacity(0.4))
-                ShortcutsTab(store: keysOff).frame(width: 520, height: ShortcutsTab.height).border(Color.secondary.opacity(0.4))
-            }.padding(12), NSSize(width: 2 * 532 + 12, height: ShortcutsTab.height + 24))
+                ShortcutsTab(store: triage).frame(width: 580, height: ShortcutsTab.height).border(Color.secondary.opacity(0.4))
+                ShortcutsTab(store: keysOff).frame(width: 580, height: ShortcutsTab.height).border(Color.secondary.opacity(0.4))
+            }.padding(12), NSSize(width: 2 * 592 + 12, height: ShortcutsTab.height + 24))
             // Notification panels: every reason, the agent buttons, notes (What's New, draft ready), the overflow summary.
             let pr = { store.tracked.prs[$0]! }
             let chevron = PanelAction(id: Automation.handlerMenuActionID, title: "More agent options", run: {}) { NSMenu() }
@@ -491,12 +526,20 @@ final class ScreenshotRenderTests: XCTestCase {
             let settings = Fixtures.sampleStore()
             settings.statuses[Fixtures.work.id] = .badToken
             try save("settings-tabs", HStack(alignment: .top, spacing: 12) {
-                AccountsTab(store: settings).frame(width: 520, height: AccountsTab.height).border(Color.secondary.opacity(0.4))
-                NotificationsTab(store: settings).frame(width: 520, height: NotificationsTab.height).border(Color.secondary.opacity(0.4))
-                PhoneTab(store: settings).frame(width: 520, height: PhoneTab.height).border(Color.secondary.opacity(0.4))
-            }.padding(12), NSSize(width: 3 * 532 + 12, height: NotificationsTab.height + 24))
-            try save("settings-general", GeneralTab(store: settings), NSSize(width: 520, height: GeneralTab.height))
-            try save("settings-menu-bar", MenuBarTab(store: settings), NSSize(width: 520, height: MenuBarTab.height))
+                AccountsTab(store: settings).frame(width: 580, height: AccountsTab.height).border(Color.secondary.opacity(0.4))
+                NotificationsTab(store: settings).frame(width: 580, height: NotificationsTab.height).border(Color.secondary.opacity(0.4))
+                PhoneTab(store: settings).frame(width: 580, height: PhoneTab.height).border(Color.secondary.opacity(0.4))
+            }.padding(12), NSSize(width: 3 * 592 + 12, height: NotificationsTab.height + 24))
+            try save("settings-general", GeneralTab(store: settings), NSSize(width: 580, height: GeneralTab.height))
+            try save("settings-menu-bar", MenuBarTab(store: settings), NSSize(width: 580, height: MenuBarTab.height))
+            // Repositories: the fixtures' muted repository and exclusion; five muted ones with rejected entries (the room it plans for).
+            let manyMuted = Fixtures.sampleStore()
+            manyMuted.setTracked { $0.mutedRepos = ["octo-org/gadgets", "octo-org/legacy", "octo-org/docs", "alice/dotfiles", "octo-org/widgets"] }
+            try save("settings-repositories", HStack(alignment: .top, spacing: 12) {
+                RepositoriesTab(store: settings).frame(width: 580, height: RepositoriesTab.height).border(Color.secondary.opacity(0.4))
+                RepositoriesTab(store: manyMuted).frame(width: 580, height: RepositoriesTab.height).border(Color.secondary.opacity(0.4))
+            }.padding(12), NSSize(width: 2 * 592 + 12, height: RepositoriesTab.height + 24))
+            try save("settings-repositories-whole", RepositoriesTab(store: manyMuted), NSSize(width: 580, height: 1200))
             var rule = Automation(name: "Answer review feedback", kinds: [.reviewChangesRequested, .comment], workingDirectory: "{worktree_dir}")
             rule.scope = .mine
             rule.sessionID = Automation.linkedSession
@@ -508,8 +551,8 @@ final class ScreenshotRenderTests: XCTestCase {
                 file.automations = [rule]
             }
             settings.mutateRepoFolders { $0.roots = ["~/Code", "~/src"]; $0.overrides = ["octo-org/widgets": "~/work/widgets"] }
-            try save("settings-automations-window", AutomationsTab(store: settings), NSSize(width: 520, height: AutomationsTab.height))
-            try save("settings-automations-whole", AutomationsTab(store: settings), NSSize(width: 520, height: 3000))
+            try save("settings-automations-window", AutomationsTab(store: settings), NSSize(width: 580, height: AutomationsTab.height))
+            try save("settings-automations-whole", AutomationsTab(store: settings), NSSize(width: 580, height: 3000))
             try save("editor-rule", HStack(spacing: 12) {
                 RuleEditorSheet(store: settings, rule: rule).frame(width: 560, height: 640).border(Color.secondary.opacity(0.4))
                 RuleEditorSheet(store: settings, rule: settings.handler, handler: true).frame(width: 560, height: 640).border(Color.secondary.opacity(0.4))

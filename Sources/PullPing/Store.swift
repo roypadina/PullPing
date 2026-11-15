@@ -240,6 +240,11 @@ final class Store {
     }
     /// The Remind Me sheet's items (Custom…, R, ⌃⌘R); nil = no sheet.
     var remindIDs: Set<String>?
+    /// The lists' Repository choice (`owner/name`, "" = All Repositories): the main window's and the menu-bar panel's, apart
+    /// like their account and filter. A view option only: counts, dots and notifications never follow it. Memory only, so
+    /// an update or a relaunch never comes back hiding rows.
+    var repoFilter = ""
+    var panelRepoFilter = ""
     /// Activity entries after this are new: the sidebar dot and the feed's New section. Set when the feed is left.
     var activitySeenAt: Date { didSet { if persist { UserDefaults.standard.set(activitySeenAt, forKey: DefaultsKey.activitySeenAt) } } }
     /// Phone notification secrets: keychain only. The demo store never reads or writes the keychain.
@@ -317,9 +322,16 @@ final class Store {
     var breakdown: String { Attention.breakdown(prs, counting: settings.badgeReasons) }
     var isPaused: Bool { settings.isPaused(now) }
 
-    func prs(_ scope: Scope, _ filter: Filter) -> [TrackedPR] {
-        prs.filter { scope.matches($0) && filter.matches($0, counting: settings.badgeReasons) }
+    /// `repo`: only that repository (`activeRepo`); nil = all.
+    func prs(_ scope: Scope, _ filter: Filter, repo: String? = nil) -> [TrackedPR] {
+        prs.filter { scope.matches($0) && filter.matches($0, counting: settings.badgeReasons) && RepoFilter.matches($0.repo, repo) }
     }
+
+    /// The Repository choices: the repositories of every tracked item in the scope (closed, muted and hidden ones too).
+    func repos(_ scope: Scope) -> [String] { RepoFilter.repos(prs.lazy.filter { scope.matches($0) }) }
+
+    /// A stored Repository choice in the scope's spelling; nil (All Repositories) when the scope has no such repository.
+    func activeRepo(_ stored: String, _ scope: Scope) -> String? { stored.isEmpty ? nil : RepoFilter.active(stored, in: repos(scope)) }
 
     /// The scope's indicators by bucket (enabled accounts only): read rows with `Filter.signal`, a whole scope (account
     /// segment, header) with `values.reduce(Signal(), +)`. In the app the number always means "need you", whatever the
@@ -693,8 +705,48 @@ final class Store {
     func markAllRead() { markRead(Set(tracked.prs.keys)) }
 
     func setMuted(_ ids: Set<String>, _ muted: Bool) {
-        mutate { for id in ids { $0.prs[id]?.muted = muted } }
+        mutate { state in
+            for id in ids {
+                state.prs[id]?.muted = muted
+                if !muted { state.prs[id]?.mutedByRepo = false }  // unmuted by hand: no longer the repository's mute
+            }
+        }
         if muted { ids.forEach { NotificationPanels.shared.dismiss(prID: $0) } }
+    }
+
+    /// The selection's repositories, sorted (Mute Repository).
+    func repos(of ids: Set<String>) -> [String] { RepoFilter.repos(ids.compactMap { tracked.prs[$0] }) }
+
+    /// Every repository of the selection is muted; false for none.
+    func reposMuted(_ ids: Set<String>) -> Bool {
+        let repos = repos(of: ids)
+        return !repos.isEmpty && repos.allSatisfy { RepoMute.isMuted($0, tracked.mutedRepos) }
+    }
+
+    func repoMuteTitle(_ ids: Set<String>) -> String { RepoMute.title(repos: repos(of: ids), muted: reposMuted(ids)) }
+
+    /// Mute the selection's repositories while any is not muted, else unmute them (the title `repoMuteTitle` shows).
+    func toggleReposMuted(_ ids: Set<String>) { setReposMuted(Set(repos(of: ids)), !reposMuted(ids)) }
+
+    /// Mute Repository / Unmute Repository (`RepoMute`), in one change, so a poll running meanwhile can't undo half of it.
+    /// Edit > Undo puts back exactly the items it changed (UND-1); muting skips repositories already muted, so its Undo
+    /// never unmutes an earlier mute.
+    func setReposMuted(_ repos: Set<String>, _ muted: Bool, only: Set<String>? = nil) {
+        let repos = muted ? repos.filter { !RepoMute.isMuted($0, tracked.mutedRepos) } : repos
+        guard !repos.isEmpty else { return }
+        var changed: Set<String> = []
+        mutate { changed = muted ? RepoMute.mute(repos, in: &$0, only: only) : RepoMute.unmute(repos, in: &$0) }
+        if muted { changed.forEach { NotificationPanels.shared.dismiss(prID: $0) } }
+        undoManager.registerUndo(withTarget: self) { store in
+            MainActor.assumeIsolated { store.setReposMuted(repos, !muted, only: muted ? nil : changed) }
+        }
+        undoManager.setActionName(muted ? "Mute Repository" : "Unmute Repository")
+    }
+
+    /// Settings > Repositories: the muted repositories, sorted, each in a tracked item's casing when one exists.
+    var mutedRepos: [String] {
+        let known = RepoFilter.repos(tracked.prs.values)
+        return (tracked.mutedRepos ?? []).map { RepoFilter.active($0, in: known) ?? $0 }.sorted { $0.lowercased() < $1.lowercased() }
     }
 
     func snooze(_ ids: Set<String>, _ option: Snooze) {
@@ -717,6 +769,8 @@ final class Store {
     /// Main-window selection from outside (⌘↩, links): switches the sidebar when the pull request isn't in the current list.
     func reveal(_ id: String) {
         selectedID = id
+        // The Repository choice must not hide it either; compared as stored: the sidebar may switch to a scope that has it.
+        if let pr = tracked.prs[id], !RepoFilter.matches(pr.repo, repoFilter.isEmpty ? nil : repoFilter) { repoFilter = "" }
         guard let pr = tracked.prs[id],
               listSelection.activity || !(listSelection.scope.matches(pr) && listSelection.filter.matches(pr, counting: settings.badgeReasons)) else { return }
         selection = SidebarItem(scope: settings.inboxLayout == .unified ? .all : .account(pr.accountID), filter: Filter.home(pr))

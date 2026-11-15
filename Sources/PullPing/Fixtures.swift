@@ -8,9 +8,12 @@ enum Fixtures {
     static let work = Account(id: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!, login: "dana-work", label: "Work")
 
     static func sampleStore(now: Date = Date()) -> Store {
-        let store = Store(state: StateStore(url: nil), accounts: [personal, work], settings: AppSettings(), persist: false)
+        var settings = AppSettings()
+        settings.excludedIssueRepos = ["octo-org/legacy"]
+        let store = Store(state: StateStore(url: nil), accounts: [personal, work], settings: settings, persist: false)
         store.setTracked { state in
             for pr in samplePRs(now: now) { state.prs[pr.id] = pr }
+            state.mutedRepos = ["octo-org/gadgets"]  // for Settings → Repositories; only PR_6 keeps it, so the lists stay full
             state.lastPollAt = [personal.id: now.addingTimeInterval(-120), work.id: now.addingTimeInterval(-120)]
             state.baselinedAccounts = [personal.id, work.id]
         }
@@ -117,6 +120,7 @@ enum Fixtures {
             },
             pr("PR_6", work, "octo-org/gadgets", 49, "Cache parsed manifests between runs", author: "alice", roles: [.commenter]) {
                 $0.muted = true
+                $0.mutedByRepo = true
                 $0.ci = .success
                 $0.events = [event("E9", "PR_6", .comment, "alice", 700, "Rebased on main.")]
             },

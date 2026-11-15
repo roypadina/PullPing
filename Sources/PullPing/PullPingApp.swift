@@ -92,6 +92,7 @@ struct AppCommands: Commands {
         SidebarCommands()
         CommandGroup(before: .sidebar) {
             Button("Refresh Now") { store.refresh() }.keyboardShortcut("r")
+            Menu("Repository") { RepoFilterPicker(store: store) }  // the window toolbar's (MNU-2)
             Divider()
         }
         CommandGroup(before: .windowArrangement) {
@@ -123,6 +124,7 @@ struct AppCommands: Commands {
             .disabled(ids.isEmpty)
             Button(muted ? "Unmute" : "Mute") { store.setMuted(ids, !muted) }
                 .keyboardShortcut("m", modifiers: [.command, .control]).disabled(ids.isEmpty)
+            Button(store.repoMuteTitle(ids)) { store.toggleReposMuted(ids) }.disabled(ids.isEmpty)
             Button(hidden ? "Unhide" : "Hide") { store.setHidden(ids, !hidden) }
                 .keyboardShortcut("h", modifiers: [.command, .control]).disabled(ids.isEmpty)
             Button("Stop Tracking") {
