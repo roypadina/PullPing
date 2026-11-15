@@ -49,6 +49,8 @@ public actor Poller {
     private var failures: [UUID: Int] = [:]
     private var notBefore: [UUID: Date] = [:]
     private var lastManual: Date?
+    /// Every account's login, lowercased (`pollAll`): an issue opened from another of my accounts is not a New issue.
+    private var ownLogins: Set<String> = []
     private var paused = false
     private var loop: Task<Void, Never>?
     private let monitor = NWPathMonitor()
@@ -112,6 +114,7 @@ public actor Poller {
         }
         if reason == .timer && isOffline { return report }
         let due = accounts.filter { $0.enabled && (reason != .timer || (notBefore[$0.id] ?? .distantPast) <= start) }
+        ownLogins = Set(accounts.map { $0.login.lowercased() })
         await withTaskGroup(of: (UUID, AccountResult?).self) { group in
             for account in due { group.addTask { (account.id, await self.poll(account: account)) } }
             for await (id, result) in group {
@@ -265,7 +268,7 @@ public actor Poller {
                                                      inRequestedSearch: stamp?.inRequested ?? false, inReviewedSearch: stamp?.inReviewed ?? false,
                                                      watchedSince: snapshot.isIssue ? IssueWatch.since(snapshot.repo, patterns: watchPatterns, since: watchSince, now: t)
                                                         .map { max($0, lastPoll) } : nil,
-                                                     now: t)
+                                                     ownLogins: ownLogins, now: t)
                     state.prs[snapshot.id] = pr
                     events += new
                 }

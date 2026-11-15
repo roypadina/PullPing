@@ -6,8 +6,10 @@ public enum EventEngine {
     static let eventCap = 50
 
     /// `watchedSince`: when watching the issue's repository began (`IssueWatch.since`), or the last poll if later; nil = not watched.
+    /// `ownLogins`: every PullPing account's login, lowercased: an issue I opened from another account is not new to me.
     public static func diff(old: TrackedPR?, snapshot s: PRSnapshot, me: String, accountID: UUID,
-                            inRequestedSearch: Bool, inReviewedSearch: Bool, watchedSince: Date? = nil, now: Date) -> (pr: TrackedPR, events: [PREvent]) {
+                            inRequestedSearch: Bool, inReviewedSearch: Bool, watchedSince: Date? = nil, ownLogins: Set<String> = [],
+                            now: Date) -> (pr: TrackedPR, events: [PREvent]) {
         let isNew = old == nil
         let meLower = me.lowercased()
         func mine(_ login: String?) -> Bool { login?.lowercased() == meLower }
@@ -25,7 +27,8 @@ public enum EventEngine {
         }
 
         // A new issue in a repository I watch, opened by someone else after watching began (`IssueWatch.since`).
-        if isNew, s.isIssue, let since = watchedSince, !mine(s.authorLogin), let created = s.createdAt, created >= since {
+        if isNew, s.isIssue, let since = watchedSince, !mine(s.authorLogin), !ownLogins.contains(s.authorLogin.lowercased()),
+           let created = s.createdAt, created >= since {
             add("opened:\(s.id)", .issueOpened, s.authorLogin, created, firstLine(s.body), s.url, silent: false)
         }
 

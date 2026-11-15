@@ -226,6 +226,9 @@ final class EventEngineTests: XCTestCase {
         XCTAssertEqual(opened(issue(created: since)).count, 1, "at the moment watching began")
         XCTAssertTrue(opened(issue(created: since.addingTimeInterval(-1))).isEmpty, "already open when watching began")
         XCTAssertTrue(opened(issue(author: "Dana")).isEmpty, "mine")
+        XCTAssertTrue(EventEngine.diff(old: nil, snapshot: issue(author: "Dana-Work"), me: me, accountID: account, inRequestedSearch: false,
+                                       inReviewedSearch: false, watchedSince: since, ownLogins: ["dana-work"], now: t0)
+                        .events.filter { $0.kind == .issueOpened }.isEmpty, "opened from my other account")
         XCTAssertTrue(opened(issue(), old: pr).isEmpty, "not new")
         XCTAssertTrue(opened(issue(), watchedSince: nil).isEmpty, "not watched")
         XCTAssertTrue(opened(issue(created: nil)).isEmpty, "no creation date")
