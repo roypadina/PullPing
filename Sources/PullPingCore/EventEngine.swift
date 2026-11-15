@@ -5,8 +5,11 @@ public enum EventEngine {
     static let seenCap = 300
     static let eventCap = 50
 
+    /// `watchedSince`: when watching the issue's repository began (`IssueWatch.since`), or the last poll if later; nil = not watched.
+    /// `ownLogins`: every PullPing account's login, lowercased: an issue I opened from another account is not new to me.
     public static func diff(old: TrackedPR?, snapshot s: PRSnapshot, me: String, accountID: UUID,
-                            inRequestedSearch: Bool, inReviewedSearch: Bool, now: Date) -> (pr: TrackedPR, events: [PREvent]) {
+                            inRequestedSearch: Bool, inReviewedSearch: Bool, watchedSince: Date? = nil, ownLogins: Set<String> = [],
+                            now: Date) -> (pr: TrackedPR, events: [PREvent]) {
         let isNew = old == nil
         let meLower = me.lowercased()
         func mine(_ login: String?) -> Bool { login?.lowercased() == meLower }
@@ -21,6 +24,12 @@ public enum EventEngine {
             if silent && isNew { event.seeded = true }
             events.append(event)
             if kind == .mentioned && !mine(actor) { pr.roles.insert(.mentioned) }
+        }
+
+        // A new issue in a repository I watch, opened by someone else after watching began (`IssueWatch.since`).
+        if isNew, s.isIssue, let since = watchedSince, !mine(s.authorLogin), !ownLogins.contains(s.authorLogin.lowercased()),
+           let created = s.createdAt, created >= since {
+            add("opened:\(s.id)", .issueOpened, s.authorLogin, created, firstLine(s.body), s.url, silent: false)
         }
 
         // Timeline. A new PR's seeded history is silent, except recent mentions of me by others.
@@ -73,6 +82,11 @@ public enum EventEngine {
                 add("ci:\(s.headOID):\(s.ci.rawValue)", s.ci == .success ? .ciPassed : .ciFailed, "CI", now,
                     failed.map(\.name).joined(separator: ", "), failed.first?.url ?? s.url, silent: false)
             }
+            // Once per head (the id dedupes); not for a pull request already conflicted when it was last refreshed. Actor "CI" =
+            // no person, as for CI events.
+            if s.mergeState == "DIRTY" && (old.mergeState != "DIRTY" || headChanged) {
+                add("conflict:\(s.headOID)", .conflicts, "CI", now, "conflicts with the base branch", s.url, silent: false)
+            }
         }
         let wasRequested = old?.reviewers.contains { $0.requested && mine($0.login) } ?? false
         let isRequested = s.reviewers.contains { $0.requested && mine($0.login) }
@@ -118,8 +132,18 @@ public enum EventEngine {
         pr.reviewers = s.reviewers
         pr.requestedTeams = s.requestedTeams
         pr.assignees = s.assignees
+        pr.myReview = s.myReview
+        pr.autoMerge = s.autoMerge
         pr.updatedAt = s.updatedAt
         pr.closedAt = s.closedAt
+        // Ready to merge with no event of its own: mergeStateStatus was still UNKNOWN when CI passed or the approval came (GitHub
+        // computes it lazily), or a blocking review went away. Not when this refresh's CI or approval event already says it.
+        if let old, Attention.bucket(old) != .merge, Attention.bucket(pr) == .merge,
+           !events.contains(where: { [.ciPassed, .reviewApproved].contains($0.kind) && !$0.isOwn }) {
+            // Once per head, by design: GitHub's merge state flickers through UNKNOWN on the same commit, and a second panel
+            // each time would be noise. Mergeable again after a block on the same commit stays in the list, without a panel.
+            add("ready:\(s.headOID)", .readyToMerge, "CI", now, "", s.url, silent: false)
+        }
         pr.lastSeenAt = ([pr.lastSeenAt, s.updatedAt] + nodes.map(\.at)).max()!
         pr.seenEventIDs = Array(pr.seenEventIDs.suffix(seenCap))
         pr.events = Array((pr.events + events).suffix(eventCap))

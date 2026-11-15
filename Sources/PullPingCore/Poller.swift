@@ -7,7 +7,7 @@ public enum PollReason: Sendable { case timer, manual, wake, networkBack, accoun
 /// Counts for logs and smoke mode.
 public struct PollStats: Sendable, Equatable {
     public var login = ""
-    public var involved = 0, requested = 0, reviewed = 0, issues = 0, pages = 0, discoverCost = 0
+    public var involved = 0, requested = 0, reviewed = 0, issues = 0, watched = 0, pages = 0, discoverCost = 0
     public var tracked = 0, changed = 0, new = 0, dropped = 0
     public var batches = 0, refreshed = 0, refreshCost = 0
     public var rateLimit: RateLimit?
@@ -33,6 +33,8 @@ public struct PollReport: Sendable {
 public actor Poller {
     static let log = Logger(subsystem: "com.padina.pullping", category: "poller")
     static let minRemaining = 300
+    /// New watched issues refreshed per poll (newest first); the rest follow on the next polls.
+    static let maxFreshWatched = 100
     static let maxBackoff: TimeInterval = 30 * 60
     static let manualGap: TimeInterval = 10
 
@@ -47,6 +49,8 @@ public actor Poller {
     private var failures: [UUID: Int] = [:]
     private var notBefore: [UUID: Date] = [:]
     private var lastManual: Date?
+    /// Every account's login, lowercased (`pollAll`): an issue opened from another of my accounts is not a New issue.
+    private var ownLogins: Set<String> = []
     private var paused = false
     private var loop: Task<Void, Never>?
     private let monitor = NWPathMonitor()
@@ -110,6 +114,7 @@ public actor Poller {
         }
         if reason == .timer && isOffline { return report }
         let due = accounts.filter { $0.enabled && (reason != .timer || (notBefore[$0.id] ?? .distantPast) <= start) }
+        ownLogins = Set(accounts.map { $0.login.lowercased() })
         await withTaskGroup(of: (UUID, AccountResult?).self) { group in
             for account in due { group.addTask { (account.id, await self.poll(account: account)) } }
             for await (id, result) in group {
@@ -183,13 +188,24 @@ public actor Poller {
         var stats = PollStats()
         let client = GitHubClient(transport: transport, token: token)
         do {
-            // 1. Discover open PRs (and open issues unless tracking them is off).
-            let trackIssues = settings().trackIssues
-            let found = try await client.discover(issues: trackIssues)
+            // 1. Discover open PRs (and open issues, mine and in repositories I watch, unless tracking them is off).
+            let s = settings(), trackIssues = s.trackIssues
+            let found = try await client.discover(issues: trackIssues, watched: trackIssues
+                ? IssueWatch.query(owned: s.watchOwnedIssues, extra: s.watchedIssueRepos, excluded: s.excludedIssueRepos) : nil)
+            let patterns = trackIssues ? IssueWatch.patterns(login: found.login, owned: s.watchOwnedIssues, extra: s.watchedIssueRepos) : []
             stats.login = found.login
-            (stats.involved, stats.requested, stats.reviewed, stats.issues, stats.pages) = (found.involved, found.requested, found.reviewed, found.issues, found.pages)
+            (stats.involved, stats.requested, stats.reviewed, stats.issues, stats.watched, stats.pages)
+                = (found.involved, found.requested, found.reviewed, found.issues, found.watched, found.pages)
             stats.discoverCost = client.cost
             let before = store.state
+            let since = before.watchedSince?[account.id] ?? [:]
+            // Every account's patterns decide what is watched: an issue two accounts see is one entry, refreshed by either.
+            let others = trackIssues ? (before.watchedSince ?? [:]).filter { $0.key != account.id }.map(\.value) : []
+            let watchPatterns = patterns + others.flatMap(\.keys).filter { !patterns.contains($0) }
+            let watchSince = others.reduce(since) { $0.merging($1) { min($0, $1) } }
+            // Only issues opened since this account's last poll notify, so one that comes back (Reset Ignored, pruned then
+            // reopened, past `maxFreshWatched`) is not new again. 5 min of slack for search-index lag and clock skew.
+            let lastPoll = before.lastPollAt[account.id].map { $0.addingTimeInterval(-300) } ?? .distantPast
             var stamps = found.stamps.filter { !before.ignoredIDs.contains($0.key) }
 
             // 2. Stamps for tracked PRs the searches missed (closed ones in retention, search lag).
@@ -200,14 +216,23 @@ public actor Poller {
             stats.dropped = dropped.count
 
             // 3. Changed = new, updated, state changed, or CI still pending (CI completion does not bump updatedAt),
-            // or the requested search disagrees with the team-request role (the search index lags the PR).
+            // or the requested search disagrees with the team-request role (the search index lags the PR),
+            // or my PR's merge state is still UNKNOWN (computed lazily after a push; resolving it doesn't bump updatedAt either),
+            // or an open PR last refreshed before 0.7.0 (no `autoMerge`): refreshed once to fill `myReview` / `autoMerge`.
             // shortcut: a PR seen by two accounts is one entry, owned by whichever account refreshed it last.
             let changed = stamps.values.filter { stamp in
                 guard let old = before.prs[stamp.id] else { return true }
                 return old.updatedAt != stamp.updatedAt || old.state != stamp.state || (old.state == .open && old.ci == .pending)
                     || (stamp.inRequested != old.roles.contains(.teamReviewRequested) && !old.roles.contains(.reviewRequested))
+                    || (old.state == .open && old.roles.contains(.author) && old.mergeState == "UNKNOWN")
+                    || (old.state == .open && !old.isIssue && old.autoMerge == nil)
             }.map(\.id).sorted()
-            let fresh = changed.filter { before.prs[$0] == nil }
+            var fresh = changed.filter { before.prs[$0] == nil }
+            // New watched issues I am not part of: the newest 100 per poll (a first sync can find 500, and one failed batch
+            // throws the whole poll away). The rest follow on the next polls, silent: they were open before this one.
+            let backlog = Set(fresh.filter { stamps[$0]?.watchedRank != nil && stamps[$0]?.inIssues == false }
+                .sorted { stamps[$0]!.watchedRank! < stamps[$1]!.watchedRank! }.dropFirst(Self.maxFreshWatched))
+            fresh.removeAll { backlog.contains($0) }
             let known = changed.filter { before.prs[$0] != nil }
             stats.changed = changed.count
             stats.new = fresh.count
@@ -238,12 +263,27 @@ public actor Poller {
             stats.baseline = store.update { state -> Bool in
                 for id in dropped { state.prs[id] = nil }
                 for snapshot in snapshots where !state.ignoredIDs.contains(snapshot.id) {
-                    let stamp = stamps[snapshot.id]
+                    let stamp = stamps[snapshot.id], isNew = state.prs[snapshot.id] == nil
                     let (pr, new) = EventEngine.diff(old: state.prs[snapshot.id], snapshot: snapshot, me: found.login, accountID: account.id,
-                                                     inRequestedSearch: stamp?.inRequested ?? false, inReviewedSearch: stamp?.inReviewed ?? false, now: t)
+                                                     inRequestedSearch: stamp?.inRequested ?? false, inReviewedSearch: stamp?.inReviewed ?? false,
+                                                     watchedSince: snapshot.isIssue ? IssueWatch.since(snapshot.repo, patterns: watchPatterns, since: watchSince,
+                                                                                                       excluded: s.excludedIssueRepos, now: t)
+                                                        .map { max($0, lastPoll) } : nil,
+                                                     ownLogins: ownLogins, now: t)
                     state.prs[snapshot.id] = pr
+                    // A muted repository's new item starts muted; its events still go out (the App logs them "not shown: muted").
+                    if isNew { RepoMute.apply(&state.prs[snapshot.id]!, muted: state.mutedRepos) }
                     events += new
                 }
+                for (id, pr) in state.prs where pr.isIssue && pr.accountID == account.id {
+                    let watched = IssueWatch.matches(pr.repo, watchPatterns, excluded: s.excludedIssueRepos)
+                    // Left the watch list and I am not part of it: it goes (not ignored, so watching again brings it back).
+                    if pr.watched && !watched && pr.state == .open && stamps[id]?.inIssues != true { state.prs[id] = nil; continue }
+                    state.prs[id]?.watched = watched
+                }
+                var all = state.watchedSince ?? [:]
+                all[account.id] = trackIssues ? Dictionary(patterns.map { ($0, since[$0] ?? t) }, uniquingKeysWith: { a, _ in a }) : nil
+                state.watchedSince = all
                 StateStore.prune(&state, retentionDays: retention, now: t)
                 state.lastPollAt[account.id] = t
                 // Issues came after accounts were baselined: an account's first poll that tracks them is silent for issues.

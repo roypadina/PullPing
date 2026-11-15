@@ -11,8 +11,16 @@ final class StatusItem: NSObject, NSPopoverDelegate {
     private var item: NSStatusItem?
     private let popover = NSPopover()
     private var visibility: NSKeyValueObservation?
-    /// The packaged template glyph; the SF Symbol when running unbundled (`swift run`).
-    private let glyph = NSImage(named: "menubar") ?? NSImage(systemSymbolName: "arrow.triangle.pull", accessibilityDescription: nil)
+    /// While the popover is open: a click anywhere else or Escape closes it, even when the panel isn't key or focused
+    /// (`.transient` and `onExitCommand` alone missed clicks in other apps and Escape without a focused view).
+    private var closeMonitors: [Any] = []
+    private var resignObserver: NSObjectProtocol?
+    private var activeObserver: NSObjectProtocol?
+    /// The packaged template glyph (the SF Symbol when running unbundled, `swift run`): its "ping" dot shows only while
+    /// something is new (`glyphNew`).
+    private static let base = NSImage(named: "menubar") ?? NSImage(systemSymbolName: "arrow.triangle.pull", accessibilityDescription: nil)
+    private let glyph = base.map { StatusItem.glyph($0, dot: false) }
+    private let glyphNew = base.map { StatusItem.glyph($0, dot: true) }
 
     func install(store: Store) {
         self.store = store
@@ -20,7 +28,7 @@ final class StatusItem: NSObject, NSPopoverDelegate {
         item.autosaveName = "PullPing"
         item.behavior = .removalAllowed  // ⌘-drag out hides it; the app keeps running (MBX-9)
         item.isVisible = UserDefaults.standard.object(forKey: DefaultsKey.showMenuBarIcon) as? Bool ?? true
-        visibility = item.observe(\.isVisible) { item, _ in  // keeps Settings > General > Show in the Menu Bar in sync
+        visibility = item.observe(\.isVisible) { item, _ in  // keeps Settings > Menu Bar > Show in the Menu Bar in sync
             let visible = item.isVisible
             if UserDefaults.standard.object(forKey: DefaultsKey.showMenuBarIcon) as? Bool ?? true != visible {
                 UserDefaults.standard.set(visible, forKey: DefaultsKey.showMenuBarIcon)
@@ -52,11 +60,13 @@ final class StatusItem: NSObject, NSPopoverDelegate {
         if popover.isShown { popover.performClose(nil) }
     }
 
-    /// Shape carries the state (MBX-5): warning triangle on account errors, dimmed offline, count when something needs you.
+    /// Shape carries the state (MBX-5): warning triangle on account errors, dimmed offline, count when something needs you,
+    /// dot when something is new.
     private func render() {
         guard let store, let button = item?.button else { return }
         withObservationTracking {
-            let image = store.hasError ? NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: nil) : glyph
+            let image = store.hasError ? NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: nil)
+                : store.menuBarDot && store.newCount > 0 ? glyphNew : glyph
             image?.isTemplate = true
             button.image = image
             button.title = store.badgeCount > 0 ? "\(store.badgeCount)" : ""
@@ -66,6 +76,25 @@ final class StatusItem: NSObject, NSPopoverDelegate {
         } onChange: { [weak self] in
             Task { @MainActor in self?.render() }  // fires once, before the change lands: re-read and re-subscribe
         }
+    }
+
+    /// `base` with the asset's dot spot (centre 14.8, 3.4 of 18 × 18, top-down) cleared, plus a filled 5 pt dot there when
+    /// `dot`. A shape, not a colour: the bar tints the template (MBX-5).
+    static func glyph(_ base: NSImage, dot: Bool) -> NSImage {
+        let image = NSImage(size: base.size, flipped: false) { rect in
+            base.draw(in: rect)
+            let centre = NSPoint(x: rect.width * 14.8 / 18, y: rect.height * (1 - 3.4 / 18))
+            NSGraphicsContext.current?.compositingOperation = .clear
+            NSBezierPath(ovalIn: NSRect(x: centre.x - 2.7, y: centre.y - 2.7, width: 5.4, height: 5.4)).fill()
+            if dot {
+                NSGraphicsContext.current?.compositingOperation = .sourceOver
+                NSColor.black.setFill()
+                NSBezierPath(ovalIn: NSRect(x: centre.x - 2.5, y: centre.y - 2.5, width: 5, height: 5)).fill()
+            }
+            return true
+        }
+        image.isTemplate = true
+        return image
     }
 
     @objc private func clicked(_ sender: NSStatusBarButton) {
@@ -79,25 +108,70 @@ final class StatusItem: NSObject, NSPopoverDelegate {
         let host = NSHostingController(rootView: StatusPanelView(store: store))
         host.sizingOptions = .preferredContentSize
         popover.contentViewController = host
-        NSApp.activate()  // user click only: arrows and Return need a key window
+        // User click only: arrows and Return need a key window. Not `activate()`: on macOS 14+ that is a request the front app
+        // (Ghostex, Mail…) never granted, so the first menu opened in the panel forced the activation, which closed that menu
+        // (traced, 0.7.0 dev builds).
+        NSApp.activate(ignoringOtherApps: true)
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
+        watchForClose()
+    }
+
+    private func watchForClose() {
+        guard closeMonitors.isEmpty else { return }
+        let clicks: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: clicks, handler: { [weak self] _ in
+            Task { @MainActor in self?.closePopover() }  // another app, the desktop, another menu-bar item
+        }) { closeMonitors.append(global) }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
+            guard event.keyCode == 53, let self, self.popover.isShown else { return event }  // 53 = Escape
+            self.closePopover()
+            return nil
+        }) { closeMonitors.append(local) }
+        resignObserver = NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.closePopover() }
+        }
+        // Activation lands after show(): key the panel then, or the first click only makes it key and dismisses the menu it opened.
+        activeObserver = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.makePanelKey() }
+        }
+    }
+
+    private func makePanelKey() {
+        guard popover.isShown, let window = popover.contentViewController?.view.window, !window.isKeyWindow else { return }
+        window.makeKey()
     }
 
     func popoverDidShow(_ notification: Notification) {
+        makePanelKey()
         SupportPrompt.shared.popoverShown()
     }
 
     /// A closed popover drops its SwiftUI view, so it stops re-rendering on every store change.
     func popoverDidClose(_ notification: Notification) {
         popover.contentViewController = nil
+        closeMonitors.forEach(NSEvent.removeMonitor)
+        closeMonitors = []
+        for observer in [resignObserver, activeObserver].compactMap({ $0 }) { NotificationCenter.default.removeObserver(observer) }
+        resignObserver = nil
+        activeObserver = nil
         SupportPrompt.shared.popoverClosed()
     }
 
     /// Order per MBX-11: actions, status, Settings / About, Quit last. Rebuilt per click so Pause shows its state.
     private func showMenu() {
-        guard let store, let item else { return }
+        guard let item, let menu = makeMenu() else { return }
         closePopover()
+        // shortcut: set-then-clear `menu` is the community way to open a status menu (popUpStatusItemMenu is deprecated);
+        // re-test on each macOS.
+        item.menu = menu
+        item.button?.performClick(nil)
+        item.menu = nil
+    }
+
+    /// The right-click menu, also the panel's ⋯ menu, so both match.
+    func makeMenu() -> NSMenu? {
+        guard let store else { return nil }
         let menu = NSMenu()
         if SupportPrompt.shared.showing {  // the receipt card is mouse-only; same three answers here
             menu.addItem(.sectionHeader(title: "Support PullPing"))
@@ -142,10 +216,6 @@ final class StatusItem: NSObject, NSPopoverDelegate {
         menu.addItem(preview)
         menu.addItem(.separator())
         menu.addItem(ClosureMenuItem(title: "Quit PullPing", key: "q") { NSApp.terminate(nil) })
-        // shortcut: set-then-clear `menu` is the community way to open a status menu (popUpStatusItemMenu is deprecated);
-        // re-test on each macOS.
-        item.menu = menu
-        item.button?.performClick(nil)
-        item.menu = nil
+        return menu
     }
 }

@@ -55,8 +55,21 @@ public struct ReviewSummary: Codable, Sendable, Equatable {
     public var state: String
     public var submittedAt: Date?
     public var requested: Bool
-    public init(login: String, state: String, submittedAt: Date?, requested: Bool) {
-        self.login = login; self.state = state; self.submittedAt = submittedAt; self.requested = requested
+    /// The head the review was left on; nil when only requested, or the commit is gone (force-push).
+    public var commitOID: String?
+    public init(login: String, state: String, submittedAt: Date?, requested: Bool, commitOID: String? = nil) {
+        self.login = login; self.state = state; self.submittedAt = submittedAt; self.requested = requested; self.commitOID = commitOID
+    }
+}
+
+/// My latest deciding review (APPROVED / CHANGES_REQUESTED), else my latest review (COMMENTED, DISMISSED).
+public struct MyReview: Codable, Sendable, Equatable {
+    public var state: String
+    /// nil when the reviewed commit is gone (force-push): counts as moved.
+    public var commitOID: String?
+    public var submittedAt: Date?
+    public init(state: String, commitOID: String?, submittedAt: Date?) {
+        self.state = state; self.commitOID = commitOID; self.submittedAt = submittedAt
     }
 }
 
@@ -102,8 +115,14 @@ public struct PRSnapshot: Codable, Sendable, Equatable {
     public var reviewers: [ReviewSummary] = []
     public var requestedTeams: [String] = []
     public var assignees: [String] = []
+    /// nil = never reviewed, or I am the author.
+    public var myReview: MyReview?
+    /// Auto-merge enabled or in the merge queue; nil for issues.
+    public var autoMerge: Bool?
     public var updatedAt = Date.distantPast
     public var closedAt: Date?
+    /// Issues only (`issueOpened`); nil for pull requests.
+    public var createdAt: Date?
     public var timeline: [TimelineNode] = []
 
     public init(id: String) { self.id = id }
@@ -133,6 +152,11 @@ public struct TrackedPR: Identifiable, Codable, Sendable, Equatable {
     public var reviewers: [ReviewSummary] = []
     public var requestedTeams: [String] = []
     public var assignees: [String] = []
+    /// nil = never reviewed, or I am the author (`Attention.bucket`).
+    public var myReview: MyReview?
+    /// Auto-merge enabled or in the merge queue. nil for issues, and for pull requests not refreshed since 0.7.0 (the
+    /// Poller refreshes those once).
+    public var autoMerge: Bool?
     public var roles: Set<Role> = []
     public var updatedAt = Date.distantPast
     public var closedAt: Date?
@@ -146,6 +170,14 @@ public struct TrackedPR: Identifiable, Codable, Sendable, Equatable {
     public var firstTrackedAt: Date
     /// Only under the Hidden filter, never counted; still notifies unless muted.
     @FalseIfMissing public var hidden = false
+    /// Remind Me: when the user asked to be reminded; nil = none. Cleared when it fires (`Remind.fire`).
+    public var remindAt: Date?
+    /// Mark as Unread: unread without an event by someone else. Cleared by mark-read.
+    @FalseIfMissing public var markedUnread = false
+    /// An issue in a repository I watch (`IssueWatch`). Set by the Poller every poll, so `Attention.bucket` stays settings-free.
+    @FalseIfMissing public var watched = false
+    /// Muted by its repository's mute (`RepoMute`), not one by one: Unmute Repository clears it.
+    @FalseIfMissing public var mutedByRepo = false
 
     public init(id: String, accountID: UUID, firstTrackedAt: Date) {
         self.id = id
@@ -172,7 +204,8 @@ extension KeyedDecodingContainer {
 
 public enum EventKind: String, Codable, Sendable, CaseIterable, CodingKeyRepresentable {
     case comment, mentioned, reviewApproved, reviewChangesRequested, reviewCommented, reviewRequested, assigned, newCommits,
-         ciPassed, ciFailed, readyForReview, convertedToDraft, merged, closed, reopened, reviewDismissed, retitled, labeled, reviewReminder
+         ciPassed, ciFailed, readyForReview, convertedToDraft, merged, closed, reopened, reviewDismissed, retitled, labeled, reviewReminder,
+         conflicts, readyToMerge, reminder, issueOpened
 }
 
 extension EventKind {
@@ -198,12 +231,17 @@ extension EventKind {
         case .retitled: "Title changed"
         case .labeled: "Labels changed"
         case .reviewReminder: "Reminder: review requested"
+        case .conflicts: "Conflicts"
+        case .readyToMerge: "Ready to merge"
+        case .reminder: "Reminder"
+        case .issueOpened: "New issue"
         }
     }
 }
 
 public struct PREvent: Identifiable, Codable, Sendable, Equatable {
-    /// GitHub node id, or "ci:<oid>:<state>", "head:<oid>", "rr:<login>:<date>", "assign:<login>:<date>", "reminder:<date>".
+    /// GitHub node id, or "ci:<oid>:<state>", "head:<oid>", "conflict:<oid>", "ready:<oid>", "rr:<login>:<date>", "assign:<login>:<date>", "reminder:<date>",
+    /// "remind:<date>" (Remind Me), "opened:<issue id>" (`issueOpened`).
     /// Unique per PR only: key lists that mix PRs by `prID` + `id`.
     public let id: String
     public var prID: String
@@ -231,5 +269,9 @@ public struct TrackedState: Codable, Sendable, Equatable {
     /// Accounts whose issues have had their silent first sync; nil in files from before issue tracking.
     public var baselinedIssueAccounts: Set<UUID>?
     public var lastPollAt: [UUID: Date] = [:]
+    /// Per account, watch pattern → when PullPing first polled it (`IssueWatch.since`); nil in files from before.
+    public var watchedSince: [UUID: [String: Date]]?
+    /// Muted repositories, `owner/name` lowercased (`RepoMute`); nil in files from before.
+    public var mutedRepos: Set<String>?
     public init() {}
 }

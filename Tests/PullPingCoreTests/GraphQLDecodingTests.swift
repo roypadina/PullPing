@@ -59,6 +59,9 @@ final class GraphQLDecodingTests: XCTestCase {
         XCTAssertEqual(s.reviewers.map(\.login), ["alice", "bob", "carol"])
         XCTAssertEqual(s.reviewers.map(\.state), ["APPROVED", "CHANGES_REQUESTED", ""])
         XCTAssertEqual(s.reviewers.map(\.requested), [false, false, true])
+        XCTAssertEqual(s.reviewers.map(\.commitOID), [nil, nil, nil])  // a response without the 0.7.0 fields still decodes
+        XCTAssertNil(s.myReview)
+        XCTAssertEqual(s.autoMerge, false)
         XCTAssertEqual(s.timeline.map(\.type), ["IssueComment", "PullRequestReview", "PullRequestReview", "ReadyForReviewEvent",
                                                 "ConvertToDraftEvent", "MergedEvent", "ClosedEvent", "ReopenedEvent",
                                                 "HeadRefForcePushedEvent", "ReviewDismissedEvent", "RenamedTitleEvent"])  // pending review dropped
@@ -68,6 +71,30 @@ final class GraphQLDecodingTests: XCTestCase {
         XCTAssertEqual(s.timeline[8].actor, "ghost")
         XCTAssertEqual(s.timeline[8].detail, "abc1234")
         XCTAssertEqual(s.timeline[10].detail, "Add widget cache")
+    }
+
+    func testRefreshDecodesReviewTurnFields() async throws {
+        let (client, _) = client(["Refresh": fixture("refresh-070")])
+        let s = try await client.refresh(["PR_7", "PR_8", "PR_9", "PR_10"], since: nil)
+        XCTAssertEqual(s.map(\.id), ["PR_7", "PR_8", "PR_9", "PR_10"])
+        let date = ISO8601DateFormatter().date(from:)
+
+        // My later comment-only review doesn't hide my change request on the older head; reviewers show deciding reviews first.
+        XCTAssertEqual(s[0].myReview, MyReview(state: "CHANGES_REQUESTED", commitOID: "aaa1111", submittedAt: date("2026-11-12T10:00:00Z")))
+        XCTAssertEqual(s[0].reviewers.map(\.login), ["alice", "dana", "erin", "carol"])
+        XCTAssertEqual(s[0].reviewers.map(\.state), ["CHANGES_REQUESTED", "CHANGES_REQUESTED", "COMMENTED", ""])
+        XCTAssertEqual(s[0].reviewers.map(\.commitOID), ["aaa1111", "aaa1111", nil, nil])
+        XCTAssertEqual(s[0].autoMerge, true)  // auto-merge enabled
+
+        XCTAssertNil(s[1].myReview)  // my own pull request: my comment review is ignored
+        XCTAssertEqual(s[1].autoMerge, true)  // in the merge queue
+        XCTAssertEqual(s[1].reviewers.map(\.state), ["APPROVED"])
+        XCTAssertNil(s[1].reviewers.first?.commitOID)  // reviewed commit force-pushed away
+
+        XCTAssertEqual(s[2].myReview, MyReview(state: "DISMISSED", commitOID: "bbb2222", submittedAt: date("2026-11-12T08:00:00Z")))
+        XCTAssertEqual(s[2].autoMerge, false)
+        XCTAssertEqual(s[2].mergeState, "UNKNOWN")
+        XCTAssertNil(s[3].myReview)  // a pending review is no review yet
     }
 
     func testRefreshFollowsTimelinePages() async throws {
@@ -101,6 +128,43 @@ final class GraphQLDecodingTests: XCTestCase {
         let variables = github.transport.requests.map { FakeTransport.operation($0).variables }
         XCTAssertEqual(variables.map { $0["withIssues"] as? Bool }, [true, false])
         XCTAssertEqual(variables.first?["issues"] as? String, SearchQueries.issues)
+    }
+
+    /// The watched search runs with Track Issues and a query; `inIssues` comes only from the involves search; it pages.
+    func testDiscoverWatchedSearch() async throws {
+        let github = FakeGitHub()
+        for id in ["I_1", "I_2", "I_3"] { github.prs[id] = .init(updatedAt: t0, node: "", issue: true) }
+        github.issues = ["I_1"]
+        github.watched = ["I_1", "I_2"]
+        github.watchedPage2 = ["I_3"]
+        let client = GitHubClient(transport: github.transport, token: "t")
+        let query = "is:issue is:open archived:false sort:created-desc user:@me"
+        let on = try await client.discover(issues: true, watched: query)
+        XCTAssertEqual(Set(on.stamps.keys), ["I_1", "I_2", "I_3"])
+        XCTAssertEqual([on.stamps["I_1"]?.inIssues, on.stamps["I_2"]?.inIssues, on.stamps["I_3"]?.inIssues], [true, false, false])
+        XCTAssertEqual(on.watched, 2)
+        let none = try await client.discover(issues: true)
+        XCTAssertEqual(Set(none.stamps.keys), ["I_1"])
+        XCTAssertEqual(none.watched, 0)
+        _ = try await client.discover(issues: false, watched: query)
+        let operations = github.transport.requests.map(FakeTransport.operation)
+        let discovers = operations.filter { $0.name == "Discover" }.map(\.variables)
+        XCTAssertEqual(discovers.map { $0["withWatched"] as? Bool }, [true, false, false])
+        XCTAssertEqual(discovers.map { $0["watched"] as? String }, [query, "", query])
+        XCTAssertEqual(operations.filter { $0.name == "Page" }.map { $0.variables["q"] as? String }, [query])
+    }
+
+    func testIssueCreatedAtAndDiscoverWithoutWatched() async throws {
+        let github = FakeGitHub()
+        github.prs["I_1"] = .init(updatedAt: t0, node: issueNode("I_1", number: 7, updatedAt: t0, createdAt: t0.addingTimeInterval(-60)), issue: true)
+        github.prs["I_2"] = .init(updatedAt: t0, node: issueNode("I_2", number: 8, updatedAt: t0), issue: true)
+        github.prs["PR_1"] = .init(updatedAt: t0, node: prNode("PR_1", number: 1, updatedAt: t0))
+        let snapshots = try await GitHubClient(transport: github.transport, token: "t").refresh(["I_1", "I_2", "PR_1"], since: nil)
+        XCTAssertEqual(snapshots.map(\.createdAt), [t0.addingTimeInterval(-60), nil, nil])
+        XCTAssertTrue(GraphQL.refresh.contains("issueState: state stateReason closedAt updatedAt createdAt body"))
+        let (client, _) = client(["Discover": fixture("discover"), "Page": fixture("page")])
+        let found = try await client.discover(issues: true, watched: "q")  // a response without the alias (an older fixture)
+        XCTAssertEqual(found.watched, 0)
     }
 
     func testIssueStampsAndMixedRefresh() async throws {

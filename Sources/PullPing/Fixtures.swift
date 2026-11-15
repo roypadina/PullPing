@@ -8,18 +8,22 @@ enum Fixtures {
     static let work = Account(id: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!, login: "dana-work", label: "Work")
 
     static func sampleStore(now: Date = Date()) -> Store {
-        let store = Store(state: StateStore(url: nil), accounts: [personal, work], settings: AppSettings(), persist: false)
+        var settings = AppSettings()
+        settings.excludedIssueRepos = ["octo-org/legacy"]
+        let store = Store(state: StateStore(url: nil), accounts: [personal, work], settings: settings, persist: false)
         store.setTracked { state in
             for pr in samplePRs(now: now) { state.prs[pr.id] = pr }
+            state.mutedRepos = ["octo-org/playground"]  // for Settings → Repositories; PR_6 is its only item, so the lists stay full
             state.lastPollAt = [personal.id: now.addingTimeInterval(-120), work.id: now.addingTimeInterval(-120)]
             state.baselinedAccounts = [personal.id, work.id]
         }
         store.statuses = [personal.id: .ok, work.id: .ok]
         store.record(sampleActivity(store, now: now))
+        store.activitySeenAt = now.addingTimeInterval(-20 * 60)  // the last few entries are New
         return store
     }
 
-    /// Main window › Activity: banners, alerts, phone, events not shown and why, a run, a launch, one pull request no longer tracked.
+    /// Main window › Activity: notified events, phone, activity-only and muted ones, a run, a launch, one pull request no longer tracked.
     private static func sampleActivity(_ store: Store, now: Date) -> [ActivityEntry] {
         func ago(_ minutes: Double) -> Date { now.addingTimeInterval(-minutes * 60) }
         func login(_ pr: TrackedPR) -> String { store.account(pr.accountID)?.login ?? "" }
@@ -38,11 +42,12 @@ enum Fixtures {
         gone.url = URL(string: "https://github.com/octo-org/widgets/pull/101")!
         let merged = PREvent(id: "E0", prID: gone.id, kind: .merged, actor: "alice", at: ago(1560), summary: "", url: nil, isOwn: false)
         let fixCI = Automation(name: "Fix failing CI", kinds: [.ciFailed], workingDirectory: "{worktree_dir}")
-        let entries = [ActivityEntry(event: merged, pr: gone, account: personal.login, panel: .alert, quiet: nil, phone: true, at: ago(1560)),
+        let entries = [ActivityEntry(event: merged, pr: gone, account: personal.login, panel: .notShown, quiet: .activityOnly, phone: true, at: ago(1560)),
                        shown(1500, "PR_7", "E10", .notShown, quiet: .own), shown(240, "PR_1", "E1", .notShown, quiet: .own),
-                       shown(180, "PR_5", "E8", .banner), ran(170, "PR_5", Automation.defaultHandler(), event: .comment),
+                       shown(180, "PR_5", "E8", .notShown, quiet: .activityOnly), ran(170, "PR_5", Automation.defaultHandler(), event: .comment),
                        shown(90, "PR_1", "E2", .banner), shown(40, "PR_2", "E4", .alert, phone: true),
-                       shown(30, "I_1", "E12", .notShown, quiet: .styleOff), shown(12, "PR_6", "E9", .notShown, quiet: .muted),
+                       shown(30, "I_1", "E12", .notShown, quiet: .activityOnly), shown(25, "PR_9", "E19", .alert),
+                       shown(12, "PR_6", "E9", .notShown, quiet: .muted), shown(8, "PR_15", "E25", .alert),
                        shown(5, "PR_1", "E3", .banner), shown(3, "I_1", "E13", .banner), shown(2, "PR_2", "E5", .alert, phone: true),
                        ran(1.5, "PR_2", fixCI, event: .ciFailed), shown(1, "PR_3", "E6", .alert, phone: true)]
         return entries.compactMap { $0 }
@@ -100,7 +105,7 @@ enum Fixtures {
                 $0.checks = [CheckSummary(name: "build", state: .pending, url: nil)]
                 $0.reviewers = [ReviewSummary(login: "dana-work", state: "", submittedAt: nil, requested: true)]
                 $0.requestedTeams = ["platform"]
-                $0.events = [event("E6", "PR_3", .reviewRequested, "carol", 1, "carol requested your review")]
+                $0.events = [event("E6", "PR_3", .reviewRequested, "carol", 1, "")]
             },
             pr("PR_4", personal, "octo-org/widgets", 131, "New settings layout", author: "dana", roles: [.author]) {
                 $0.isDraft = true
@@ -113,8 +118,9 @@ enum Fixtures {
                 $0.ci = .success
                 $0.events = [event("E8", "PR_5", .comment, "bob", 180, "Moved the Homebrew section up.")]
             },
-            pr("PR_6", work, "octo-org/gadgets", 49, "Cache parsed manifests between runs", author: "alice", roles: [.commenter]) {
+            pr("PR_6", work, "octo-org/playground", 49, "Cache parsed manifests between runs", author: "alice", roles: [.commenter]) {
                 $0.muted = true
+                $0.mutedByRepo = true
                 $0.ci = .success
                 $0.events = [event("E9", "PR_6", .comment, "alice", 700, "Rebased on main.")]
             },
@@ -125,11 +131,69 @@ enum Fixtures {
                 $0.ci = .success
                 $0.events = [event("E10", "PR_7", .merged, "dana", 1500, "", own: true)]
             },
-            pr("PR_8", work, "octo-org/docs", 15, "Fix typos in the FAQ", author: "erin", roles: [.reviewer]) {  // reviewed, nothing unread: Done
+            pr("PR_8", work, "octo-org/docs", 15, "Fix typos in the FAQ", author: "erin", roles: [.reviewer]) {  // reviewed, nothing unread
                 $0.reviewDecision = "APPROVED"
                 $0.ci = .success
-                $0.reviewers = [ReviewSummary(login: "dana-work", state: "APPROVED", submittedAt: ago(400), requested: false)]
+                $0.headOID = "f00d001"
+                $0.myReview = MyReview(state: "APPROVED", commitOID: "f00d001", submittedAt: ago(400))
+                $0.reviewers = [ReviewSummary(login: "dana-work", state: "APPROVED", submittedAt: ago(400), requested: false, commitOID: "f00d001")]
                 $0.events = [event("E11", "PR_8", .reviewApproved, "dana-work", 400, "", own: true)]
+            },
+            // One per remaining bucket: re-review after pushes, waiting on reviewers, on CI, on auto-merge, a team request, changes
+            // I requested, an unread mention, an issue assigned to me, a hidden one.
+            pr("PR_9", personal, "octo-org/widgets", 125, "Stream large uploads in chunks", author: "alice", roles: [.reviewer]) {
+                $0.reviewDecision = "CHANGES_REQUESTED"
+                $0.ci = .success
+                $0.headOID = "c0ffee2"
+                $0.myReview = MyReview(state: "CHANGES_REQUESTED", commitOID: "c0ffee1", submittedAt: ago(1400))
+                $0.reviewers = [ReviewSummary(login: "dana", state: "CHANGES_REQUESTED", submittedAt: ago(1400), requested: false, commitOID: "c0ffee1")]
+                $0.events = [event("E17", "PR_9", .reviewChangesRequested, "dana", 1400, "The retry loop never gives up.", own: true),
+                             event("E18", "PR_9", .newCommits, "alice", 300, "pushed c0ffee0"),
+                             event("E19", "PR_9", .newCommits, "alice", 25, "pushed c0ffee2")]
+            },
+            pr("PR_10", personal, "octo-org/widgets", 130, "Show sync progress in the menu", author: "dana", roles: [.author]) {
+                $0.reviewDecision = "REVIEW_REQUIRED"
+                $0.ci = .success
+                $0.mergeState = "BLOCKED"
+                $0.reviewers = [ReviewSummary(login: "alice", state: "", submittedAt: nil, requested: true),
+                                ReviewSummary(login: "bob", state: "", submittedAt: nil, requested: true)]
+                $0.events = [event("E20", "PR_10", .newCommits, "dana", 2800, "", own: true)]
+            },
+            pr("PR_11", work, "octo-org/gadgets", 63, "Retry flaky uploads once", author: "dana-work", roles: [.author]) {
+                $0.reviewDecision = "APPROVED"
+                $0.ci = .pending
+                $0.mergeState = "BLOCKED"
+                $0.reviewers = [ReviewSummary(login: "carol", state: "APPROVED", submittedAt: ago(120), requested: false)]
+                $0.events = [event("E21", "PR_11", .reviewApproved, "carol", 120, "")]
+                $0.lastReadAt = ago(60)
+            },
+            pr("PR_12", personal, "octo-org/widgets", 127, "Bump dependencies", author: "dana", roles: [.author]) {
+                $0.reviewDecision = "APPROVED"
+                $0.ci = .pending
+                $0.autoMerge = true
+                $0.events = [event("E22", "PR_12", .reviewApproved, "bob", 1000, "")]
+            },
+            pr("PR_13", work, "octo-org/docs", 18, "Rewrite the billing page copy", author: "erin", roles: [.teamReviewRequested]) {
+                $0.reviewDecision = "REVIEW_REQUIRED"
+                $0.ci = .success
+                $0.requestedTeams = ["docs-team"]
+                $0.events = [event("E23", "PR_13", .reviewRequested, "erin", 700, "via team docs-team")]
+            },
+            pr("PR_14", personal, "octo-org/widgets", 121, "Add search filters", author: "bob", roles: [.reviewer]) {
+                $0.reviewDecision = "CHANGES_REQUESTED"
+                $0.ci = .success
+                $0.headOID = "beef001"
+                $0.myReview = MyReview(state: "CHANGES_REQUESTED", commitOID: "beef001", submittedAt: ago(2000))
+                $0.reviewers = [ReviewSummary(login: "dana", state: "CHANGES_REQUESTED", submittedAt: ago(2000), requested: false, commitOID: "beef001")]
+                $0.events = [event("E24", "PR_14", .reviewChangesRequested, "dana", 2000, "", own: true)]
+            },
+            pr("PR_15", work, "octo-org/gadgets", 52, "Plan the 3.0 release", author: "carol", roles: [.commenter, .mentioned]) {
+                $0.ci = .success
+                $0.events = [event("E25", "PR_15", .mentioned, "carol", 8, "@dana-work can you check the migration notes?")]
+            },
+            pr("PR_16", personal, "octo-org/widgets", 110, "Experiment: new icon set", author: "erin", roles: [.commenter]) {
+                $0.hidden = true
+                $0.events = [event("E26", "PR_16", .comment, "erin", 2500, "Parking this for now.")]
             },
             // Issues: mine with an unread comment (needs me), one assigned and completed, one closed as not planned.
             pr("I_1", personal, "octo-org/widgets", 134, "Crash when the sync folder is renamed", author: "dana", roles: [.author]) {
@@ -148,6 +212,27 @@ enum Fixtures {
                 $0.closedAt = ago(240)
                 $0.events = [event("E14", "I_2", .assigned, "carol", 2000, ""),
                              event("E15", "I_2", .closed, "carol", 240, "as completed")]
+            },
+            pr("I_4", work, "octo-org/gadgets", 66, "Document the retry settings", author: "carol", roles: [.assigned]) {
+                $0.isIssue = true
+                $0.url = URL(string: "https://github.com/octo-org/gadgets/issues/66")!
+                $0.mergeState = ""
+                $0.events = [event("E27", "I_4", .assigned, "carol", 1200, "")]
+            },
+            // Issues in a watched repository: a new one to triage, one already read.
+            pr("I_5", personal, "octo-org/widgets", 140, "Crash when the list is empty", author: "dave", roles: []) {
+                $0.isIssue = true
+                $0.watched = true
+                $0.url = URL(string: "https://github.com/octo-org/widgets/issues/140")!
+                $0.mergeState = ""
+                $0.events = [event("E28", "I_5", .issueOpened, "dave", 6, "The app crashes on launch when the widget list is empty.")]
+            },
+            pr("I_6", personal, "octo-org/widgets", 128, "Support custom date formats", author: "dave", roles: []) {
+                $0.isIssue = true
+                $0.watched = true
+                $0.url = URL(string: "https://github.com/octo-org/widgets/issues/128")!
+                $0.mergeState = ""
+                $0.events = [event("E29", "I_6", .issueOpened, "dave", 2600, "Dates always use the system format.")]
             },
             pr("I_3", work, "octo-org/docs", 20, "Add a dark mode screenshot to the README", author: "erin", roles: [.commenter]) {
                 $0.isIssue = true

@@ -5,12 +5,13 @@ enum GraphQL {
     static let me = "query Me { viewer { login avatarUrl } rateLimit { cost remaining resetAt } }"
 
     static let discover = """
-    query Discover($involved: String!, $requested: String!, $reviewed: String!, $issues: String!, $withIssues: Boolean!) {
+    query Discover($involved: String!, $requested: String!, $reviewed: String!, $issues: String!, $withIssues: Boolean!, $watched: String!, $withWatched: Boolean!) {
       viewer { login }
       involved:  search(query: $involved,  type: ISSUE, first: 100) { issueCount pageInfo { hasNextPage endCursor } nodes { ... on PullRequest { id updatedAt } } }
       requested: search(query: $requested, type: ISSUE, first: 100) { issueCount pageInfo { hasNextPage endCursor } nodes { ... on PullRequest { id updatedAt } } }
       reviewed:  search(query: $reviewed,  type: ISSUE, first: 100) { issueCount pageInfo { hasNextPage endCursor } nodes { ... on PullRequest { id updatedAt } } }
       issues:    search(query: $issues,    type: ISSUE, first: 100) @include(if: $withIssues) { issueCount pageInfo { hasNextPage endCursor } nodes { ... on Issue { id updatedAt } } }
+      watched:   search(query: $watched,   type: ISSUE, first: 100) @include(if: $withWatched) { issueCount pageInfo { hasNextPage endCursor } nodes { ... on Issue { id updatedAt } } }
       rateLimit { cost remaining resetAt }
     }
     """
@@ -31,12 +32,14 @@ enum GraphQL {
         __typename
         ... on PullRequest {
           id number title url isDraft state merged mergedAt closedAt updatedAt headRefOid headRefName body
-          reviewDecision mergeStateStatus
+          reviewDecision mergeStateStatus isInMergeQueue autoMergeRequest { enabledAt }
           author { login avatarUrl }
           repository { nameWithOwner url isPrivate }
           assignees(first: 10) { nodes { login } }
           reviewRequests(first: 20) { nodes { requestedReviewer { __typename ... on User { login } ... on Team { slug name } } } }
-          latestReviews(first: 20) { nodes { author { login } state submittedAt url } }
+          latestReviews(first: 20) { nodes { author { login } state submittedAt url commit { oid } } }
+          latestOpinionatedReviews(first: 20) { nodes { author { login } state submittedAt commit { oid } } }
+          viewerLatestReview { author { login } state submittedAt commit { oid } }
           commits(last: 1) { nodes { commit { oid committedDate author { user { login } name }
             statusCheckRollup { state contexts(first: 30) { nodes { __typename
               ... on CheckRun { name conclusion status detailsUrl }
@@ -60,7 +63,7 @@ enum GraphQL {
           }
         }
         ... on Issue {
-          id number title url issueState: state stateReason closedAt updatedAt body
+          id number title url issueState: state stateReason closedAt updatedAt createdAt body
           author { login avatarUrl }
           repository { nameWithOwner url isPrivate }
           assignees(first: 10) { nodes { login } }
@@ -139,6 +142,8 @@ struct DiscoverData: Decodable {
     var reviewed: SearchResult
     /// Absent when issue tracking is off (`@include`).
     var issues: SearchResult?
+    /// Issues in repositories I watch; absent when there is nothing to watch.
+    var watched: SearchResult?
 }
 
 struct PageData: Decodable { var search: SearchResult }
@@ -152,7 +157,11 @@ struct RawPR: Decodable {
         struct Reviewer: Decodable { var login: String?; var slug: String? }
         var requestedReviewer: Reviewer?
     }
-    struct Review: Decodable { var author: Login?; var state: String; var submittedAt: Date? }
+    struct Review: Decodable {
+        struct Commit: Decodable { var oid: String }
+        var author: Login?; var state: String; var submittedAt: Date?; var commit: Commit?
+    }
+    struct AutoMergeRequest: Decodable { var enabledAt: Date? }
     struct CommitNode: Decodable { var commit: Commit }
     struct Commit: Decodable {
         struct Author: Decodable { var user: Login?; var name: String? }
@@ -217,9 +226,15 @@ struct RawPR: Decodable {
     var assignees: Nodes<Login>
     var reviewRequests: Nodes<Requested>?
     var latestReviews: Nodes<Review>?
+    /// Latest APPROVED / CHANGES_REQUESTED per reviewer: a later comment-only review doesn't replace it, a dismissed one drops out.
+    var latestOpinionatedReviews: Nodes<Review>?
+    var viewerLatestReview: Review?
+    var isInMergeQueue: Bool?
+    var autoMergeRequest: AutoMergeRequest?
     var commits: Nodes<CommitNode>?
     var timelineItems: Timeline
     // Issue only.
     var issueState: String?
     var stateReason: String?
+    var createdAt: Date?
 }

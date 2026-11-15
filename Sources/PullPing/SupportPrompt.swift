@@ -4,7 +4,7 @@ import PullPingCore
 import SwiftUI
 
 /// When the Ko-fi card shows. The moment: a pull request of yours merged or got approved, then you open the menu-bar panel
-/// for a calm look (open ≥ 2 s, no account error, no failure in the last hour, no review asked of you, nothing to fix on yours)
+/// for a calm look (open ≥ 2 s, no account error, no failure in the last hour, no review asked of you, nothing to fix on yours, no reminder due)
 /// and close it; the card follows ~10 s later if you are still settled at the desk. One try per merge or approval. The ask
 /// rules themselves are SupportPromptState (Core, unit-tested).
 @MainActor
@@ -19,9 +19,10 @@ final class SupportPrompt {
 
     private static let installDateKey = "supportInstallDate"
     private static let updatesKey = "supportUpdatesPinged"
+    private static let quietKey = "supportUpdatesQuiet"
     private static let mergedKey = "supportPRsMerged"
     private static let stateKey = "supportPrompt"
-    private static var appVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0" }
+    private static var appVersion: String { AppVersion.current }
 
     private var state: SupportPromptState {
         get {
@@ -46,11 +47,14 @@ final class SupportPrompt {
     }
 
     /// One pull request's new events (`Store.show`, real store only): counts the updates its panel pinged (a reminder is
-    /// PullPing's own, not a GitHub update) and a merge, and notes a merge or approval of yours, or trouble on yours.
+    /// PullPing's own, not a GitHub update), others' updates that asked nothing of you (kept quiet) and a merge, and notes
+    /// a merge or approval of yours, or trouble on yours.
     func observed(_ events: [PREvent], pr: TrackedPR, pinged: [PREvent]) {
         let d = UserDefaults.standard
-        let updates = pinged.filter { $0.kind != .reviewReminder }.count
+        let updates = pinged.filter { $0.kind != .reviewReminder && $0.kind != .reminder }.count
         if updates > 0 { d.set(d.integer(forKey: Self.updatesKey) + updates, forKey: Self.updatesKey) }
+        let quiet = events.filter { e in !e.isOwn && e.seeded != true && Notify.reason(e, pr: pr) == nil && !pinged.contains { $0.id == e.id } }.count
+        if quiet > 0 { d.set(d.integer(forKey: Self.quietKey) + quiet, forKey: Self.quietKey) }
         if events.contains(where: { $0.kind == .merged }) { d.set(d.integer(forKey: Self.mergedKey) + 1, forKey: Self.mergedKey) }
         for event in events {
             switch SupportPromptState.moment(event, pr: pr) {
@@ -98,7 +102,7 @@ final class SupportPrompt {
         }
     }
 
-    /// Accounts fine and synced, notifications not paused, no failure in the last hour, no review asked of you, nothing to fix on yours.
+    /// Accounts fine and synced, notifications not paused, no failure in the last hour, no review asked of you, nothing to fix on yours, no reminder due.
     private func isCalm(_ now: Date) -> Bool {
         guard let store = AppDelegate.store else { return false }
         return !store.hasError && !store.offline && !store.syncing && !store.isPaused && store.firstSync.isEmpty
@@ -128,7 +132,7 @@ final class SupportPrompt {
         guard !showing else { return }
         showing = true
         let d = UserDefaults.standard
-        SupportPanel.show(updates: d.integer(forKey: Self.updatesKey), merged: d.integer(forKey: Self.mergedKey),
+        SupportPanel.show(updates: d.integer(forKey: Self.updatesKey), quiet: d.integer(forKey: Self.quietKey), merged: d.integer(forKey: Self.mergedKey),
                           since: d.object(forKey: Self.installDateKey) as? Date ?? Date(),
                           statusItemWindow: StatusItem.shared.iconWindow,
                           onAnswer: { [weak self] answer in self?.answer(answer, record: record) },
@@ -193,7 +197,7 @@ enum SupportPanel {
     /// Transparent room around the card: shadow on top/right, coffee burst on left/bottom.
     static let insets = EdgeInsets(top: 12, leading: 48, bottom: 48, trailing: 12)
 
-    static func show(updates: Int, merged: Int, since: Date, statusItemWindow: NSWindow?,
+    static func show(updates: Int, quiet: Int, merged: Int, since: Date, statusItemWindow: NSWindow?,
                      onAnswer: @escaping (SupportPromptState.Answer) -> Void,
                      onClosed: @escaping @MainActor () -> Void) {
         guard panel == nil else { return }
@@ -210,7 +214,7 @@ enum SupportPanel {
         p.isOpaque = false
         p.hidesOnDeactivate = false
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-        let host = NSHostingView(rootView: SupportPromptView(updates: updates, merged: merged, since: since))
+        let host = NSHostingView(rootView: SupportPromptView(updates: updates, quiet: quiet, merged: merged, since: since))
         p.contentView = host
         let size = host.fittingSize
         let visible = screen.visibleFrame  // card lands 12pt in from the top-right corner (= the insets)
@@ -222,7 +226,7 @@ enum SupportPanel {
         self.onAnswer = onAnswer
         self.onClosed = onClosed
         AccessibilityNotification.Announcement(
-            "PullPing: \(updates.formatted()) GitHub updates since \(since.formatted(.dateTime.day().month())), each one pinged to you. Tip a coffee on Ko-fi? Options are in the PullPing menu: right-click its icon."
+            "PullPing: pinged you \(updates.formatted()) times since \(since.formatted(.dateTime.day().month())), only when it was your turn\(quiet > 0 ? ", and kept \(quiet.formatted()) other updates quiet" : ""). Tip a coffee on Ko-fi? Options are in the PullPing menu: right-click its icon."
         ).post()
         Task {  // unanswered 5 min, 2 min without input (walked off) or a call started: fade away as "Ask me in 2 weeks"
             for _ in 0..<20 {
@@ -294,6 +298,7 @@ enum SupportPanel {
 /// The receipt: prints out of a slot, itemises what PullPing did, ends in "TIP? ☕ optional".
 struct SupportPromptView: View {
     let updates: Int  // pinged in a panel
+    let quiet: Int  // others' updates that asked nothing of you
     let merged: Int  // tracked pull requests seen merged
     let since: Date  // counting starts at the first launch of the version with the card
     var settled = false  // start fully printed, no entry animation (screenshot renders)
@@ -313,7 +318,7 @@ struct SupportPromptView: View {
 
     private static let width: CGFloat = 340
     private static let radius: CGFloat = 18
-    private var title: String { "\(updates.formatted()) GitHub updates since \(since.formatted(.dateTime.day().month())).\nEach one pinged to you. 🎯" }  // one sentence per line
+    private var title: String { "Pinged you \(updates.formatted()) times since \(since.formatted(.dateTime.day().month())).\nOnly when it was your turn. 🎯" }  // one sentence per line
 
     var body: some View {
         card
@@ -377,6 +382,7 @@ struct SupportPromptView: View {
                 .font(.system(size: 10, design: .monospaced)).foregroundStyle(faded)
                 .padding(.bottom, 6)
             if updates > 0 { row("Updates pinged", updates.formatted()) }
+            if quiet > 0 { row("Kept quiet", quiet.formatted()) }
             if merged > 0 { row("Tracked PRs merged", merged.formatted()) }
             row("Price paid", "$0.00")
             Divider().overlay(faded.opacity(0.5)).padding(.vertical, 3)

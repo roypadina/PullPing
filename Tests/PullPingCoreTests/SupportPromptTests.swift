@@ -81,6 +81,8 @@ final class SupportPromptTests: XCTestCase {
         XCTAssertEqual(SupportPromptState.moment(event(.ciFailed), pr: failing), .stress)
         XCTAssertEqual(SupportPromptState.moment(event(.reviewChangesRequested), pr: pr()), .stress)
         XCTAssertNil(SupportPromptState.moment(event(.ciFailed), pr: pr(roles: [.reviewRequested])), "CI on someone else's")
+        XCTAssertEqual(SupportPromptState.moment(event(.conflicts), pr: pr()), .stress, "conflicts on yours (0.7.0)")
+        XCTAssertNil(SupportPromptState.moment(event(.reviewChangesRequested, own: true), pr: pr()), "your own event")
     }
 
     func testCalmMeansNoReviewAskedAndNothingToFix() {
@@ -92,5 +94,8 @@ final class SupportPromptTests: XCTestCase {
         XCTAssertFalse(SupportPromptState.calm([failing]), "CI failed on yours")
         failing.muted = true
         XCTAssertTrue(SupportPromptState.calm([failing]), "muted items are out of mind")
+        var reminded = pr()
+        reminded.events = [event(.reminder)]
+        XCTAssertFalse(SupportPromptState.calm([reminded]), "a reminder you set is due")
     }
 }

@@ -22,7 +22,7 @@ public enum SmokeRunner {
         let poller = Poller(transport: transport, tokenProvider: { _ in token }, state: store, settings: { AppSettings() })
         guard let result = await poller.poll(account: Account(id: accountID, login: viewer.login)) else { return 1 }
         let s = result.stats
-        print("discover: involved=\(s.involved) requested=\(s.requested) reviewed=\(s.reviewed) issues=\(s.issues)  pages=\(s.pages)  cost=\(s.discoverCost)")
+        print("discover: involved=\(s.involved) requested=\(s.requested) reviewed=\(s.reviewed) issues=\(s.issues) watched=\(s.watched)  pages=\(s.pages)  cost=\(s.discoverCost)")
         print("stamps: tracked=\(s.tracked) changed=\(s.changed) new=\(s.new) dropped=\(s.dropped)")
         print("refresh: batches=\(s.batches) prs=\(s.refreshed) cost=\(s.refreshCost) remaining=\(s.rateLimit.map { "\($0.remaining)" } ?? "?") resetAt=\(s.rateLimit?.resetAt.ISO8601Format() ?? "?")")
         switch result.status {
@@ -32,9 +32,8 @@ public enum SmokeRunner {
         }
 
         let prs = store.state.prs.values.filter { $0.accountID == accountID }
-        let open = prs.filter { $0.state == .open }
-        func count(_ group: PRGroup) -> Int { open.filter { Attention.group($0) == group }.count }
-        print("groups: mine=\(count(.mine)) toReview=\(count(.toReview)) involved=\(count(.involved)) closedKept=\(prs.count - open.count)")
+        let buckets = Dictionary(grouping: prs, by: Attention.bucket).mapValues(\.count)
+        print("buckets: " + Bucket.allCases.compactMap { b in buckets[b].map { "\(b.rawValue)=\($0)" } }.joined(separator: " "))
         let notify = result.events.filter { !$0.isOwn }.count
         print("events (would notify = \(notify), own/silent = \(result.events.count - notify)):")
         for event in result.events {

@@ -1,19 +1,109 @@
 import Foundation
 
-/// Status panel sections; a PR is in exactly one, checked in this order.
-public enum PRGroup: String, Sendable, CaseIterable { case mine, toReview, involved }
+/// Why a pull request or issue needs me, in priority order (`needReason`, `sorted`, `breakdown`); the raw value is the
+/// breakdown wording and the stored key, so it never changes.
+public enum NeedReason: String, Codable, Sendable, CaseIterable, CodingKeyRepresentable {
+    case toReview = "to review", reReview = "to re-review", changesRequested = "changes requested", ciFailed = "CI failed"
+    case conflicts = "with conflicts", toTriage = "to triage", mentioned, assigned, reminder = "reminder due", newComments = "with new comments", readyToMerge = "ready to merge"
+    case teamToReview = "team review"
+}
 
-/// Why a pull request or issue needs me, in breakdown order; the raw value is the breakdown wording.
-public enum NeedReason: String, Codable, Sendable, CaseIterable {
-    case toReview = "to review", teamToReview = "team review", assigned, changesRequested = "changes requested", ciFailed = "CI failed"
-    case mentioned, newComments = "with new comments", readyToMerge = "ready to merge"
+/// Where a tracked item lives: whose turn it is. Exactly one per item (`Attention.bucket`); hidden and muted are flags, not buckets.
+public enum Bucket: String, Sendable, CaseIterable {
+    /// My pull requests. Your turn: `fix`, `merge`. Waiting on others: `waitingReview`, `waitingCI`, `waitingMerge`. And `draft`.
+    case fix, merge, waitingReview, waitingCI, waitingMerge, draft
+    /// Others' pull requests. Needs your review: `review`, `reReview`. Then `teamReview`, `reviewed`.
+    case review, reReview, teamReview, reviewed
+    case issueAssigned, issueMine, issueWatched, issueMentioned
+    /// Open, not mine, no review role (commented, mentioned, assigned); merged or closed.
+    case watching, closed
+}
+
+/// A group's two indicators: how many items need me (a number), how many have activity I have not read (a dot).
+public struct Signal: Equatable, Sendable {
+    public var needs = 0, new = 0
+    /// Of `new`, the items that also need me: Needs Me's dot (its list shows only those).
+    public var newNeeds = 0
+
+    public init(needs: Int = 0, new: Int = 0, newNeeds: Int = 0) {
+        self.needs = needs
+        self.new = new
+        self.newNeeds = newNeeds
+    }
+
+    public static func + (a: Signal, b: Signal) -> Signal {
+        Signal(needs: a.needs + b.needs, new: a.new + b.new, newNeeds: a.newNeeds + b.newNeeds)
+    }
+
+    /// "3 •", "3", "•"; nil when both are zero. One badge string for menus, segments and tooltips.
+    public var badge: String? {
+        switch (needs > 0, new > 0) {
+        case (true, true): "\(needs) •"
+        case (true, false): "\(needs)"
+        case (false, true): "•"
+        case (false, false): nil
+        }
+    }
+
+    /// "3 need you, 2 new"; "" when both are zero. Accessibility text.
+    public var spoken: String {
+        [needs > 0 ? "\(needs) need you" : nil, new > 0 ? "\(new) new" : nil].compactMap { $0 }.joined(separator: ", ")
+    }
 }
 
 public enum Attention {
-    /// Events by others newer than the last read. Baseline marks everything read (Poller).
-    public static func unread(_ pr: TrackedPR) -> Int {
-        pr.events.filter { !$0.isOwn && $0.at > (pr.lastReadAt ?? .distantPast) }.count
+    /// Lights a group's dot: unread, and not muted, hidden or snoozed. A row's own dot is plain `unread(pr) > 0`.
+    public static func isNew(_ pr: TrackedPR, now: Date) -> Bool {
+        !pr.muted && !pr.hidden && (pr.snoozedUntil ?? .distantPast) <= now && unread(pr) > 0
     }
+
+    /// One pass: each item adds `needs` (it has a reason in `counting`) and `new` (`isNew`) to its bucket. Muted and hidden
+    /// items add nothing.
+    public static func signals(_ prs: some Sequence<TrackedPR>, counting: Set<NeedReason> = Set(NeedReason.allCases),
+                               now: Date) -> [Bucket: Signal] {
+        var map: [Bucket: Signal] = [:]
+        for pr in prs {
+            let needs = needReason(pr, counting: counting) != nil, new = isNew(pr, now: now)
+            guard needs || new else { continue }
+            let bucket = bucket(pr)
+            map[bucket] = (map[bucket] ?? Signal()) + Signal(needs: needs ? 1 : 0, new: new ? 1 : 0, newNeeds: needs && new ? 1 : 0)
+        }
+        return map
+    }
+
+    /// Events by others newer than the last read, at least 1 while marked unread. Baseline marks everything read (Poller).
+    public static func unread(_ pr: TrackedPR) -> Int {
+        max(pr.events.filter { !$0.isOwn && $0.at > (pr.lastReadAt ?? .distantPast) }.count, pr.markedUnread ? 1 : 0)
+    }
+
+    public static func markRead(_ pr: inout TrackedPR, now: Date) {
+        pr.lastReadAt = now
+        pr.markedUnread = false
+    }
+
+    /// Mark as Unread: the flag lights the dot; rewinding the read mark to just before the newest event by someone else that
+    /// gives a reason (a mention, an assignment, a due reminder, a comment or review on mine), else the newest event by
+    /// someone else, brings that reason back even when later comments, pushes or CI followed. Not `lastReadAt = nil`: that
+    /// would revive weeks-old mentions.
+    public static func markUnread(_ pr: inout TrackedPR) {
+        pr.markedUnread = true
+        let others = pr.events.filter { !$0.isOwn }
+        let reasons = Set<EventKind>([.mentioned, .assigned, .reminder, .issueOpened]).union(mine(pr) ? talk : [])
+        guard let newest = others.filter({ reasons.contains($0.kind) }).map(\.at).max() ?? others.map(\.at).max(),
+              let read = pr.lastReadAt, read >= newest else { return }
+        // Whole seconds: the state file stores ISO-8601 dates without fractions.
+        pr.lastReadAt = Date(timeIntervalSince1970: (newest.timeIntervalSince1970 - 1).rounded(.down))
+    }
+
+    /// A Remind Me reminder fired and is not read yet.
+    public static func reminderDue(_ pr: TrackedPR) -> Bool { unreadEvent(pr, .reminder) }
+
+    static func unreadEvent(_ pr: TrackedPR, _ kind: EventKind) -> Bool {
+        pr.events.contains { $0.kind == kind && !$0.isOwn && $0.at > (pr.lastReadAt ?? .distantPast) }
+    }
+
+    /// Mine to answer: what I opened, issues assigned to me, issues in repositories I watch.
+    static func mine(_ pr: TrackedPR) -> Bool { pr.roles.contains(.author) || (pr.isIssue && (pr.roles.contains(.assigned) || pr.watched)) }
 
     public static func awaitingMyReview(_ pr: TrackedPR) -> Bool {
         pr.state == .open && !pr.isDraft && !pr.roles.isDisjoint(with: [.reviewRequested, .teamReviewRequested])
@@ -23,25 +113,168 @@ public enum Attention {
         !pr.muted && !pr.hidden && (unread(pr) > 0 || awaitingMyReview(pr))
     }
 
-    /// Open, shown, unmuted, and: my review is awaited (directly or via a team), an unread assignment or mention, or I'm the
-    /// author (of an issue: or assignee) and it has changes requested, failed CI, unread comments or reviews, or is ready
-    /// to merge. Only reasons in `counting` (Settings > General) apply; the first match wins, so each item counts once.
+    /// `reviewDecision`, else (no required reviews) the reviewers' latest deciding reviews: any change request, else any approval.
+    public static func decision(_ pr: TrackedPR) -> String? {
+        pr.reviewDecision ?? (pr.reviewers.contains { $0.state == "CHANGES_REQUESTED" } ? "CHANGES_REQUESTED"
+            : pr.reviewers.contains { $0.state == "APPROVED" } ? "APPROVED" : nil)
+    }
+
+    /// The head moved since my review (a nil commit, gone after a force-push, counts as moved). False when I never reviewed.
+    public static func movedSinceMyReview(_ pr: TrackedPR) -> Bool {
+        pr.myReview.map { $0.commitOID != pr.headOID } ?? false
+    }
+
+    static func ciOK(_ pr: TrackedPR) -> Bool { pr.ci == .success || pr.ci == .none }
+
+    /// Conflicts with the base branch, or approved and green but behind it under strict protection: the author's move. Not
+    /// behind on auto-merge or in the merge queue: GitHub updates the branch itself.
+    public static func conflicted(_ pr: TrackedPR) -> Bool {
+        pr.mergeState == "DIRTY" || (pr.mergeState == "BEHIND" && pr.autoMerge != true && decision(pr) == "APPROVED" && ciOK(pr))
+    }
+
+    /// Whose turn: the first matching rule wins (0.7.0 design §3.3). Reads only stored state, so it is the same everywhere.
+    public static func bucket(_ pr: TrackedPR) -> Bucket {
+        guard pr.state == .open else { return .closed }
+        let roles = pr.roles
+        if pr.isIssue {
+            return roles.contains(.assigned) ? .issueAssigned : roles.contains(.author) ? .issueMine : pr.watched ? .issueWatched : .issueMentioned
+        }
+        if roles.contains(.author) {
+            let decision = decision(pr)
+            if pr.isDraft { return .draft }
+            if decision == "CHANGES_REQUESTED" || pr.ci == .failure || conflicted(pr) { return .fix }
+            if pr.autoMerge == true { return .waitingMerge }
+            if decision == "APPROVED" && ciOK(pr) && ["CLEAN", "HAS_HOOKS"].contains(pr.mergeState) { return .merge }
+            let noRequests = !pr.reviewers.contains(where: \.requested) && pr.requestedTeams.isEmpty
+            if pr.ci == .pending && (decision == "APPROVED" || (decision == nil && noRequests)) { return .waitingCI }
+            return .waitingReview
+        }
+        if !pr.isDraft {
+            if roles.contains(.reviewRequested) { return pr.myReview == nil ? .review : .reReview }
+            if ["CHANGES_REQUESTED", "DISMISSED"].contains(pr.myReview?.state), movedSinceMyReview(pr) { return .reReview }
+            if roles.contains(.teamReviewRequested) { return .teamReview }
+        }
+        return pr.myReview != nil || roles.contains(.reviewer) ? .reviewed : .watching
+    }
+
+    /// A row's status chip: what the item waits on, in words (0.7.0 design §5.2). `symbol` is an SF Symbol name.
+    public struct Lead: Equatable, Sendable {
+        public enum Tone: Sendable { case needsYou, good, bad, merged, neutral }
+        public var text: String, symbol: String, tone: Tone
+    }
+
+    /// The status chip of an item's bucket; nil for open issues (except a new one in a repository I watch) and Watching (their
+    /// other chips say enough).
+    public static func lead(_ pr: TrackedPR) -> Lead? {
+        let requester = pr.events.last { $0.kind == .reviewRequested && !$0.summary.hasPrefix("via team") }?.actor ?? pr.authorLogin
+        switch bucket(pr) {
+        case .review: return Lead(text: "Review requested by @\(requester)", symbol: "eye", tone: .needsYou)
+        case .reReview where pr.roles.contains(.reviewRequested):
+            return Lead(text: "Re-review requested by @\(requester)", symbol: "arrow.triangle.2.circlepath", tone: .needsYou)
+        case .reReview:
+            let pushes = pr.events.filter { $0.kind == .newCommits && $0.at > (pr.myReview?.submittedAt ?? .distantPast) }.count
+            return Lead(text: pushes == 0 ? "Re-review · updated since your review" : "Re-review · \(pushes) push\(pushes == 1 ? "" : "es") since your review",
+                        symbol: "arrow.triangle.2.circlepath", tone: .needsYou)
+        case .teamReview:
+            return Lead(text: pr.requestedTeams.first.map { "Requested from team \($0)" } ?? "Requested from your team", symbol: "person.3", tone: .neutral)
+        case .reviewed:
+            let since = movedSinceMyReview(pr) ? " · updated since" : ""
+            switch pr.myReview?.state {
+            case "APPROVED": return Lead(text: "You approved" + since, symbol: "checkmark.circle", tone: .good)
+            case "CHANGES_REQUESTED":
+                return Lead(text: "You requested changes · waiting on @\(pr.authorLogin)" + since, symbol: "exclamationmark.bubble", tone: .neutral)
+            case "DISMISSED": return Lead(text: "Your review was dismissed" + since, symbol: "hand.raised.slash", tone: .neutral)
+            case "COMMENTED": return Lead(text: "You commented" + since, symbol: "text.bubble", tone: .neutral)
+            default: return Lead(text: "You reviewed", symbol: "text.bubble", tone: .neutral)
+            }
+        case .fix:
+            if decision(pr) == "CHANGES_REQUESTED" {
+                let by = pr.reviewers.first { $0.state == "CHANGES_REQUESTED" }.map { " by @\($0.login)" } ?? ""
+                return Lead(text: "Changes requested" + by, symbol: "exclamationmark.bubble", tone: .bad)
+            }
+            if pr.ci == .failure {
+                let check = pr.checks.first { $0.state == .failure }.map { ": \($0.name)" } ?? ""
+                return Lead(text: "CI failed" + check, symbol: "xmark.circle", tone: .bad)
+            }
+            return pr.mergeState == "DIRTY" ? Lead(text: "Conflicts with base", symbol: "exclamationmark.triangle", tone: .bad)
+                : Lead(text: "Behind base: update branch", symbol: "arrow.down.circle", tone: .bad)
+        case .merge: return Lead(text: "Approved · Ready to merge", symbol: "checkmark.circle", tone: .good)
+        case .waitingReview:
+            if decision(pr) == "APPROVED" { return Lead(text: "Approved · not mergeable yet", symbol: "clock", tone: .neutral) }
+            let waiting = pr.reviewers.filter(\.requested).map { "@\($0.login)" } + pr.requestedTeams.map { "@\($0)" }
+            return Lead(text: waiting.isEmpty ? "Waiting for review" : "Waiting on " + waiting.joined(separator: ", "), symbol: "clock", tone: .neutral)
+        case .waitingCI: return Lead(text: "CI running", symbol: "circle.dotted", tone: .neutral)
+        case .waitingMerge: return Lead(text: "Auto-merge on", symbol: "arrow.triangle.merge", tone: .neutral)
+        case .draft: return Lead(text: "Draft", symbol: "circle.dashed", tone: .neutral)
+        case .closed:
+            if pr.state == .merged { return Lead(text: "Merged", symbol: "arrow.triangle.merge", tone: .merged) }
+            if pr.isIssue && pr.stateReason == "COMPLETED" { return Lead(text: "Completed", symbol: "checkmark.circle", tone: .merged) }
+            if pr.isIssue && pr.stateReason == "NOT_PLANNED" { return Lead(text: "Not planned", symbol: "slash.circle", tone: .neutral) }
+            return Lead(text: "Closed", symbol: "xmark.circle", tone: .neutral)
+        case .issueWatched where unreadEvent(pr, .issueOpened):
+            return Lead(text: "New issue by @\(pr.authorLogin)", symbol: "plus.circle", tone: .needsYou)
+        case .issueAssigned, .issueMine, .issueWatched, .issueMentioned, .watching: return nil
+        }
+    }
+
+    /// Why an open, shown, unmuted item needs me, from its bucket, plus unread new issues, mentions, assignments and (`mine`)
+    /// unread comments or reviews. Only reasons in `counting` (Settings > Menu Bar) apply;
+    /// the first match in `NeedReason` order wins, so each item counts once.
     public static func needReason(_ pr: TrackedPR, counting: Set<NeedReason> = Set(NeedReason.allCases)) -> NeedReason? {
         guard pr.state == .open, !pr.muted, !pr.hidden else { return nil }
         let unread = pr.events.filter { !$0.isOwn && $0.at > (pr.lastReadAt ?? .distantPast) }
-        let mine = pr.roles.contains(.author) || (pr.isIssue && pr.roles.contains(.assigned)), reviewable = !pr.isDraft
-        let talk: Set<EventKind> = [.comment, .reviewApproved, .reviewChangesRequested, .reviewCommented]
+        let mine = Attention.mine(pr), bucket = bucket(pr)
         let checks: [(NeedReason, Bool)] = [
-            (.toReview, reviewable && pr.roles.contains(.reviewRequested)),
-            (.teamToReview, reviewable && pr.roles.contains(.teamReviewRequested)),
-            (.assigned, unread.contains { $0.kind == .assigned }),
-            (.changesRequested, mine && pr.reviewDecision == "CHANGES_REQUESTED"),
-            (.ciFailed, mine && pr.ci == .failure),
+            (.toReview, bucket == .review),
+            (.reReview, bucket == .reReview),
+            (.changesRequested, bucket == .fix && decision(pr) == "CHANGES_REQUESTED"),
+            (.ciFailed, bucket == .fix && pr.ci == .failure),
+            (.conflicts, bucket == .fix && conflicted(pr)),
+            (.toTriage, unread.contains { $0.kind == .issueOpened }),
             (.mentioned, unread.contains { $0.kind == .mentioned }),
+            (.assigned, unread.contains { $0.kind == .assigned }),
+            (.reminder, unread.contains { $0.kind == .reminder }),
             (.newComments, mine && unread.contains { talk.contains($0.kind) }),
-            (.readyToMerge, mine && pr.reviewDecision == "APPROVED" && pr.ci == .success && pr.mergeState == "CLEAN"),
+            (.readyToMerge, bucket == .merge),
+            (.teamToReview, bucket == .teamReview),
         ]
         return checks.first { counting.contains($0.0) && $0.1 }?.0
+    }
+
+    /// Comments and reviews: `newComments` on my pull requests and issues.
+    static let talk: Set<EventKind> = [.comment, .reviewApproved, .reviewChangesRequested, .reviewCommented]
+
+    /// When the item entered `reason`: its newest event of a kind that causes the reason, else `updatedAt`.
+    public static func waitingSince(_ pr: TrackedPR, _ reason: NeedReason) -> Date { causedAt(pr, reason) ?? pr.updatedAt }
+
+    /// The newest event of a kind that causes `reason`; nil when none is stored.
+    static func causedAt(_ pr: TrackedPR, _ reason: NeedReason) -> Date? {
+        let kinds: Set<EventKind> = switch reason {
+        case .toReview, .teamToReview: [.reviewRequested, .readyForReview]
+        case .reReview: [.reviewRequested, .readyForReview, .newCommits, .reviewDismissed]
+        case .changesRequested: [.reviewChangesRequested]
+        case .ciFailed: [.ciFailed]
+        case .conflicts: [.conflicts]
+        case .toTriage: [.issueOpened]
+        case .mentioned: [.mentioned]
+        case .assigned: [.assigned]
+        case .reminder: [.reminder]
+        case .newComments: [.comment, .reviewApproved, .reviewChangesRequested, .reviewCommented]
+        case .readyToMerge: [.reviewApproved, .ciPassed, .readyToMerge]
+        }
+        return pr.events.filter { kinds.contains($0.kind) }.map(\.at).max()
+    }
+
+    /// `list` plus each of `kept` that it lacks, put back where `order` (the ids last shown) had it: after its nearest
+    /// earlier id still in the list, else first. Keeps a row in place when reading it removed its reason.
+    public static func keeping(_ list: [TrackedPR], _ kept: [TrackedPR], order: [String]) -> [TrackedPR] {
+        var result = list
+        for pr in kept where !result.contains(where: { $0.id == pr.id }) {
+            let earlier = order.firstIndex(of: pr.id).map { order[..<$0] } ?? []
+            let after = earlier.reversed().lazy.compactMap { id in result.firstIndex { $0.id == id } }.first
+            result.insert(pr, at: after.map { $0 + 1 } ?? 0)
+        }
+        return result
     }
 
     public static func needsMe(_ pr: TrackedPR, counting: Set<NeedReason> = Set(NeedReason.allCases)) -> Bool {
@@ -67,32 +300,25 @@ public enum Attention {
         }
     }
 
-    /// Nothing left for me: merged or closed, or open and not mine, not assigned to me, no review asked of me or my team,
-    /// nothing unread. Ignores the badge settings, so a switched-off reason never moves a request into Done.
-    public static func isDone(_ pr: TrackedPR) -> Bool {
-        guard pr.state == .open else { return true }
-        return pr.roles.isDisjoint(with: [.author, .assigned, .reviewRequested, .teamReviewRequested])
-            && unread(pr) == 0 && !awaitingMyReview(pr)
-    }
-
     /// Latest of updated, closed and the newest event.
     public static func lastActivity(_ pr: TrackedPR) -> Date {
         max(pr.updatedAt, pr.closedAt ?? .distantPast, pr.events.map(\.at).max() ?? .distantPast)
     }
 
-    /// The one list order: needs me, then unread (`isAttention`), then latest activity; ties by number, highest first.
-    /// Done pull requests rank by activity alone.
+    /// The one list order: items that need me first, by reason (`NeedReason` order), oldest waiting first (they are queues);
+    /// then the rest, latest activity first. Ties by number, highest first, then id. Unread is no rank of its own.
+    /// `counting: []` gives plain latest-activity order (Waiting on Others, Reviewed, Watching, Closed).
     public static func sorted(_ prs: [TrackedPR], counting: Set<NeedReason> = Set(NeedReason.allCases)) -> [TrackedPR] {
-        prs.map { pr -> (TrackedPR, (Int, Date, Int, String)) in
-            let rank = isDone(pr) ? 0 : needsMe(pr, counting: counting) ? 2 : isAttention(pr) ? 1 : 0
-            return (pr, (rank, lastActivity(pr), pr.number, pr.id))  // id: a stable order when numbers tie across repos
+        let rank = Dictionary(uniqueKeysWithValues: NeedReason.allCases.enumerated().map { ($1, $0) })
+        return prs.map { pr -> (pr: TrackedPR, rank: Int, at: Date) in
+            let reason = needReason(pr, counting: counting)
+            return (pr, reason.flatMap { rank[$0] } ?? rank.count, reason.map { waitingSince(pr, $0) } ?? lastActivity(pr))
         }
-        .sorted { $0.1 > $1.1 }
-        .map(\.0)
-    }
-
-    public static func group(_ pr: TrackedPR) -> PRGroup {
-        if pr.roles.contains(.author) { return .mine }
-        return awaitingMyReview(pr) ? .toReview : .involved
+        .sorted { a, b in
+            if a.rank != b.rank { return a.rank < b.rank }
+            if a.at != b.at { return a.rank < rank.count ? a.at < b.at : a.at > b.at }
+            return (a.pr.number, a.pr.id) > (b.pr.number, b.pr.id)  // id: a stable order when numbers tie across repos
+        }
+        .map(\.pr)
     }
 }

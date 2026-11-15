@@ -231,9 +231,7 @@ struct AddAccountSheet: View {
 
 struct NotificationsTab: View {
     @Bindable var store: Store
-    static let height: CGFloat = 640  // plan height; the 18-row table scrolls
-    private static let kinds = EventKind.allCases.filter { $0 != .reviewReminder }
-    private static let column: CGFloat = 112
+    static let height: CGFloat = 860  // the whole tab, no scrolling
 
     var body: some View {
         Form {
@@ -254,23 +252,17 @@ struct NotificationsTab: View {
                 }
             }
             Section {
-                ForEach(Self.kinds, id: \.self) { kind in
-                    LabeledContent(kind.label) {
-                        HStack(spacing: 8) {
-                            stylePicker(kind, mine: true)
-                            stylePicker(kind, mine: false)
-                        }
+                ForEach(NeedReason.notifyOrder, id: \.self) { reason in
+                    Picker(reason.notifyLabel, selection: Binding(get: { store.settings.needStyle(reason) }, set: { store.settings.needStyles[reason] = $0 })) {
+                        Text("Off").tag(NotificationStyle.off)
+                        Text("Banner").tag(NotificationStyle.banner)
+                        Text("Alert").tag(NotificationStyle.alert)
                     }
                 }
             } header: {
-                HStack(spacing: 8) {
-                    Text("Notify Me About")
-                    Spacer()
-                    Text("Mine").frame(width: Self.column, alignment: .trailing)
-                    Text("Others").frame(width: Self.column, alignment: .trailing)
-                }
+                Text("Notify Me When")
             } footer: {
-                Text("Mine: pull requests and issues you opened. Others: ones you review, are assigned to, are mentioned in or comment on. A banner hides after a few seconds; an alert stays until you act on it.").formFooter()
+                Text("A notification means something needs you. Everything else (merges, CI passed, new commits, labels…) is listed in Activity without a notification. A banner hides after a few seconds; an alert stays until you act on it.").formFooter()
             }
             .disabled(!store.settings.notificationsEnabled)
             Section {
@@ -280,24 +272,11 @@ struct NotificationsTab: View {
             } header: {
                 Text("Review Reminders")
             } footer: {
-                Text("Repeats until you review, the request is removed, or the pull request is merged or closed.").formFooter()
+                Text("For reviews and re-reviews asked of you (team requests while their notification is on). Repeats until you review, the request is removed, or the pull request is merged or closed.").formFooter()
             }
             .disabled(!store.settings.notificationsEnabled)
         }
         .formStyle(.grouped)
-    }
-
-    private func stylePicker(_ kind: EventKind, mine: Bool) -> some View {
-        Picker("\(kind.label), \(mine ? "mine" : "others")", selection: Binding(
-            get: { store.settings.style(for: kind, mine: mine) },
-            set: { if mine { store.settings.styles[kind] = $0 } else { store.settings.otherStyles[kind] = $0 } })) {
-            Text("Off").tag(NotificationStyle.off)
-            Text("Banner").tag(NotificationStyle.banner)
-            Text("Alert").tag(NotificationStyle.alert)
-        }
-        .labelsHidden()
-        .fixedSize()
-        .frame(width: Self.column, alignment: .trailing)
     }
 }
 
@@ -305,7 +284,7 @@ struct NotificationsTab: View {
 
 /// ntfy pushes (MeetAlert pattern): server and topic in settings, access token and fallback URL in the keychain.
 struct PhoneTab: View {
-    static let height: CGFloat = 640  // plan height; the 18-row table scrolls
+    static let height: CGFloat = 640  // plan height; the 22-row table scrolls
     @Bindable var store: Store
     @State private var sending = false
     @State private var testResult: Bool?
@@ -384,20 +363,17 @@ struct PhoneTab: View {
     }
 }
 
-// MARK: General
+// MARK: Menu Bar
 
-struct GeneralTab: View {
-    static let height: CGFloat = 640
+/// The icon, its count and dot, and what the count counts (was part of General; split so neither pane scrolls, SET-8).
+struct MenuBarTab: View {
+    static let height: CGFloat = 740
     @Bindable var store: Store
     @AppStorage(DefaultsKey.showMenuBarIcon) private var showIcon = true
 
     var body: some View {
         Form {
             Section {
-                Picker("Check GitHub every", selection: $store.settings.pollIntervalMinutes) {
-                    ForEach(AppSettings.pollIntervalOptions, id: \.self) { Text($0 == 1 ? "1 minute" : "\($0) minutes").tag($0) }
-                }
-                LaunchAtLoginToggle()
                 Toggle("Show in the Menu Bar", isOn: $showIcon).controlSize(.mini)
                     .onChange(of: showIcon) { StatusItem.shared.setVisible(showIcon) }
                 Picker("Menu bar count", selection: $store.settings.badgeMode) {
@@ -406,23 +382,207 @@ struct GeneralTab: View {
                     Text("Off").tag(BadgeMode.off)
                 }
                 .pickerStyle(.radioGroup)
+                Toggle(isOn: $store.settings.menuBarDot) {
+                    Text("Show a dot for new activity")
+                    if store.settings.badgeMode == .allUnread { Text("The count already shows unread") }
+                }
+                .controlSize(.mini)
+                .disabled(store.settings.badgeMode == .allUnread)
             } footer: {
                 Text("Icon missing? Check System Settings > Menu Bar. Opening PullPing again from Applications shows the window.").formFooter()
             }
             if store.settings.badgeMode == .needsMe {
                 Section {
-                    ForEach(NeedReason.allCases, id: \.self) { reason in
+                    ForEach(NeedReason.notifyOrder, id: \.self) { reason in  // the order of Settings > Notifications
                         Toggle(reason.settingsLabel, isOn: Binding(
                             get: { store.settings.badgeReasons.contains(reason) },
                             set: { on in
                                 if on { store.settings.badgeReasons.insert(reason) } else { store.settings.badgeReasons.remove(reason) }
                             }))
+                        .controlSize(.mini)
                     }
                 } header: {
                     Text("Count in the Menu Bar")
                 } footer: {
-                    Text("Each pull request or issue counts once. Muted, hidden, merged and closed ones never count.").formFooter()
+                    Text("Each pull request or issue counts once. Muted, hidden, merged and closed ones never count. A dot marks new activity you have not opened yet. Reminders you set always count.").formFooter()
                 }
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+// MARK: Shortcuts
+
+/// Every shortcut, read-only (KBD-1). Menu shortcuts are changed in System Settings (App Shortcuts), so no recorder here;
+/// single keys only switch off.
+struct ShortcutsTab: View {
+    static let height: CGFloat = 820
+    @Bindable var store: Store
+
+    /// Command, menu shortcut, single key: mirrors `AppCommands`' Pull Request menu and `prKeys`.
+    private static let pullRequest = [("Open in Browser", "⇧⌘O", "O or ↩"), ("Mark as Read / Unread", "⇧⌘U", "U"), ("Mark All as Read", "⌥⇧⌘U", ""),
+                                      ("Mute / Unmute", "⌃⌘M", "M"), ("Hide / Unhide", "⌃⌘H", "H"), ("Remind Me ▸ Custom…", "⌃⌘R", "R"),
+                                      ("Stop Tracking", "⌘⌫", "")]
+    private static let app = [("Refresh Now", "⌘R"), ("Open Window", "⌘1"), ("Settings", "⌘,"), ("Select All", "⌘A"),
+                              ("Open in Main Window (panel)", "⌘↩")]
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Single-key shortcuts", isOn: $store.settings.singleKeyShortcuts).controlSize(.mini)
+            } footer: {
+                Text("While a pull request list has keyboard focus, in the window and the menu-bar panel: the keys in the Key column, without ⌘.").formFooter()
+            }
+            Section("Pull Request") {
+                LabeledContent("") { columns("Menu", "Key", keyStyle: AnyShapeStyle(.secondary)) }
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)  // a header: each row below reads its own shortcuts
+                ForEach(Self.pullRequest, id: \.0) { command, menu, key in
+                    let keys = store.settings.singleKeyShortcuts
+                    LabeledContent(command) {
+                        columns(menu, key, keyStyle: keys ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+                    }
+                    // Says which is which ("menu ⌃⌘M, key M"); no key while single keys are off.
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(command)
+                    .accessibilityValue([menu.isEmpty ? nil : "menu \(menu)", keys && !key.isEmpty ? "key \(key)" : nil]
+                        .compactMap { $0 }.joined(separator: ", "))
+                }
+            }
+            Section("App") {
+                ForEach(Self.app, id: \.0) { command, menu in
+                    LabeledContent(command) { columns(menu, "") }.accessibilityElement(children: .combine)
+                }
+            }
+            Section {
+                Button("Open Keyboard Settings…") {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension")!)
+                }
+            } footer: {
+                Text("To change a menu shortcut, add PullPing under Keyboard Shortcuts › App Shortcuts and type the menu title exactly, for example Mark as Read. Single keys cannot be changed.").formFooter()
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    /// Two right-aligned fixed-width columns: the menu shortcut, the single key.
+    private func columns(_ menu: String, _ key: String, keyStyle: AnyShapeStyle = AnyShapeStyle(.primary)) -> some View {
+        HStack(spacing: 0) {
+            Text(verbatim: menu).frame(width: 64, alignment: .trailing)
+            // A blank, not an empty Text: an empty cell dropped the row's shortcut to a second line.
+            Text(verbatim: key.isEmpty ? " " : key).frame(width: 64, alignment: .trailing).foregroundStyle(keyStyle)
+        }
+    }
+}
+
+// MARK: Repositories
+
+/// Every repository-level setting on one pane: which repositories' issues are tracked, and the muted repositories.
+struct RepositoriesTab: View {
+    static let height: CGFloat = 470  // one muted repository and the footer (render); more scroll
+    @Bindable var store: Store
+    /// Other Repositories and Excluded Repositories as typed; parsed and saved on Return, when the field loses focus (SET-4)
+    /// and when Settings closes.
+    @State private var repos: String
+    @State private var rejected: [String] = []
+    @FocusState private var reposFocused: Bool
+    @State private var excluded: String
+    @State private var rejectedExcluded: [String] = []
+    @FocusState private var excludedFocused: Bool
+
+    init(store: Store) {
+        self.store = store
+        _repos = State(initialValue: store.settings.watchedIssueRepos.joined(separator: ", "))
+        _excluded = State(initialValue: store.settings.excludedIssueRepos.joined(separator: ", "))
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Track Issues", isOn: $store.settings.trackIssues).controlSize(.mini)
+                    .onChange(of: store.settings.trackIssues) { store.refresh() }  // the next poll adds or drops them
+                Toggle("Track Issues in My Repositories", isOn: $store.settings.watchOwnedIssues).controlSize(.mini)
+                    .disabled(!store.settings.trackIssues)
+                    .onChange(of: store.settings.watchOwnedIssues) { store.refresh() }
+                TextField("Other Repositories", text: $repos, prompt: Text(verbatim: "owner/name, owner/*"))  // a format, not repositories already watched
+                    .disabled(!store.settings.trackIssues)
+                    .focused($reposFocused)
+                    .onSubmit(commitRepos)
+                    .onChange(of: reposFocused) { if !reposFocused { commitRepos() } }
+                    // Closing Settings (red button, ⌘W) ends no editing and keeps this view: commit what was typed.
+                    .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { note in
+                        if (note.object as? NSWindow)?.contentViewController is SettingsTabs { commitRepos(); commitExcluded() }
+                    }
+                if !rejected.isEmpty {
+                    Text(verbatim: "Not added: \(rejected.joined(separator: ", ")). Use owner/name, or owner/* for every repository of an owner (at most \(IssueWatch.maxRepos)).")
+                        .font(.subheadline).foregroundStyle(Theme.bad)
+                }
+                TextField("Excluded Repositories", text: $excluded, prompt: Text(verbatim: "owner/name"))
+                    .disabled(!store.settings.trackIssues)
+                    .focused($excludedFocused)
+                    .onSubmit(commitExcluded)
+                    .onChange(of: excludedFocused) { if !excludedFocused { commitExcluded() } }
+                if !rejectedExcluded.isEmpty {
+                    Text(verbatim: "Not excluded: \(rejectedExcluded.joined(separator: ", ")). Use owner/name (at most \(IssueWatch.maxRepos)).")
+                        .font(.subheadline).foregroundStyle(Theme.bad)
+                }
+            } header: {
+                Text("Issues")
+            } footer: {
+                Text("Track Issues adds open issues you opened, are assigned to, are mentioned in or comment on. Track Issues in My Repositories adds every open issue in repositories your accounts own, and tells you when someone opens a new one; Other Repositories adds more. Excluded Repositories leaves repositories out of both. To watch only some of your own, exclude the rest, or turn Track Issues in My Repositories off and list them under Other Repositories. All three need Track Issues. Issues you are part of stay tracked.").formFooter()
+            }
+            Section {
+                let muted = store.mutedRepos
+                if muted.isEmpty { Text("No Muted Repositories").foregroundStyle(.secondary) }
+                ForEach(muted, id: \.self) { repo in
+                    LabeledContent {
+                        Button("Unmute") { store.setReposMuted([repo], false) }.accessibilityLabel(Text(verbatim: "Unmute \(repo)"))
+                    } label: {
+                        Text(verbatim: repo)
+                    }
+                }
+            } header: {
+                Text("Muted Repositories")
+            } footer: {
+                Text("Pull requests and issues in a muted repository stay listed, but never notify, never count and never start automations on their own, new ones included. To mute one, right-click a pull request or issue and choose Mute owner/name. Edit > Undo reverses it.").formFooter()
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func commitRepos() {
+        let parsed = IssueWatch.parse(repos)
+        rejected = parsed.rejected
+        repos = parsed.patterns.joined(separator: ", ")
+        guard parsed.patterns != store.settings.watchedIssueRepos else { return }
+        store.settings.watchedIssueRepos = parsed.patterns
+        store.refresh()
+    }
+
+    private func commitExcluded() {
+        let parsed = IssueWatch.parse(excluded, wildcards: false)
+        rejectedExcluded = parsed.rejected
+        excluded = parsed.patterns.joined(separator: ", ")
+        guard parsed.patterns != store.settings.excludedIssueRepos else { return }
+        store.settings.excludedIssueRepos = parsed.patterns
+        store.refresh()
+    }
+}
+
+// MARK: General
+
+struct GeneralTab: View {
+    static let height: CGFloat = 660
+    @Bindable var store: Store
+
+    var body: some View {
+        Form {
+            Section {
+                Picker("Check GitHub every", selection: $store.settings.pollIntervalMinutes) {
+                    ForEach(AppSettings.pollIntervalOptions, id: \.self) { Text($0 == 1 ? "1 minute" : "\($0) minutes").tag($0) }
+                }
+                LaunchAtLoginToggle()
             }
             Section {
                 Picker("Layout", selection: $store.settings.inboxLayout) {
@@ -430,14 +590,17 @@ struct GeneralTab: View {
                     Text("Per account").tag(InboxLayout.perAccount)
                 }
                 .pickerStyle(.radioGroup)
+                Picker("Mark as read when selected", selection: $store.settings.markReadSeconds) {
+                    ForEach(AppSettings.markReadOptions, id: \.self) { seconds in
+                        Text(seconds < 0 ? "Never" : seconds == 0 ? "Immediately" : seconds == 1 ? "After 1 second" : "After \(seconds) seconds").tag(seconds)
+                    }
+                }
             } header: {
                 Text("Inbox")
             } footer: {
-                Text("Unified lists all accounts together, then each account. Per account lists each account on its own.").formFooter()
+                Text("Unified lists all accounts together, then each account. Per account lists each account on its own. Selecting a pull request in the window marks it read; with Never, use Mark as Read (⇧⌘U).").formFooter()
             }
             Section {
-                Toggle("Track Issues", isOn: $store.settings.trackIssues).controlSize(.mini)
-                    .onChange(of: store.settings.trackIssues) { store.refresh() }  // the next poll adds or drops them
                 Picker("Keep merged and closed pull requests for", selection: $store.settings.retentionDays) {
                     ForEach(AppSettings.retentionOptions, id: \.self) { Text($0 == 1 ? "1 day" : "\($0) days").tag($0) }
                 }
@@ -451,12 +614,15 @@ struct GeneralTab: View {
             } header: {
                 Text("Tracking")
             } footer: {
-                Text("Track Issues adds open issues you opened, are assigned to, are mentioned in or comment on. Turning it off removes them from the lists. Activity, in the window's sidebar, lists every event and run, at most 5000.").formFooter()
+                Text("Activity, in the window's sidebar, lists every event and run, at most 5000.").formFooter()
             }
             Section("About") {
+                // Two per row: four in one row truncated when the panes were 520 pt.
                 HStack {
                     Button("About PullPing…") { AboutWindow.show() }
                     Button("Check for Updates…") { Updates.check() }
+                }
+                HStack {
                     Button("Welcome Guide…") { WelcomeWindow.show() }
                     Button("Support on Ko-fi ☕") { NSWorkspace.shared.open(AboutInfo.kofi) }
                 }
@@ -467,17 +633,43 @@ struct GeneralTab: View {
 }
 
 extension NeedReason {
-    /// Settings > General > Count in the Menu Bar.
+    /// Settings > Notifications, in this order (0.7.0 design §4.2).
+    static let notifyOrder: [NeedReason] = [.toReview, .reReview, .teamToReview, .changesRequested, .ciFailed, .conflicts, .mentioned, .assigned,
+                                            .toTriage, .newComments, .readyToMerge]
+
+    /// Settings > Notifications.
+    var notifyLabel: String {
+        switch self {
+        case .toReview: "Review requested"
+        case .reReview: "Re-review: requested again or updated"
+        case .teamToReview: "Team review requested"
+        case .changesRequested: "Changes requested on your pull request"
+        case .ciFailed: "CI failed on your pull request"
+        case .conflicts: "Conflicts on your pull request"
+        case .toTriage: "New issue in your repositories"
+        case .mentioned: "Mentioned"
+        case .assigned: "Assigned to you"
+        case .newComments: "New comments on your pull requests and issues"
+        case .readyToMerge: "Your pull request is ready to merge"
+        case .reminder: "Reminders you set"
+        }
+    }
+
+    /// Settings > Menu Bar > Count in the Menu Bar.
     var settingsLabel: String {
         switch self {
         case .toReview: "Review requested from me"
+        case .reReview: "Re-review: re-requested, or updated after I requested changes"
+        case .conflicts: "Conflicts on my pull requests"
         case .teamToReview: "Review requested from my team"
         case .assigned: "Assigned to me"
+        case .toTriage: "New issues in my repositories"
         case .changesRequested: "Changes requested on my pull requests"
         case .ciFailed: "CI failed on my pull requests"
         case .mentioned: "Unread mentions of me"
         case .newComments: "New comments or reviews on my pull requests and issues"
         case .readyToMerge: "My pull requests ready to merge"
+        case .reminder: "Reminders you set"
         }
     }
 }
@@ -499,6 +691,11 @@ struct AutomationsTab: View {
     @Bindable var store: Store
     @State private var editing: Automation?
     @State private var newOverride = ""
+    @State private var editingTarget: LaunchTarget?
+    @State private var removingTarget: LaunchTarget?
+    @State private var removingRule: Automation?
+    @State private var editingScenario: Scenario?
+    @State private var copied = false
 
     /// Homebrew links `pullping` itself; from source the user makes the link.
     private var installLine: String {
@@ -509,6 +706,19 @@ struct AutomationsTab: View {
     var body: some View {
         Form {
             Section {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    (Text("Easiest: let your agent set this up.").bold()
+                     + Text(" Copy the prompt, paste it into Claude Code or Codex, and it walks you through every option below."))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    Button(copied ? "Copied" : "Copy Setup Prompt") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(AgentSetup.prompt, forType: .string)
+                        copied = true
+                        Task { try? await Task.sleep(for: .seconds(2)); copied = false }
+                    }
+                    .help("Copies the text of `pullping setup prompt`")
+                }
                 Toggle("Run Automations", isOn: Binding(get: { store.automationsEnabled }, set: { store.setAutomationsEnabled($0) }))  // master: regular switch (SET-7)
             } header: {
                 Text("Automations")
@@ -519,7 +729,7 @@ struct AutomationsTab: View {
                 HStack(spacing: 10) {  // RuleRow's layout
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Handle with Agent").fontWeight(.semibold)
-                        Text(verbatim: "\(AutomationCLI.agentWord(store.handler)) in \(store.handler.launcher.title) · \(store.handler.workingDirectory)"
+                        Text(verbatim: "\(AutomationCLI.agentWord(store.handler)) in \(store.automationFile.defaultTarget.name) · \(store.handler.workingDirectory)"
                              + (store.handler.source == "cli" ? " · CLI" : ""))
                             .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             .help(store.handler.source == "cli" ? "Written from the command line" + (store.handler.by.isEmpty ? "" : " by \(store.handler.by)") : "")
@@ -532,19 +742,21 @@ struct AutomationsTab: View {
                     Button("Edit…") { editing = store.handler }
                 }
                 Toggle("Look for earlier sessions", isOn: Binding(get: { store.automationFile.findSessions }, set: { store.setFindSessions($0) }))
+                    .controlSize(.mini)
             } header: {
                 Text("Handle with Agent")
             } footer: {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Adds a Handle with Agent button to the notifications you pick in Edit… and to the pull request's menu. When an agent has linked its session to the pull request (`pullping session set`, or one PullPing started), the button becomes Resume Session and New Session.").formFooter()
-                    Text("When a pull request has no linked session, PullPing searches your local Claude Code and Codex transcripts (`~/.claude/projects`, `~/.codex/sessions`) for the pull request's URL or branch. Only file names and folders are read into PullPing; nothing leaves your Mac.").formFooter()
+                    Text("Adds Handle with Agent to the notifications you pick in Edit… and to the pull request's menu. With a linked session (`pullping session set`, or one PullPing started) it becomes Resume Session and New Session. It opens with the default under Open With; the menu and the notification's chevron offer the others.").formFooter()
+                    Text("Look for earlier sessions: with nothing linked, PullPing searches your Claude Code and Codex transcripts (`~/.claude/projects`, `~/.codex/sessions`) for the pull request's URL or branch. Only file names and folders are read; nothing leaves your Mac.").formFooter()
                 }
             }
             .disabled(!store.automationsEnabled)
+            // By use: what you turn on and edit first, then where runs open and what they say, then folders and status lists.
             Section {
                 if store.rules.isEmpty { Text("No rules yet.").foregroundStyle(.secondary) }
                 ForEach(store.rules) { rule in
-                    RuleRow(store: store, rule: rule) { editing = rule }
+                    RuleRow(store: store, rule: rule, onEdit: { editing = rule }, onRemove: { removingRule = rule })
                 }
             } header: {
                 Text("Rules")
@@ -555,6 +767,9 @@ struct AutomationsTab: View {
                 }
             }
             .disabled(!store.automationsEnabled)
+            openWith
+            backgroundRuns
+            prompts
             Section {
                 let folders = store.automationFile.repoFolders
                 if folders.roots.isEmpty { Text("No folders.").foregroundStyle(.secondary) }
@@ -575,7 +790,7 @@ struct AutomationsTab: View {
                 Text("Repository Folders")
             } footer: {
                 HStack(alignment: .firstTextBaseline) {
-                    Text("{repo_dir}, the default working directory: PullPing finds a repository by the owner/repo of its git remotes in these folders (3 levels deep), whatever the clone is called; without one, the fallback folder, so a run never fails only because the repository isn't cloned. Add an override when it lives elsewhere.").formFooter()
+                    Text("{repo_dir}, the default working directory, is the clone whose git remote matches the pull request's owner/repo, searched 3 levels deep in these folders. Not cloned: the fallback folder. Somewhere else: add an override below.").formFooter()
                     Button("Add Folder…") {
                         func expanded(_ path: String) -> String { (path as NSString).expandingTildeInPath }
                         if let dir = Self.chooseFolder() {
@@ -667,7 +882,108 @@ struct AutomationsTab: View {
         }
         .formStyle(.grouped)
         .sheet(item: $editing) { RuleEditorSheet(store: store, rule: $0, handler: $0.id == Automation.handlerID).frame(width: 560, height: 640) }
+        .sheet(item: $editingTarget) { TargetEditorSheet(store: store, target: $0).frame(width: 460) }
+        .sheet(item: $editingScenario) { ScenarioPromptSheet(store: store, scenario: $0).frame(width: 560, height: 600) }
+        .confirmationDialog(removingRule.map { "Remove \($0.name.isEmpty ? "this rule" : "\u{201C}\($0.name)\u{201D}")?" } ?? "",
+                            isPresented: Binding(get: { removingRule != nil }, set: { if !$0 { removingRule = nil } })) {
+            Button("Remove", role: .destructive) { if let r = removingRule { store.removeAutomation(r.id) } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Its events, prompt and settings are deleted.")
+        }
+        .alert(removingTarget.map { "Remove \($0.name)?" } ?? "", isPresented: Binding(get: { removingTarget != nil }, set: { if !$0 { removingTarget = nil } })) {
+            Button("Remove", role: .destructive) { if let t = removingTarget { store.mutateAutomationFile { $0.removeTarget(t.id) } } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(removingTarget.map { Self.users($0, in: store) }.map { "\($0) \($0 == 1 ? "rule uses" : "rules use") it and will use the default." } ?? "")
+        }
     }
+
+    /// Settings → Automations → Open With: where agent sessions open; the first is the default.
+    private var openWith: some View {
+        Section {
+            let targets = store.automationFile.targets
+            ForEach(Array(targets.enumerated()), id: \.element.id) { i, t in
+                HStack(spacing: 10) {
+                    Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary).accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(verbatim: t.name).fontWeight(.semibold).lineLimit(1)
+                        Text(verbatim: t.summary + (t.source == "cli" ? " · CLI" : "")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            .help(t.source == "cli" ? "Written from the command line" + (t.by.isEmpty ? "" : " by \(t.by)") : "")
+                    }
+                    Spacer(minLength: 8)
+                    if i == 0 { Text("Default").font(.caption).foregroundStyle(.secondary) }
+                    Button("Edit…") { editingTarget = t }
+                    Button("Remove", role: .destructive) { if Self.users(t, in: store) > 0 { removingTarget = t } else { store.mutateAutomationFile { $0.removeTarget(t.id) } } }
+                        .disabled(targets.count == 1)
+                }
+                .contextMenu {  // the keyboard and VoiceOver way to reorder (A11Y-8)
+                    Button("Move Up") { store.mutateAutomationFile { $0.targets.swapAt(i, i - 1) } }.disabled(i == 0)
+                    Button("Move Down") { store.mutateAutomationFile { $0.targets.swapAt(i, i + 1) } }.disabled(i == targets.count - 1)
+                    Button("Make Default") { store.mutateAutomationFile { $0.makeDefault(t.id) } }.disabled(i == 0)
+                }
+            }
+            .onMove { from, to in store.mutateAutomationFile { $0.targets.move(fromOffsets: from, toOffset: to) } }
+        } header: {
+            Text("Open With")
+        } footer: {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Notification buttons use the first one. Drag to reorder, or right-click a row. Terminal, iTerm2 and Ghostty always open a new window.").formFooter()
+                Button("Add…") {
+                    let file = store.automationFile
+                    editingTarget = file.newTarget(Launcher.allCases.first { $0.isInstalled && !file.targets.map(\.launcher).contains($0) } ?? .terminal)
+                }
+                .disabled(store.automationFile.targets.count >= LaunchTarget.maxCount)
+            }
+        }
+        .disabled(!store.automationsEnabled)
+    }
+
+    /// Settings → Automations → Prompts: each scenario's task text, built-in or the user's.
+    private var prompts: some View {
+        Section {
+            // Collapsed: nine rows most people never change (the summary says whether any is custom).
+            DisclosureGroup {
+                ForEach(Scenario.allCases, id: \.self) { s in
+                    HStack {
+                        Text(s.label)
+                        Spacer(minLength: 8)
+                        Text(store.automationFile.task(s) == s.builtIn ? "Built-in" : "Custom").font(.caption).foregroundStyle(.secondary)
+                        Button("Edit…") { editingScenario = s }
+                    }
+                }
+            } label: {
+                let custom = Scenario.allCases.filter { store.automationFile.task($0) != $0.builtIn }.count
+                LabeledContent("Scenario prompts", value: custom == 0 ? "All built-in" : "\(custom) custom")
+            }
+        } header: {
+            Text("Prompts")
+        } footer: {
+            Text("`{task}` in the Handle with Agent prompt (and in a rule's) becomes the task of the run's scenario: what the pull request needs from you. The built-in tasks explain and propose, then wait for your OK.").formFooter()
+        }
+        .disabled(!store.automationsEnabled)
+    }
+
+    /// Settings → Automations → Background Runs: off by default; the daily cap.
+    private var backgroundRuns: some View {
+        Section {
+            Toggle("Background Runs", isOn: Binding(get: { store.automationFile.background.enabled },
+                                                    set: { on in store.mutateAutomationFile { $0.background.enabled = on } }))
+            Stepper(value: Binding(get: { store.automationFile.background.dailyCap }, set: { cap in store.mutateAutomationFile { $0.background.dailyCap = cap } }),
+                    in: BackgroundSettings.dailyCapRange) {
+                Text("At most \(store.automationFile.background.dailyCap) runs a day")
+            }
+            .disabled(!store.automationFile.background.enabled)
+        } header: {
+            Text("Background Runs")
+        } footer: {
+            Text("Claude Code runs without a terminal and can only read the repository folder and the pull request's diff and discussion; the result is a draft, and PullPing posts nothing until you click Post. Start one from a pull request's Handle with Agent menu or from a rule. At most 2 at once, 10 minutes each. Codex can't run in the background yet.").formFooter()
+        }
+        .disabled(!store.automationsEnabled)
+    }
+
+    /// Rules and hooks that open with `t` (they fall back to the default when it goes).
+    static func users(_ t: LaunchTarget, in store: Store) -> Int { store.automationFile.automations.filter { $0.target == t.id }.count }
 
     /// A folder from an open panel, `~` abbreviated; nil on Cancel.
     static func chooseFolder() -> String? {
@@ -698,13 +1014,14 @@ private struct RuleRow: View {
     let store: Store
     let rule: Automation
     let onEdit: () -> Void
+    let onRemove: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(rule.name).fontWeight(.semibold).lineLimit(1)
                 Text(verbatim: summary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    .help(rule.source == "cli" ? "Written from the command line" + (rule.by.isEmpty ? "" : " by \(rule.by)") : "")
+                    .help(summary + (rule.source == "cli" ? "\nWritten from the command line" + (rule.by.isEmpty ? "" : " by \(rule.by)") : ""))  // whole, as it truncates (A11Y-15)
             }
             Spacer(minLength: 8)
             Toggle("Enabled", isOn: Binding(get: { rule.enabled }, set: { store.setEnabled(rule.id, $0) }))
@@ -713,7 +1030,7 @@ private struct RuleRow: View {
                 .controlSize(.mini)
                 .help(rule.enabled ? "On" : "Off")
             Button("Edit…", action: onEdit)
-            Button("Remove", role: .destructive) { store.removeAutomation(rule.id) }
+            Button("Remove…", role: .destructive, action: onRemove)
         }
     }
 
@@ -721,7 +1038,8 @@ private struct RuleRow: View {
     private var summary: String {
         let scope = switch rule.scope { case .any: "Any"; case .mine: "Mine"; case .others: "Others" }
         return "\(rule.kinds.count) \(rule.kinds.count == 1 ? "event" : "events") · \(scope) · \(rule.mode == .auto ? "Automatic" : "Ask") · "
-            + "\(rule.agent.title) in \(rule.launcher.title)" + (rule.source == "cli" ? " · CLI" : "")
+            + "\(rule.agent.title) " + (rule.background.map { "· background " + ($0 == .review ? "review" : $0 == .triage ? "triage" : "summary") } ?? "in \(store.automationFile.target(for: rule).target.name)")
+            + (rule.source == "cli" ? " · CLI" : "")
     }
 }
 
@@ -738,7 +1056,7 @@ struct RuleEditorSheet: View {
     /// Save found the file changed underneath (`pullping` meanwhile): Reload or Save Anyway.
     @State private var conflict = false
     @Environment(\.dismiss) private var dismiss
-    private static let kinds = EventKind.allCases.filter { $0 != .reviewReminder }
+    private static let kinds = EventKind.allCases.filter { $0 != .reviewReminder && $0 != .reminder }
 
     init(store: Store, rule: Automation, handler: Bool = false) {
         self.store = store
@@ -785,11 +1103,25 @@ struct RuleEditorSheet: View {
         let rule = edited
         func blank(_ s: String) -> Bool { s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         return (handler || !blank(rule.name)) && !rule.kinds.isEmpty && !blank(rule.prompt) && !blank(rule.workingDirectory)
-            && !(rule.launcher == .custom && blank(rule.customCommand))
+            && (rule.background == nil || BackgroundPlanner.unsupported(rule.agent) == nil)
+    }
+
+    /// The "Use the scenario's prompt" checkbox: a `{task}` line before the safety line (else at the end), or none.
+    static func withTask(_ prompt: String, _ on: Bool) -> String {
+        guard on else {
+            return prompt.components(separatedBy: "\n").filter { $0.trimmingCharacters(in: .whitespaces) != "{task}" }.joined(separator: "\n")
+                .replacingOccurrences(of: "{task}", with: "")
+        }
+        guard !prompt.contains("{task}") else { return prompt }
+        var lines = prompt.components(separatedBy: "\n")
+        lines.insert("{task}", at: lines.lastIndex { $0.hasPrefix("Text quoted from GitHub") } ?? lines.count)
+        return lines.joined(separator: "\n")
     }
 
     var body: some View {
         VStack(spacing: 0) {
+            Text(handler ? "Handle with Agent" : original == nil ? "New Rule" : "Edit Rule").font(.headline)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 20).padding(.top, 16)
             Form {
                 if !handler {
                     Section {
@@ -839,14 +1171,23 @@ struct RuleEditorSheet: View {
                         ForEach(AgentKind.allCases, id: \.self) { Text($0.title).tag($0) }
                     }
                     TextField("Command", text: $rule.agentCommand, prompt: Text(verbatim: rule.agent.rawValue))
-                    Picker("Open in", selection: $rule.launcher) {
-                        // Installed apps and Custom; a saved app that's gone stays listed so the picker shows it.
-                        ForEach(Launcher.allCases.filter { $0.isInstalled || $0 == rule.launcher }, id: \.self) { launcher in
-                            Text(verbatim: launcher.isInstalled ? launcher.title : "\(launcher.title) (not installed)").tag(launcher)
+                    if !handler && (store.automationFile.background.enabled || rule.background != nil) {
+                        Picker("Run", selection: $rule.background) {
+                            Text("In a terminal").tag(BackgroundAction?.none)
+                            Text("Review in the background (a draft)").tag(BackgroundAction?.some(.review))
+                            Text("Summarize in the background").tag(BackgroundAction?.some(.summarize))
+                            Text("Triage a new issue in the background (a draft reply)").tag(BackgroundAction?.some(.triage))
                         }
                     }
-                    if rule.launcher == .custom {
-                        TextField("Custom command", text: $rule.customCommand, prompt: Text(verbatim: "open -a iTerm {script}"))
+                    if !handler {  // the handler opens with the default
+                        let targets = store.automationFile.targets
+                        Picker("Open in", selection: $rule.target) {
+                            Text(verbatim: "Default (\(store.automationFile.defaultTarget.name))").tag(String?.none)
+                            ForEach(targets) { Text(verbatim: $0.name).tag(String?.some($0.id)) }
+                            if let gone = rule.target, !targets.contains(where: { $0.id == gone }) {
+                                Text(verbatim: "\(gone) (removed: opens with the default)").tag(String?.some(gone))
+                            }
+                        }
                     }
                     TextField("Working directory", text: $rule.workingDirectory, prompt: Text(verbatim: Automation.defaultDirectory))
                     if !handler {
@@ -856,20 +1197,33 @@ struct RuleEditorSheet: View {
                         }
                     }
                 } footer: {
+                    if rule.background != nil {
+                        if let reason = BackgroundPlanner.unsupported(rule.agent) {
+                            Text(verbatim: "\(reason): choose Claude to save this rule.").font(.subheadline).foregroundStyle(Theme.bad)
+                        }
+                        Text("In the background Claude Code only reads (no shell, network or write tools) and the run ends in a draft you post yourself; Open in, Session, Working directory and Prompt are not used.").formFooter()
+                    }
                     if rule.usesLinkedSession {
                         Text("Runs only on pull requests with a linked session, in that session's agent and folder; Command still applies. Pull requests without a link are skipped.").formFooter()
                     }
-                    Text(rule.launcher == .custom
-                         ? "Command replaces `\(rule.agent.rawValue)`, for example a wrapper function. Custom command placeholders, inserted already quoted: {script} {cwd} {title} {prompt_file} {agent_command}. iTerm: `open -a iTerm {script}`."
-                         : "Command replaces `\(rule.agent.rawValue)`, for example a wrapper function. The working directory must exist when \(handler ? "it" : "the rule") runs; {repo_dir} is the repository's clone under Repository Folders (found by its git remote), else the fallback folder; {repo_root} the folder holding it; {main_dir} its main worktree; {worktree_dir} the worktree with the pull request's branch.").formFooter()
+                    Text("Command replaces `\(rule.agent.rawValue)`, for example a wrapper function. \(handler ? "Opens with the default in Open With. " : "")The working directory must exist when \(handler ? "it" : "the rule") runs; {repo_dir} is the repository's clone under Repository Folders (found by its git remote), else the fallback folder; {repo_root} the folder holding it; {main_dir} its main worktree; {worktree_dir} the worktree with the pull request's branch.").formFooter()
                 }
                 Section {
                     TextEditor(text: $rule.prompt).font(.body.monospaced()).frame(height: 110)
-                    if !handler { Stepper("Runs per pull request: \(rule.maxRunsPerPR)", value: $rule.maxRunsPerPR, in: 1...10) }
+                    if handler {
+                        if !rule.prompt.contains("{task}") {
+                            Text("This prompt does not use scenario prompts. Add `{task}` where the task belongs.").font(.callout).foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Toggle("Use the scenario's prompt", isOn: Binding(get: { rule.prompt.contains("{task}") }, set: { rule.prompt = Self.withTask(rule.prompt, $0) }))
+                            .toggleStyle(.checkbox)
+                            .help("Adds or removes the {task} line: the task of the scenario (Settings → Automations → Prompts)")
+                        Stepper("Runs per \(rule.itemNoun): \(rule.maxRunsPerPR)", value: $rule.maxRunsPerPR, in: 1...10)
+                    }
                 } header: {
                     Text("Prompt")
                 } footer: {
-                    Text("Placeholders: {pr_url} {pr_number} {repo} {repo_owner} {repo_name} {repo_dir} {repo_root} {main_dir} {worktree_dir} {is_issue} {head_sha} {event} {event_label} {account} {cwd} {automation}. Text written by others on GitHub: {title} {author} {actor} {summary} {branch}. PullPing starts the agent exactly as you would in a terminal; permission prompts are the agent's own.").formFooter()
+                    Text("`{task}` is replaced by the prompt of the scenario (Prompts section). Placeholders: {pr_url} {pr_number} {repo} {repo_owner} {repo_name} {repo_dir} {repo_root} {main_dir} {worktree_dir} {is_issue} {head_sha} {event} {event_label} {account} {cwd} {automation} {scenario} {scenario_label} {resume_note} {event_url} {reviewed_sha}. Text written by others on GitHub: {title} {author} {actor} {summary} {branch}. PullPing starts the agent exactly as you would in a terminal; permission prompts are the agent's own.").formFooter()
                 }
             }
             .formStyle(.grouped)
@@ -886,7 +1240,8 @@ struct RuleEditorSheet: View {
             let blocked = handler ? nil : store.prs.first.flatMap { store.runBlocked(edited, $0) }  // the handler has no caps
             let last = store.automationFile.runs.last(where: { $0.automationID == rule.id })
             // Above the buttons, whole: an error names the folder it tried.
-            if let status = blocked ?? last.map({ $0.ok ? "Started" : $0.detail }) {
+            // A block names the pull request Try would use ("octo-org/widgets #12: No linked session").
+            if let status = blocked.flatMap({ b in store.prs.first.map { "\($0.repo) #\($0.number): \(b)" } }) ?? last.map({ $0.ok ? "Started" : $0.detail }) {
                 Text(verbatim: status).font(.callout).foregroundStyle(blocked != nil ? .secondary : last?.ok == true ? Theme.good : Theme.bad)
                     .lineLimit(3).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -905,6 +1260,146 @@ struct RuleEditorSheet: View {
                 .keyboardShortcut(.defaultAction).disabled(!valid)
             }
             .padding(16)
+        }
+    }
+}
+
+/// Open With › Add… / Edit…: a target's name, app, custom line and Ghostex reuse. A new target gets an id from its app.
+struct TargetEditorSheet: View {
+    let store: Store
+    @State private var target: LaunchTarget
+    @Environment(\.dismiss) private var dismiss
+
+    init(store: Store, target: LaunchTarget) {
+        self.store = store
+        _target = State(initialValue: target)
+    }
+
+    private var isNew: Bool { !store.automationFile.targets.contains { $0.id == target.id } }
+    private var valid: Bool { target.launcher != .custom || !target.customCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text(isNew ? "Add to Open With" : "Edit Open With").font(.headline)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 20).padding(.top, 16)
+            Form {
+                Section {
+                    TextField("Name", text: $target.name, prompt: Text(verbatim: target.launcher.title))
+                    Picker("Open in", selection: $target.launcher) {
+                        // Installed apps and Custom; a saved app that's gone stays listed so the picker shows it.
+                        ForEach(Launcher.allCases.filter { $0.isInstalled || $0 == target.launcher }, id: \.self) { launcher in
+                            Text(verbatim: launcher.isInstalled ? launcher.title : "\(launcher.title) (not installed)").tag(launcher)
+                        }
+                    }
+                    if target.launcher == .custom {
+                        TextField("Custom command", text: $target.customCommand, prompt: Text(verbatim: "open -a iTerm {script}"))
+                    }
+                    if target.launcher == .ghostex {
+                        Toggle("Focus the session if it is already running", isOn: $target.reuseRunning).controlSize(.mini)
+                    }
+                } footer: {
+                    Text(target.launcher == .custom
+                         ? "The launch line for any other terminal. Placeholders, inserted already quoted: {script} {cwd} {title} {prompt_file} {agent_command}."
+                         : target.launcher == .ghostex
+                         ? "Resume Session then focuses the session when it already runs in Ghostex and types a line pointing at the prompt, without pressing Return."
+                         : "Opens a new window for every run.").formFooter()
+                }
+            }
+            .formStyle(.grouped)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(isNew ? "Add" : "Save") { save() }.keyboardShortcut(.defaultAction).disabled(!valid)
+            }
+            .padding(16)
+        }
+    }
+
+    private func save() {
+        var t = target
+        t.name = PromptTemplate.clean(t.name, max: 40)
+        if t.name.isEmpty { t.name = t.launcher.title }
+        if t.launcher != .custom { t.customCommand = "" }
+        (t.source, t.by) = ("ui", "")
+        store.mutateAutomationFile { file in
+            if let i = file.targets.firstIndex(where: { $0.id == t.id }) {
+                file.targets[i] = t
+            } else if file.targets.count < LaunchTarget.maxCount {
+                t.id = file.newTargetID(t.launcher.rawValue)  // from the app it ended up with
+                file.targets.append(t)
+            }
+        }
+        dismiss()
+    }
+}
+
+/// Prompts › Edit…: one scenario's task text, the placeholders, Reset to Built-in, and the whole prompt it makes.
+struct ScenarioPromptSheet: View {
+    let store: Store
+    let scenario: Scenario
+    @State private var text: String
+    @Environment(\.dismiss) private var dismiss
+
+    init(store: Store, scenario: Scenario) {
+        self.store = store
+        self.scenario = scenario
+        _text = State(initialValue: store.automationFile.task(scenario))
+    }
+
+    private var blank: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    TextEditor(text: $text).font(.body.monospaced()).frame(height: 130)
+                } header: {
+                    Text(scenario.label)
+                } footer: {
+                    Text("Placeholders as in the prompt, for example {pr_url} {head_sha} {event_url} (the comment or review) {reviewed_sha} (the commit of your last review). At most \(Scenario.maxTaskLength) characters\(text.count > Scenario.maxTaskLength ? " (now \(text.count))" : "").").formFooter()
+                }
+                Section {
+                    Text(verbatim: preview).font(.caption.monospaced()).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                } header: {
+                    Text("Preview")
+                } footer: {
+                    if !store.handler.prompt.contains("{task}") {
+                        Text("The Handle with Agent prompt has no `{task}`, so it doesn't use this text yet.").formFooter()
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            HStack {
+                Button("Reset to Built-in") { text = scenario.builtIn }.disabled(text == scenario.builtIn)
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Save") {
+                    store.mutateAutomationFile { $0.scenarioPrompts[scenario.rawValue] = text == scenario.builtIn ? nil : text }
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction).disabled(blank || text.count > Scenario.maxTaskLength)
+            }
+            .padding(16)
+        }
+    }
+
+    /// The Handle with Agent prompt with this text, on the latest pull request (a placeholder one without any). Writes nothing.
+    private var preview: String {
+        let file = store.automationFile
+        var handler = file.handler
+        handler.workingDirectory = "~"  // the preview is about the prompt; the folder is checked when it runs
+        let pr = store.prs.first ?? {
+            var pr = TrackedPR(id: "PREVIEW", accountID: UUID(), firstTrackedAt: Date())
+            (pr.repo, pr.number, pr.title, pr.url) = ("octo-org/widgets", 12, "Add a widget cache", URL(string: "https://github.com/octo-org/widgets/pull/12")!)
+            return pr
+        }()
+        do {
+            return try LaunchPlanner.plan(handler, pr: pr, event: nil, account: store.account(pr.accountID)?.login ?? "", runID: "preview",
+                                          runsDir: FileManager.default.temporaryDirectory, home: NSHomeDirectory(), folders: file.repoFolders,
+                                          index: store.index(file.repoFolders), scenario: scenario, task: blank ? nil : text).promptText
+                .trimmingCharacters(in: .newlines)
+        } catch {
+            return error.localizedDescription
         }
     }
 }

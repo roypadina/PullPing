@@ -1,0 +1,64 @@
+{
+  "data": {
+    "nodes": [
+      {
+        "__typename": "PullRequest", "id": "PR_7", "number": 7, "title": "Retry webhooks", "url": "https://github.com/octo-org/widgets/pull/7",
+        "isDraft": false, "state": "OPEN", "merged": false, "mergedAt": null, "closedAt": null,
+        "updatedAt": "2026-11-13T10:00:00Z", "headRefOid": "fff7777", "headRefName": "retry", "body": "",
+        "reviewDecision": "CHANGES_REQUESTED", "mergeStateStatus": "BLOCKED", "isInMergeQueue": false, "autoMergeRequest": { "enabledAt": "2026-11-13T09:00:00Z" },
+        "author": { "login": "bob" }, "repository": { "nameWithOwner": "octo-org/widgets" }, "assignees": { "nodes": [] },
+        "reviewRequests": { "nodes": [ { "requestedReviewer": { "__typename": "User", "login": "carol" } } ] },
+        "latestReviews": { "nodes": [
+          { "author": { "login": "alice" }, "state": "COMMENTED", "submittedAt": "2026-11-13T09:30:00Z", "url": "https://github.com/octo-org/widgets/pull/7#pullrequestreview-3", "commit": { "oid": "fff7777" } },
+          { "author": { "login": "dana" }, "state": "COMMENTED", "submittedAt": "2026-11-13T09:40:00Z", "url": "https://github.com/octo-org/widgets/pull/7#pullrequestreview-4", "commit": { "oid": "fff7777" } },
+          { "author": { "login": "erin" }, "state": "COMMENTED", "submittedAt": "2026-11-13T09:45:00Z", "url": "https://github.com/octo-org/widgets/pull/7#pullrequestreview-5", "commit": null }
+        ] },
+        "latestOpinionatedReviews": { "nodes": [
+          { "author": { "login": "alice" }, "state": "CHANGES_REQUESTED", "submittedAt": "2026-11-12T09:00:00Z", "commit": { "oid": "aaa1111" } },
+          { "author": { "login": "dana" }, "state": "CHANGES_REQUESTED", "submittedAt": "2026-11-12T10:00:00Z", "commit": { "oid": "aaa1111" } }
+        ] },
+        "viewerLatestReview": { "author": { "login": "dana" }, "state": "COMMENTED", "submittedAt": "2026-11-13T09:40:00Z", "commit": { "oid": "fff7777" } },
+        "commits": { "nodes": [] },
+        "timelineItems": { "pageInfo": { "hasNextPage": false, "endCursor": null }, "nodes": [] }
+      },
+      {
+        "__typename": "PullRequest", "id": "PR_8", "number": 8, "title": "Bump deps", "url": "https://github.com/octo-org/widgets/pull/8",
+        "isDraft": false, "state": "OPEN", "merged": false, "mergedAt": null, "closedAt": null,
+        "updatedAt": "2026-11-13T10:00:00Z", "headRefOid": "ccc8888", "headRefName": "deps", "body": "",
+        "reviewDecision": "APPROVED", "mergeStateStatus": "CLEAN", "isInMergeQueue": true, "autoMergeRequest": null,
+        "author": { "login": "dana" }, "repository": { "nameWithOwner": "octo-org/widgets" }, "assignees": { "nodes": [] },
+        "reviewRequests": { "nodes": [] },
+        "latestReviews": { "nodes": [] },
+        "latestOpinionatedReviews": { "nodes": [
+          { "author": { "login": "carol" }, "state": "APPROVED", "submittedAt": "2026-11-12T09:00:00Z", "commit": null }
+        ] },
+        "viewerLatestReview": { "author": { "login": "dana" }, "state": "COMMENTED", "submittedAt": "2026-11-12T08:00:00Z", "commit": { "oid": "ccc8888" } },
+        "commits": { "nodes": [] },
+        "timelineItems": { "pageInfo": { "hasNextPage": false, "endCursor": null }, "nodes": [] }
+      },
+      {
+        "__typename": "PullRequest", "id": "PR_9", "number": 9, "title": "Cache headers", "url": "https://github.com/octo-org/widgets/pull/9",
+        "isDraft": false, "state": "OPEN", "merged": false, "mergedAt": null, "closedAt": null,
+        "updatedAt": "2026-11-13T10:00:00Z", "headRefOid": "ddd9999", "headRefName": "cache", "body": "",
+        "reviewDecision": "REVIEW_REQUIRED", "mergeStateStatus": "UNKNOWN", "isInMergeQueue": false, "autoMergeRequest": null,
+        "author": { "login": "bob" }, "repository": { "nameWithOwner": "octo-org/widgets" }, "assignees": { "nodes": [] },
+        "reviewRequests": { "nodes": [] }, "latestReviews": { "nodes": [] }, "latestOpinionatedReviews": { "nodes": [] },
+        "viewerLatestReview": { "author": { "login": "dana" }, "state": "DISMISSED", "submittedAt": "2026-11-12T08:00:00Z", "commit": { "oid": "bbb2222" } },
+        "commits": { "nodes": [] },
+        "timelineItems": { "pageInfo": { "hasNextPage": false, "endCursor": null }, "nodes": [] }
+      },
+      {
+        "__typename": "PullRequest", "id": "PR_10", "number": 10, "title": "Docs", "url": "https://github.com/octo-org/widgets/pull/10",
+        "isDraft": false, "state": "OPEN", "merged": false, "mergedAt": null, "closedAt": null,
+        "updatedAt": "2026-11-13T10:00:00Z", "headRefOid": "eee1010", "headRefName": "docs", "body": "",
+        "reviewDecision": null, "mergeStateStatus": "CLEAN", "isInMergeQueue": false, "autoMergeRequest": null,
+        "author": { "login": "bob" }, "repository": { "nameWithOwner": "octo-org/widgets" }, "assignees": { "nodes": [] },
+        "reviewRequests": { "nodes": [] }, "latestReviews": { "nodes": [] }, "latestOpinionatedReviews": { "nodes": [] },
+        "viewerLatestReview": { "author": { "login": "dana" }, "state": "PENDING", "submittedAt": null, "commit": { "oid": "eee1010" } },
+        "commits": { "nodes": [] },
+        "timelineItems": { "pageInfo": { "hasNextPage": false, "endCursor": null }, "nodes": [] }
+      }
+    ],
+    "rateLimit": { "cost": 1, "remaining": 4990, "resetAt": "2026-11-13T11:00:00Z" }
+  }
+}

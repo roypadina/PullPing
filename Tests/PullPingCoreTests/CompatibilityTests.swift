@@ -18,6 +18,8 @@ final class CompatibilityTests: XCTestCase {
         XCTAssertNil(pr.stateReason)
         XCTAssertNil(pr.headRef)  // until the next refresh
         XCTAssertNil(state.baselinedIssueAccounts)  // issue baseline still to come
+        XCTAssertNil(state.watchedSince)
+        XCTAssertFalse(pr.watched)
         XCTAssertTrue(pr.muted)
         XCTAssertEqual(pr.events.count, 1)
         XCTAssertEqual(state.ignoredIDs, ["PR_9"])
@@ -40,15 +42,109 @@ final class CompatibilityTests: XCTestCase {
         XCTAssertEqual(settings.style(for: .labeled, mine: false), .off)
     }
 
-    /// Reasons saved before issue tracking gain `assigned`; a later choice to turn it off sticks.
+    /// Reasons saved before issue tracking gain `assigned`, before 0.7.0 `reReview` and `conflicts`; a later choice to turn
+    /// them off sticks.
     func testAssignedReasonMigration() throws {
         let old = try JSONDecoder().decode(AppSettings.self, from: Data(#"{ "badgeReasons": ["to review", "mentioned"] }"#.utf8))
-        XCTAssertEqual(old.badgeReasons, [.toReview, .mentioned, .assigned])
+        XCTAssertEqual(old.badgeReasons, [.toReview, .mentioned, .assigned, .reReview, .conflicts, .reminder, .toTriage])
         var mine = old
-        mine.badgeReasons.remove(.assigned)
+        mine.badgeReasons.subtract([.assigned, .conflicts, .reminder])
         let again = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(mine))
-        XCTAssertEqual(again.badgeReasons, [.toReview, .mentioned])
+        XCTAssertEqual(again.badgeReasons, [.toReview, .mentioned, .reReview, .reminder, .toTriage], "a reminder I set always counts")
         XCTAssertTrue(again.trackIssues)
+    }
+
+    /// 0.6.1 files: pull requests load without `myReview` / `autoMerge` (the Poller refreshes them once); panel styles move
+    /// from kinds to reasons, the new reasons start counted.
+    func testV061FilesLoad() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("state.json")
+        try fixture("v061-state").write(to: url)
+        let state = StateStore(url: url).state
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent("state.broken.json").path))
+        let mine = try XCTUnwrap(state.prs["PR_1"]), theirs = try XCTUnwrap(state.prs["PR_2"]), issue = try XCTUnwrap(state.prs["I_1"])
+        XCTAssertEqual([mine.autoMerge, theirs.autoMerge, issue.autoMerge], [nil, nil, nil])
+        XCTAssertNil(theirs.myReview)
+        XCTAssertNil(theirs.reviewers.first?.commitOID)
+        XCTAssertEqual(mine.events.first?.seeded, true)
+        XCTAssertEqual(Attention.bucket(mine), .merge)
+        XCTAssertEqual(Attention.bucket(theirs), .reviewed)  // re-review needs `myReview`: after the backfill refresh
+        XCTAssertEqual(Attention.bucket(issue), .issueAssigned)
+        XCTAssertEqual([mine.remindAt, theirs.remindAt], [nil, nil])
+        XCTAssertEqual([mine.markedUnread, theirs.markedUnread], [false, false])
+        XCTAssertEqual([mine.watched, issue.watched], [false, false])  // set by the next poll
+        XCTAssertNil(state.watchedSince)
+        XCTAssertNil(state.mutedRepos)
+        XCTAssertEqual([mine.mutedByRepo, theirs.mutedByRepo, issue.mutedByRepo], [false, false, false])
+        // Remind Me and Mark as Unread survive a save and a reload.
+        let store = StateStore(url: url)
+        store.update { $0.prs["PR_2"]?.remindAt = t0; $0.prs["PR_2"]?.markedUnread = true }
+        store.save()
+        let reloaded = try XCTUnwrap(StateStore(url: url).state.prs["PR_2"])
+        XCTAssertEqual(reloaded.remindAt, t0)
+        XCTAssertTrue(reloaded.markedUnread)
+        // A muted repository survives too.
+        store.update { RepoMute.mute(["octo-org/widgets"], in: &$0) }
+        store.save()
+        let muted = StateStore(url: url).state
+        XCTAssertEqual(muted.mutedRepos, ["octo-org/widgets"])
+        XCTAssertEqual(muted.prs.values.filter(\.mutedByRepo).count, 3)
+        XCTAssertEqual(muted, store.state)
+
+        let settings = try JSONDecoder().decode(AppSettings.self, from: fixture("v061-settings"))
+        XCTAssertEqual(settings.needStyles, AppSettings.defaultNeedStyles)
+        XCTAssertEqual(settings.badgeReasons, Set(NeedReason.allCases))
+        XCTAssertEqual(settings.phoneMine, [.merged, .ciFailed])
+        XCTAssertEqual(settings.style(for: .comment, mine: false), .off)  // kept for a downgrade and phone priority
+        XCTAssertEqual(settings.excludedIssueRepos, [])
+        var excluded = settings
+        excluded.excludedIssueRepos = ["octo-org/legacy"]
+        XCTAssertEqual(try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(excluded)).excludedIssueRepos, ["octo-org/legacy"])
+    }
+
+    /// A 0.6.1 automations file shaped like a real one (handler in Ghostex with a wrapper, `{repo_root}`, its own prompt, Look
+    /// for earlier sessions on, links and runs): it loads unchanged but for the new keys, and saves back the same.
+    func testV061AutomationsFileMigrates() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("automations.json")
+        try fixture("v061-automations").write(to: url)
+        let original = try XCTUnwrap(JSONSerialization.jsonObject(with: fixture("v061-automations")) as? [String: Any])
+        let store = AutomationStore(url: url)
+        let file = store.load()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent("automations.broken.json").path))
+        XCTAssertEqual(file.targets, [LaunchTarget(id: "ghostex", name: "Ghostex", launcher: .ghostex)])
+        XCTAssertTrue(file.targets[0].reuseRunning, "Ghostex keeps focusing a running session")
+        let h = file.handler
+        XCTAssertEqual([h.agentCommand, h.workingDirectory, h.launcher.rawValue], ["wrapper", "{repo_root}", "ghostex"])
+        XCTAssertEqual(h.prompt, (original["handler"] as? [String: Any])?["prompt"] as? String, "a custom prompt is untouched")
+        XCTAssertFalse(h.prompt.contains("{task}"))
+        XCTAssertTrue(h.enabled && file.findSessions && file.enabled)
+        XCTAssertEqual(h.kinds.count, 12, "the default kinds gain issueOpened")
+        XCTAssertTrue(h.kinds.contains(.issueOpened))
+        XCTAssertEqual(file.version, 2)
+        XCTAssertEqual(file.sessions.map(\.sessionID), ["0f3c2a1e-5b7d-4c9e-8a10-2b4d6f8e1c3a"])
+        XCTAssertEqual(file.runs.count, 1)
+        XCTAssertEqual(file.repoFolders.overrides, ["octo-org/widgets": "~/src/widgets-main"])
+        XCTAssertEqual(file.scenarioPrompts, [:])
+        XCTAssertEqual(file.target(for: h).target.id, "ghostex")
+        // The first save writes the targets and keeps every old key as it was.
+        store.mutate { $0.findSessions = false; $0.findSessions = true; $0.runs.append($0.runs[0]) }
+        let saved = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        XCTAssertEqual((saved["targets"] as? [[String: Any]])?.map { $0["id"] as? String }, ["ghostex"])
+        func handler(_ json: [String: Any]) -> (NSDictionary, Set<String>) {  // kinds: a set, written in any order
+            var h = json["handler"] as? [String: Any] ?? [:]
+            let kinds = Set(h.removeValue(forKey: "kinds") as? [String] ?? [])
+            return (h as NSDictionary, kinds)
+        }
+        XCTAssertEqual(handler(saved).0, handler(original).0, "0.7 reads the same handler")
+        XCTAssertEqual(handler(saved).1, handler(original).1.union(["issueOpened"]))
+        XCTAssertEqual(saved["sessions"] as? NSArray, original["sessions"] as? NSArray)
+        XCTAssertEqual(saved["repoFolders"] as? NSDictionary, original["repoFolders"] as? NSDictionary)
+        XCTAssertEqual(AutomationStore(url: url).load().targets, file.targets)
     }
 
     func testOldAccountsLoad() throws {

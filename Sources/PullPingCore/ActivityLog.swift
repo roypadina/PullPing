@@ -9,12 +9,15 @@ public struct ActivityEntry: Codable, Sendable, Equatable {
 
     /// Why an event showed no panel, in the order `Store.show` checks.
     public enum Quiet: String, Codable, Sendable, CaseIterable {
-        case own, notificationsOff, paused, muted, snoozed, styleOff
+        /// `activityOnly`: the event asks nothing of me (`Notify.reason` nil). `styleOff`: its reason is Off in Settings
+        /// (before 0.7.0: its kind).
+        case own, activityOnly, notificationsOff, paused, muted, snoozed, styleOff
 
         /// "Not shown: muted" (app) and the CLI.
         public var label: String {
             switch self {
             case .own: "your own"
+            case .activityOnly: "activity only"
             case .notificationsOff: "notifications off"
             case .paused: "paused"
             case .muted: "muted"
@@ -24,14 +27,16 @@ public struct ActivityEntry: Codable, Sendable, Equatable {
         }
 
         /// nil = the event gets a panel. `offered`: an ask-mode automation offers a Run button on it, which shows the panel
-        /// whatever the kind's style, also for an own event. Hidden pull requests still notify, so hidden is no reason.
+        /// whatever its reason and style, also for an own event. Hidden pull requests still notify, so hidden is no reason.
         public static func reason(_ event: PREvent, pr: TrackedPR, settings: AppSettings, offered: Bool, now: Date) -> Quiet? {
             if event.isOwn && !offered { return .own }
+            let need = Notify.reason(event, pr: pr)
+            if need == nil && !offered { return .activityOnly }
             if !settings.notificationsEnabled { return .notificationsOff }
             if settings.isPaused(now) { return .paused }
             if pr.muted { return .muted }
             if (pr.snoozedUntil ?? .distantPast) > now { return .snoozed }
-            if !offered && settings.style(for: event.kind, mine: pr.roles.contains(.author)) == .off { return .styleOff }
+            if !offered, let need, settings.needStyle(need) == .off { return .styleOff }
             return nil
         }
     }
@@ -55,10 +60,32 @@ public struct ActivityEntry: Codable, Sendable, Equatable {
     public var quiet: Quiet?
     public var phone: Bool?
     public var own: Bool?
+    /// What the event asked of me (`Notify.reason`); nil = Activity only, and on lines from before 0.7.0.
+    public var need: NeedReason?
     // Runs and Handle with Agent launches.
     public var automation: String?
     public var ok: Bool?
     public var error: String?
+    /// Background runs: the run's id (its draft) and what happened to it.
+    public var runID: String?
+    public var stage: Stage?
+
+    /// A background run's step in the log: started, its draft ready, failed (also cancelled, timed out, interrupted), not
+    /// started (a cap or a gate), its draft discarded or posted.
+    public enum Stage: String, Codable, Sendable {
+        case started, ready, failed, refused, discarded, posted
+
+        public var label: String {
+            switch self {
+            case .started: "Started"
+            case .ready: "Ready"
+            case .failed: "Failed"
+            case .refused: "Not started"
+            case .discarded: "Discarded"
+            case .posted: "Posted"
+            }
+        }
+    }
 
     public init(at: Date, kind: Kind, pr: TrackedPR, account: String) {
         self.at = at
@@ -83,16 +110,39 @@ public struct ActivityEntry: Codable, Sendable, Equatable {
         self.quiet = quiet
         self.phone = phone
         own = e.isOwn ? true : nil
+        need = Notify.reason(e, pr: pr)
     }
 
     /// A launch PullPing started (app or `pullping run`); `error` nil = it started.
-    public init(run a: Automation, pr: TrackedPR, account: String, event: EventKind?, error: String?, at: Date) {
+    /// `scenario` / `prompt`: the handler's run name (`AutomationCLI.runName`).
+    public init(run a: Automation, pr: TrackedPR, account: String, event: EventKind?, error: String?, at: Date, scenario: Scenario? = nil,
+                prompt: Bool = true) {
         let handler = a.id == Automation.handlerID
         self.init(at: at, kind: handler ? .handler : .run, pr: pr, account: account)
         self.event = event
-        automation = handler ? "\(a.name) (\(AutomationCLI.sessionWord(a)))" : a.name
+        automation = AutomationCLI.runName(a, scenario: scenario, prompt: prompt)
         ok = error == nil
         self.error = error
+    }
+
+    /// A background run's step; `what` the action ("Review in Background") or, posted, "Review: Request changes as @login".
+    public init(background what: String, stage: Stage, pr: TrackedPR, account: String, runID: String?, error: String? = nil, at: Date) {
+        self.init(at: at, kind: .run, pr: pr, account: account)
+        automation = what
+        self.stage = stage
+        self.runID = runID
+        ok = stage == .failed ? false : stage == .refused ? nil : true
+        self.error = error
+    }
+
+    /// A switch a `pullping` command flipped, with no pull request: "Background Runs" · "Turned on" · "From the command line".
+    public init(setting: String, what: String, by: String, at: Date) {
+        self.at = at
+        kind = .run
+        title = setting
+        automation = what
+        summary = "From the command line" + (by.isEmpty ? "" : " (by \(by))")
+        ok = true
     }
 
     /// Lenient: a missing or unreadable field takes its default; only `at` and `kind` are required.
@@ -115,21 +165,27 @@ public struct ActivityEntry: Codable, Sendable, Equatable {
         quiet = value(.quiet)
         phone = value(.phone)
         own = value(.own)
+        need = value(.need)
         automation = value(.automation)
         ok = value(.ok)
         error = value(.error)
+        runID = value(.runID)
+        stage = value(.stage)
     }
 
-    /// "Review approved · alice", "Ran Fix CI", "Failed: Fix CI": the app row and `pullping activity`.
+    /// "Review approved · alice", "Ran Fix CI", "Failed: Fix CI", "Asked: Fix CI": the app row and `pullping activity`.
     public var what: String {
-        guard kind == .event else { return (ok == false ? "Failed: " : "Ran ") + (automation ?? "") }
+        if let stage { return "\(stage.label): \(automation ?? "")" }
+        if prID == nil, kind != .event { return automation ?? "" }  // a setting
+        guard kind == .event else { return (ok == false ? "Failed: " : ok == nil ? "Asked: " : "Ran ") + (automation ?? "") }
         let label = event?.label ?? ""
         return actor.map { $0.isEmpty || $0 == "CI" ? label : "\(label) · \($0)" } ?? label
     }
 
-    /// "banner, phone", "not shown: muted", "OK", "failed: <error>".
+    /// "banner, phone", "not shown: muted", "OK", "failed: <error>"; a run not started (`ok` nil): why, e.g. "session is running in
+    /// Ghostex: asked instead".
     public var outcome: String {
-        guard kind == .event else { return ok == false ? "failed: \(error ?? "")" : "OK" }
+        guard kind == .event else { return ok == false ? "failed: \(error ?? "")" : ok == nil ? error ?? "" : "OK" }
         let panel = quiet.map { "not shown: \($0.label)" } ?? self.panel?.rawValue ?? "not shown"
         return phone == true ? "\(panel), phone" : panel
     }

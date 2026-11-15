@@ -1,4 +1,5 @@
 import AppKit
+import OSLog
 import SwiftUI
 
 /// Real windows from a menu-bar-only app (MBX-15): Dock icon and menu bar while one is open, back to
@@ -6,6 +7,7 @@ import SwiftUI
 @MainActor
 final class AccessoryWindows: NSObject, NSWindowDelegate {
     static let shared = AccessoryWindows()
+    static let log = Logger(subsystem: "com.padina.pullping", category: "activation")
     /// The Store's manager, so Edit > Undo reaches Stop Tracking and Reset Ignored from any window.
     var undoManager: UndoManager?
 
@@ -13,8 +15,32 @@ final class AccessoryWindows: NSObject, NSWindowDelegate {
         StatusItem.shared.closePopover()  // every window entry point: status panel, menus, links, Welcome
         window.delegate = self
         NSApp.setActivationPolicy(.regular)
-        NSApp.activate()
+        // Forceful, as the status panel: a user action, and macOS 14+ often refused the `activate()` request (window behind).
+        NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        keepFront(window)
+    }
+
+    /// shortcut: ~0.5 s after the .accessory → .regular switch macOS hands activation back to the previous app (traced:
+    /// Settings behind Ghostex, no click). Take it back once, within 1.5 s of the show, and only if there was no click or key
+    /// press anywhere since (asked of the window server when activation goes, so no event monitor can lose the race: a click in
+    /// Edge stole focus back, traced); drop when macOS stops.
+    private func keepFront(_ window: NSWindow) {
+        let shown = Date()
+        var done = false
+        let observer = NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated {
+                let elapsed = Date().timeIntervalSince(shown)
+                let input = [CGEventType.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown]
+                    .map { CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: $0) }.min() ?? 0
+                guard !done, elapsed < 1.5, input > elapsed, window.isVisible else { return }
+                done = true
+                Self.log.notice("keepFront: took activation back from \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "-", privacy: .public) \(Int(elapsed * 1000)) ms after showing \(window.title, privacy: .public)")
+                NSApp.activate(ignoringOtherApps: true)
+                window.makeKeyAndOrderFront(nil)
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { NotificationCenter.default.removeObserver(observer) }
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -33,6 +59,8 @@ final class MainWindow {
     static let shared = MainWindow()
     var store: Store?  // set once at launch
     private var window: NSWindow?
+    /// The window while it is key: a sheet's parent.
+    var keyWindow: NSWindow? { window?.isKeyWindow == true ? window : nil }
 
     func show(select id: String? = nil) {
         guard let store else { return }
@@ -56,7 +84,7 @@ final class MainWindow {
 
     /// The activity log (All Accounts, or the first account with the per-account layout).
     func showActivity() {
-        store?.selection = SidebarItem(scope: .all, filter: .all, activity: true)
+        store?.selection = SidebarItem(scope: .all, filter: .needsMe, activity: true)
         show()
     }
 }

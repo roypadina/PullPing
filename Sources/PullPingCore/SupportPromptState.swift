@@ -54,21 +54,21 @@ public struct SupportPromptState: Codable, Equatable, Sendable {
         }
     }
 
-    /// Your pull request merged (by anyone, you too) or approved = success; CI failed or changes requested on yours = stress.
-    /// Seeded history is neither.
+    /// Trouble on yours: what notifies you to fix your pull request.
+    static let trouble: Set<NeedReason> = [.changesRequested, .ciFailed, .conflicts]
+
+    /// Your pull request merged (by anyone, you too) or approved = success; changes requested, CI failed or conflicts on
+    /// yours = stress. Seeded history is neither.
     public static func moment(_ event: PREvent, pr: TrackedPR) -> Moment? {
         guard event.seeded != true, !pr.isIssue, pr.roles.contains(.author) else { return nil }
-        switch event.kind {
-        case .merged: return .success
-        case .reviewApproved where !event.isOwn: return .success
-        case .ciFailed where !event.isOwn, .reviewChangesRequested where !event.isOwn: return .stress
-        default: return nil
-        }
+        if event.kind == .merged || (event.kind == .reviewApproved && !event.isOwn) { return .success }
+        return Notify.reason(event, pr: pr).map(trouble.contains) == true ? .stress : nil
     }
 
-    /// Nothing waits on you that weighs: no review asked of you, nothing to fix on yours. Team requests, mentions and comments don't count.
+    /// Nothing waits on you that weighs: no review or re-review asked of you, nothing to fix on yours, no reminder of yours
+    /// due. Team requests, mentions and comments don't count.
     public static func calm(_ prs: [TrackedPR]) -> Bool {
-        prs.allSatisfy { Attention.needReason($0, counting: [.toReview, .changesRequested, .ciFailed]) == nil }
+        prs.allSatisfy { Attention.needReason($0, counting: trouble.union([.toReview, .reReview, .reminder])) == nil }
     }
 
     static func major(_ version: String) -> Int { Int(version.split(separator: ".").first ?? "") ?? 0 }

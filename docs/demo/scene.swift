@@ -94,11 +94,12 @@ private func dismissButtonCenter(_ img: CGImage) -> CGPoint {
 
 // MARK: - fake data: the app's own Fixtures (generic "octo-org" repos, accounts "Personal" / "Work"), trimmed so the panel shows every section
 
-/// Fixtures.swift sampleStore: eleven pull requests and issues. Keep four: mine with changes requested + failed CI (PR_2), my issue with a new
-/// comment (I_1), someone else's pull request awaiting my review (PR_3, the one that "arrives"), and one I only commented on (PR_5).
+/// Fixtures.swift sampleStore: one pull request or issue per bucket. Keep five: mine with changes requested + failed CI (PR_2), mine approved and
+/// ready to merge (PR_1), my issue with a new comment (I_1), someone else's pull request awaiting my review (PR_3, the one that "arrives"), and mine
+/// waiting on CI (PR_11, in the collapsed Waiting on Others group).
 @MainActor private func makeStore(arrived: Bool) -> Store {
     let store = Fixtures.sampleStore()
-    let keep: Set<String> = arrived ? ["PR_2", "I_1", "PR_3", "PR_5"] : ["PR_2", "I_1", "PR_5"]
+    let keep: Set<String> = arrived ? ["PR_2", "PR_1", "I_1", "PR_3", "PR_11"] : ["PR_2", "PR_1", "I_1", "PR_11"]
     let now = Date()  // only ever compared with Store.now a few ms later: "just now" / "now" come out the same on every render
     store.setTracked { state in
         state.prs = state.prs.filter { keep.contains($0.key) }
@@ -147,9 +148,9 @@ private let glyphSize: CGFloat = 18  // menubar.png is 18x18 pt; NSStatusBarButt
     let before = calm.badgeCount, after = busy.badgeCount  // Store.badgeCount: what needs me (review requests, changes requested, new comments...)
 
     // The panel the app shows when PR_3's review request arrives: Store.show(_:) builds the model from the event, the style (alert: Settings
-    // default for a review request on someone else's pull request, stays until acted on) and the account label.
+    // default for the Review requested reason, stays until acted on) and the account label.
     let pr3 = busy.tracked.prs["PR_3"]!
-    let alert = busy.settings.style(for: .reviewRequested, mine: false) == .alert
+    let alert = busy.settings.needStyle(.toReview) == .alert
     let model = PanelModel(pr: pr3, events: pr3.events, alert: alert, account: busy.login(for: pr3))
     let note = capture(NotificationContent(model: model, onOpen: {}, onSnooze: {}, onMute: {}, onDismiss: {}, onHover: { _ in }),
                        size: CGSize(width: Theme.panelWidth, height: Theme.panelHeight))
@@ -173,7 +174,7 @@ private let glyphSize: CGFloat = 18  // menubar.png is 18x18 pt; NSStatusBarButt
     let popOrigin = CGPoint(x: min(item.midX - popSize.width / 2, W - popSize.width - 8), y: Demo.barHeight + 6)  // NSPopover under the item, 6 pt gap
     func inPopover(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: popOrigin.x + x * k, y: popOrigin.y + y * k) }
     // StatusPanelView header, points in the unscaled panel (measured on the capture): the "Work N" segment of the account picker.
-    let workSegment = inPopover(230, 80.5)
+    let workSegment = inPopover(230, 92.5)
     let itemCenter = CGPoint(x: item.midX, y: Demo.barHeight / 2)
     let radius: CGFloat = 16
 
@@ -198,11 +199,11 @@ private let glyphSize: CGFloat = 18  // menubar.png is 18x18 pt; NSStatusBarButt
         return c.image
     }
 
-    // 3. a click on the icon opens the popover (StatusItem.togglePopover): Mine / To Review / Involved with chips; the cursor then heads for "Work"
+    // 3. a click on the icon opens the popover (StatusItem.togglePopover): To Review / Your Pull Requests / Mentions, Assigned & Reminders with status chips; the cursor then heads for "Work"
     let open3 = 0.90
     let path3 = CursorPath(start: dismissAt, moves: [.init(t0: 0.10, t1: 0.75, to: itemCenter), .init(t0: 2.05, t1: 2.75, to: workSegment)],
                            clicks: [open3])
-    let s3 = Scene(name: "panel", duration: 3.4, caption: "Mine, To Review, Involved, with CI and review state") { t in
+    let s3 = Scene(name: "panel", duration: 3.4, caption: "What needs you first, with whose turn it is") { t in
         let c = Canvas()
         let opened = t >= open3
         _ = drawBar(c, count: after, active: opened)

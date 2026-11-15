@@ -201,6 +201,40 @@ final class EventEngineTests: XCTestCase {
         XCTAssertEqual(prClosed.map(\.summary), [""])
     }
 
+    /// A new issue in a repository I watch, opened by someone else after watching began: one `issueOpened`, its first event.
+    func testIssueOpenedInAWatchedRepository() {
+        let since = t0.addingTimeInterval(-3600)
+        func issue(author: String = "alice", created: Date? = t0.addingTimeInterval(-60), isIssue: Bool = true) -> PRSnapshot {
+            var s = snap("I_1", author: author, timeline: [node("IC_1", by: "carol", at: t0.addingTimeInterval(-30), body: "@dana fyi")],
+                         body: "\n  The list crashes when empty.\nSteps: …")
+            (s.isIssue, s.createdAt) = (isIssue, created)
+            return s
+        }
+        func opened(_ s: PRSnapshot, old: TrackedPR? = nil, watchedSince: Date? = since) -> [PREvent] {
+            EventEngine.diff(old: old, snapshot: s, me: me, accountID: account, inRequestedSearch: false, inReviewedSearch: false,
+                             watchedSince: watchedSince, now: t0).events.filter { $0.kind == .issueOpened }
+        }
+        let (pr, events) = EventEngine.diff(old: nil, snapshot: issue(), me: me, accountID: account, inRequestedSearch: false, inReviewedSearch: false,
+                                            watchedSince: since, now: t0)
+        XCTAssertEqual(events.map(\.kind), [.issueOpened, .mentioned])
+        let event = try! XCTUnwrap(events.first)
+        XCTAssertEqual([event.id, event.actor, event.summary], ["opened:I_1", "alice", "The list crashes when empty."])
+        XCTAssertEqual(event.at, t0.addingTimeInterval(-60))
+        XCTAssertFalse(event.isOwn)
+        XCTAssertNil(event.seeded)
+        XCTAssertEqual(pr.events.first, event)
+        XCTAssertEqual(opened(issue(created: since)).count, 1, "at the moment watching began")
+        XCTAssertTrue(opened(issue(created: since.addingTimeInterval(-1))).isEmpty, "already open when watching began")
+        XCTAssertTrue(opened(issue(author: "Dana")).isEmpty, "mine")
+        XCTAssertTrue(EventEngine.diff(old: nil, snapshot: issue(author: "Dana-Work"), me: me, accountID: account, inRequestedSearch: false,
+                                       inReviewedSearch: false, watchedSince: since, ownLogins: ["dana-work"], now: t0)
+                        .events.filter { $0.kind == .issueOpened }.isEmpty, "opened from my other account")
+        XCTAssertTrue(opened(issue(), old: pr).isEmpty, "not new")
+        XCTAssertTrue(opened(issue(), watchedSince: nil).isEmpty, "not watched")
+        XCTAssertTrue(opened(issue(created: nil)).isEmpty, "no creation date")
+        XCTAssertTrue(opened(issue(isIssue: false)).isEmpty, "a pull request")
+    }
+
     func testRequestRemovedDropsRoleWithoutEvent() {
         let old = diff(tracked(), snap(requested: [me]), requestedSearch: true).pr
         XCTAssertTrue(old.roles.contains(.reviewRequested))
@@ -245,5 +279,60 @@ final class EventEngineTests: XCTestCase {
         XCTAssertEqual(pr.events.count, 50)
         XCTAssertEqual(pr.events.last?.id, "IC_new_4")
         XCTAssertEqual(pr.events.first?.id, "old-5")
+    }
+
+    func testConflictsOncePerHead() {
+        func conflicted(_ head: String, _ mergeState: String = "DIRTY") -> PRSnapshot {
+            var s = snap(author: me, head: head)
+            s.mergeState = mergeState
+            return s
+        }
+        var pr = tracked(conflicted("aaa1111", "CLEAN"))
+        var events: [PREvent]
+        (pr, events) = diff(pr, conflicted("aaa1111"))
+        XCTAssertEqual(loud(events).map(\.id), ["conflict:aaa1111"])
+        XCTAssertEqual(events.first.map { [$0.kind.label, $0.actor] }, ["Conflicts", "CI"])
+        (pr, events) = diff(pr, conflicted("aaa1111", "UNKNOWN"))
+        (pr, events) = diff(pr, conflicted("aaa1111"))
+        XCTAssertEqual(events.filter { $0.kind == .conflicts }, [], "same head: once")
+        (pr, events) = diff(pr, conflicted("bbb2222"))
+        XCTAssertEqual(events.filter { $0.kind == .conflicts }.map(\.id), ["conflict:bbb2222"], "a push that still conflicts")
+        // Already conflicted when last refreshed (e.g. before 0.7.0): no event.
+        XCTAssertEqual(diff(tracked(conflicted("ccc3333")), conflicted("ccc3333")).events.filter { $0.kind == .conflicts }, [])
+    }
+
+    /// CI passed (or the approval came) while mergeStateStatus was still UNKNOWN: Ready to merge fires once it resolves.
+    func testReadyToMergeWhenMergeStateResolves() {
+        func mine(_ ci: CIState, _ mergeState: String, head: String = "aaa1111") -> PRSnapshot {
+            var s = snap(author: me, head: head, ci: ci)
+            s.reviewDecision = "APPROVED"
+            s.mergeState = mergeState
+            s.autoMerge = false
+            return s
+        }
+        var pr = tracked(mine(.pending, "UNKNOWN"))
+        var events: [PREvent]
+        (pr, events) = diff(pr, mine(.success, "UNKNOWN"))
+        XCTAssertEqual(events.map(\.kind), [.ciPassed])
+        XCTAssertNil(Notify.reason(events[0], pr: pr), "not mergeable yet: Activity only")
+        (pr, events) = diff(pr, mine(.success, "CLEAN"))
+        XCTAssertEqual(events.map(\.id), ["ready:aaa1111"])
+        XCTAssertEqual(events.first.map { [$0.kind.label, $0.actor] }, ["Ready to merge", "CI"])
+        XCTAssertEqual(Notify.reason(events[0], pr: pr), .readyToMerge)
+        XCTAssertEqual(diff(pr, mine(.success, "CLEAN")).events, [], "once")
+        // CI passing straight into a clean state says it itself: no second event.
+        (pr, events) = diff(pr, mine(.pending, "UNKNOWN", head: "bbb2222"))
+        (pr, events) = diff(pr, mine(.success, "CLEAN", head: "bbb2222"))
+        XCTAssertEqual(events.map(\.kind), [.ciPassed])
+        XCTAssertEqual(Notify.reason(events[0], pr: pr), .readyToMerge)
+    }
+
+    func testReviewTurnFieldsAreCopied() {
+        var s = snap()
+        s.myReview = MyReview(state: "APPROVED", commitOID: "aaa1111", submittedAt: t0)
+        s.autoMerge = true
+        let pr = diff(tracked(), s).pr
+        XCTAssertEqual(pr.myReview, s.myReview)
+        XCTAssertEqual(pr.autoMerge, true)
     }
 }

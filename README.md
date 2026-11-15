@@ -21,7 +21,7 @@ check, a request for your review.
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-support-F16061?logo=ko-fi&logoColor=white)](https://ko-fi.com/roypadina)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-<img src="docs/demo.gif" alt="PullPing in action: the menu bar counts the pull requests that need you, a review request arrives as a panel that stays until you close it, and the status panel lists Mine, To Review and Involved, then just the Work account." width="720">
+<img src="docs/demo.gif" alt="PullPing in action: the menu bar counts the pull requests that need you, a review request arrives as a panel that stays until you close it, and the status panel lists what needs you (to review, your pull requests, mentions), then just the Work account." width="720">
 
 <br>
 
@@ -31,10 +31,10 @@ brew install --cask roypadina/tap/pullping
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/status-panel-dark.png">
-<img src="docs/screenshots/status-panel.png" alt="PullPing status panel: pull requests grouped into Mine, To Review and Involved, with CI and review chips" width="320">
+<img src="docs/screenshots/status-panel.png" alt="PullPing status panel: the Needs Me filter, a summary of what needs you, All, Personal and Work account tabs, then To Review and Your Pull Requests, each row with a status chip such as Review requested, Re-review, Requested from team or Changes requested" width="320">
 </picture>
 &nbsp;
-<img src="docs/screenshots/main-window.png" alt="PullPing main window: a sidebar of filters and accounts, the list of pull requests, and the details of the selected one" width="620">
+<img src="docs/screenshots/main-window.png" alt="PullPing main window: a sidebar with Needs Me, My Pull Requests, Reviews, Issues, Watching, Closed and Activity per account, the Needs Me list, and the details of the selected pull request" width="620">
 
 </div>
 
@@ -43,18 +43,25 @@ brew install --cask roypadina/tap/pullping
 ## Features
 
 - **Every pull request you are involved in, in one place.** Ones you opened, ones assigned to you, ones where your review is requested (directly or through a team), and ones where you commented, reviewed or were mentioned. Merged and closed ones stay listed for a few days.
-- **Issues too.** Open issues you opened, are assigned to, are mentioned in or commented on appear in the same lists with an **Issue** chip. Comments, mentions, assignments, label changes, renames, reopening and closing (shown as completed or not planned) notify like pull request events. Label changes on pull requests notify too. Settings → General → Track Issues turns issues off.
+- **Issues too.** Open issues you opened, are assigned to, are mentioned in or commented on appear in the same lists with an **Issue** chip, and so does every open issue in the repositories your accounts own (plus any others you add): when someone opens a new one there, you get a **New issue** notification and it needs you until you read it. Comments, mentions, assignments, label changes, renames, reopening and closing (shown as completed or not planned) are tracked like pull request events: mentions, assignments and comments on your issues (and on issues in your repositories) notify, the rest is listed in Activity. Settings → Repositories → Track Issues turns issues off.
 - **Several GitHub accounts at once.** Personal and work, each with its own token and a label you choose.
-- **Menu-bar panel.** Your pull requests in three groups (Mine, To Review, Involved), with CI status, review state, an unread dot and the latest activity on each row. What needs you comes first, then unread, then the most recently active; pull requests with nothing left for you (merged, closed, or read with no review asked of you) wait in a collapsed Done group at the bottom. Switch between All accounts and each account, and filter (Inbox, All, Mine, To Review, Involved, Recently Closed, Muted, Hidden). Right-click the icon for Refresh, Mark All as Read, Pause Notifications, Settings and Quit.
-- **A count that means something.** By default the menu-bar number counts only pull requests that need you: review requests, unread assignments and mentions, your own pull requests with changes requested, failed CI, new comments, or ready to merge, and new comments on issues you opened or are assigned to. The panel header spells it out ("2 to review · 1 ready to merge"). Settings → General → Count in the Menu Bar picks which of these count (team review requests have their own switch), or count everything unread, or show no number.
-- **Main window.** Mail-style sidebar: the same filters for All Accounts and for each account, with counts, then the same order with a collapsible Done section at the bottom of the list, search and a detail view with reviewers, checks and the recent activity of the selected pull request. Prefer one inbox per account? Settings → General → Inbox → Per account.
+- **Sorted by whose turn it is.** **Needs Me** lists what waits on you, oldest first: reviews and re-reviews asked of you, your pull requests to fix (changes requested, CI failed, conflicts) or to merge, mentions, assignments and new comments. **My Pull Requests** splits into Your Turn, Waiting on Others (reviewers, CI, auto-merge) and Drafts; **Reviews** into Needs Your Review, Team Requests and Reviewed; then **Issues**, **Watching**, **Closed** and **Muted & Hidden**. Each row has one status chip that says why it is there ("Re-review · 2 pushes since your review", "Changes requested by @carol", "Approved · Ready to merge", "Waiting on @alice, @bob"), plus CI, an unread dot and the latest activity.
+- **Re-reviews you would miss.** A pull request you reviewed comes back to Needs Me when you are asked again, or when you requested changes and the author pushed since, even if they forgot to ask.
+- **Menu-bar panel.** Needs Me by default, with what waits on others and what you reviewed one click away; the filter picks any other row. Switch between All accounts and each account. Right-click the icon for Refresh, Mark All as Read, Pause Notifications, Settings and Quit.
+- **A count that means something.** By default the menu-bar number is the Needs Me list: review and re-review requests, unread assignments and mentions, your own pull requests with changes requested, failed CI, conflicts, new comments, or ready to merge, new issues in your repositories, and new comments on issues you opened, are assigned to or that are in your repositories. The panel header spells it out ("2 to review · 1 ready to merge"). Settings → Menu Bar → Count in the Menu Bar picks which of these count (team review requests have their own switch), or count everything unread, or show no number.
+- **Numbers and dots.** Every account, filter and sidebar row shows how many items need you (a number) and whether something there happened that you haven't opened yet (a dot), and so does the menu-bar icon. Opening an item clears its dot; opening the panel doesn't.
+- **Main window.** Mail-style sidebar: the same rows for All Accounts and for each account, with counts of what is your turn and a dot for new activity, search across every row, and a detail view with whose turn it is, reviewers (and the commit each reviewed), checks and the recent activity of the selected pull request. Prefer one inbox per account? Settings → General → Inbox → Per account.
 - **Phone notifications** through [ntfy](https://ntfy.sh), chosen per kind of event, separately from the desktop panels.
 - **Agent automations.** Start Claude Code or Codex in a terminal when a pull request event arrives: rules you write in Settings, or hooks an agent attaches from the command line ("resume this session when the pull request is approved"). Asks first by default.
-- **Notifications that stay out of your way.** A small panel appears at the top right, never takes keyboard focus, and is grouped per pull request. Pick Off, Banner (hides itself) or Alert (stays) for each kind of event.
-- **Activity.** Everything PullPing saw and did, in one list: every event, whether it showed a banner or an alert, went to your phone, or was not shown and why, plus every automation run.
-- **Review reminders.** While your review is requested, PullPing nudges you again every so often until you review, the request is removed, or the pull request is merged or closed.
+- **Background reviews, posted only by you.** Optionally, your agent reviews or summarizes a pull request (or triages a new issue) without a terminal, with read-only tools, and hands you a draft: you edit it and click Post (comment, request changes or approve; a comment on an issue). Nothing reaches GitHub without that click.
+- **Notifications only when something needs you.** A small panel appears at the top right when a review is asked of you, your pull request needs a fix or is ready to merge, or you are mentioned or assigned. It never takes keyboard focus and is grouped per pull request. Merges, passing CI, new commits and the rest go to Activity without a notification. Pick Off, Banner (hides itself) or Alert (stays) for each reason.
+- **Activity.** Everything PullPing saw and did, in one list: every event, whether it notified you or went to your phone, plus every automation run. Filter it, and see what is new since your last look.
+- **Review reminders.** While a review or re-review waits on you, PullPing nudges you again every so often until you review, the request is removed, or the pull request is merged or closed.
+- **Remind Me.** Put any pull request off until later (in an hour, tomorrow at 9:00, next week, or a time you pick): when it is due, it is new and in Needs Me again, with a notification.
+- **Select several, mark as unread.** Select many rows at once and act on all of them; Mark as Read turns into Mark as Unread to bring an item back.
 - **Snooze, mute, hide, mark as read, stop tracking.** All of them from the panel, the menu bar and the main window, with Undo for Hide and Stop Tracking. Hidden pull requests leave every list and count but still notify you.
-- **Keyboard friendly.** Arrow keys and Return in the panel, menu commands with shortcuts, VoiceOver announcements for new notifications.
+- **Repositories.** Mute a whole repository (its new pull requests and issues too), leave repositories out of Issues in My Repositories, and narrow the window or the panel to one repository without changing any count.
+- **Keyboard friendly.** Arrow keys and Return in the panel, menu commands with shortcuts, single keys on a focused list (O, U, M, H, R; Settings → Shortcuts), VoiceOver announcements for new notifications and for what a key did.
 - **`pullping://` links** for Shortcuts and Raycast.
 - Universal binary, no third-party dependencies, no analytics.
 
@@ -106,9 +113,12 @@ open dist/PullPing.app
 2. Add an account: **Add Account…** in the Welcome window, or **Settings → Accounts**. See
    [Accounts and tokens](#accounts-and-tokens).
 3. Click the menu-bar icon. **↩** opens the selected pull request in your browser, **⌘↩** opens it in the
-   main window, **Esc** closes the panel. Right-click a row for Open in Browser, Mark as Read,
-   Mute, Hide, Snooze and Stop Tracking. Right-click the menu-bar icon, or click **⋯** in the panel, for the same menu (Pause Notifications included).
-4. The first sync of an account is silent: PullPing learns what already exists, and only tells
+   main window, **Esc** closes the panel. Right-click a row for Open in Browser, Mark as Read (or Unread),
+   Remind Me, Mute, Mute owner/name, Hide, Snooze Notifications and Stop Tracking; ⌘-click or ⇧-click to act on several rows. Right-click the menu-bar icon, or click **⋯** in the panel, for the same menu (Pause Notifications included).
+4. To see one repository only, pick it under **Repository** in the main window's toolbar (or View → Repository) or
+   **Repository ▸** in the panel's filter menu; a bar above the list says so, with **Show All**. Counts, dots and
+   notifications keep covering every repository.
+5. The first sync of an account is silent: PullPing learns what already exists, and only tells
    you about what happens afterwards (plus review requests, assignments and mentions it finds).
 
 Which pull requests are tracked: open pull requests that you opened, that are assigned to you,
@@ -116,14 +126,28 @@ that request your review (directly or through a team), or that you commented on,
 were mentioned in. Merged and closed ones stay for 1, 3 (default), 7 or 14 days, so a late comment
 still reaches you.
 
+Which issues are tracked: open issues you opened, are assigned to, are mentioned in or commented on, plus every open
+issue in the repositories your accounts own (**Settings → Repositories → Track Issues in My Repositories**, on by default)
+and in **Other Repositories** (`owner/name`, or `owner/*` for every repository of a user or organization; at most 20).
+**Excluded Repositories** (`owner/name`, at most 20) leaves repositories out of both; issues you are part of there stay
+tracked. To watch only some of your own repositories, exclude the rest, or turn Track Issues in My Repositories off and
+list the ones you want under Other Repositories.
+They stay under **Issues** while they are open (In My Repositories for the ones you only watch). Issues that were
+already open when PullPing started watching a repository are listed quietly; only issues opened after that notify.
+
 | Command | Shortcut |
 |---|---|
 | Refresh now | ⌘R |
 | Open the main window | ⌘1 |
-| Open in browser | ⇧⌘O |
-| Mark as read / Mark all as read | ⇧⌘U / ⌥⇧⌘U |
+| Open in browser | ⇧⌘O, or O |
+| Mark as read or unread / Mark all as read | ⇧⌘U, or U / ⌥⇧⌘U |
+| Mute or unmute | ⌃⌘M, or M |
+| Hide or unhide | ⌃⌘H, or H |
+| Remind Me ▸ Custom… | ⌃⌘R, or R |
 | Stop tracking | ⌘⌫ |
 | Settings | ⌘, |
+
+The single keys (O, U, M, H, R) work while a pull request list has keyboard focus, in the window and the panel; switch them off in **Settings → Shortcuts**, which lists every shortcut. To change a menu shortcut, add PullPing under System Settings → Keyboard → Keyboard Shortcuts → App Shortcuts.
 
 Links: `pullping://open`, `pullping://open?pr=<id>`, `pullping://refresh`, `pullping://settings`.
 
@@ -134,7 +158,7 @@ Add a personal access token in **Settings → Accounts → Add Account…**. Pul
 one token each.
 
 - **Classic token:** scopes `repo` (private repositories) and `read:org` (team review requests). Public repositories only: `public_repo`. Organizations with SAML SSO: click "Configure SSO" on the token and authorize each organization.
-- **Fine-grained token:** Resource owner = your user or the organization (one token per organization); Repository access = All repositories (or select); Permissions: Pull requests: Read, Issues: Read, Commit statuses: Read, Checks: Read (Metadata: Read is implied). Organizations may require admin approval; until approved the token sees only public data. CI status may be incomplete with fine-grained tokens (GitHub lists the Checks API as a gap); use a classic token when CI matters.
+- **Fine-grained token:** Resource owner = your user or the organization (one token per organization); Repository access = All repositories (or select); Permissions: Pull requests: Read, Issues: Read, Commit statuses: Read, Checks: Read (Metadata: Read is implied). Organizations may require admin approval; until approved the token sees only public data. CI status may be incomplete with fine-grained tokens (GitHub lists the Checks API as a gap); use a classic token when CI matters. Posting a draft review ([Background runs and drafts](#background-runs-and-drafts)) needs Pull requests: Read and write, posting a triage reply on an issue Issues: Read and write; a classic token with `repo` already covers both.
 
 If a classic token lacks `repo` and `public_repo`, PullPing still adds the account and shows
 "Missing repo scope" next to it.
@@ -146,54 +170,79 @@ owner approves PullPing. Use a personal access token if a repository stays invis
 
 ## Notifications
 
-When something happens on a pull request you are tracking, PullPing shows a small panel at the
+When something on a pull request you are tracking needs you, PullPing shows a small panel at the
 top right of the screen your mouse is on. It never takes keyboard focus, so typing in another
-app is never interrupted.
+app is never interrupted. Everything else is listed in [Activity](#activity) without a panel.
 
-- **Styles, per kind of event:** Off, Banner (hides after 5, 8, 12 or 20 seconds; hovering pauses it) or Alert (stays until you act). Set separately for your own pull requests and for the ones you review or follow, in **Settings → Notifications**.
-- **Defaults:** on your own pull requests every event shows a banner, and changes requested, CI failed and merged show an alert. On other pull requests, review requests, assignments and mentions show an alert; comments, reviews, merged and closed show a banner; the rest stay off.
+- **What notifies:** a review requested from you or your team, a re-review (requested again, or the author pushed after you requested changes), and on your own pull requests changes requested, CI failed, conflicts with the base branch, new comments, and ready to merge (approved, checks green, mergeable); a new issue someone opens in your repositories, and new comments on your issues and on issues in your repositories; plus mentions and assignments anywhere. Merges, closes, CI passed (unless it makes your pull request ready to merge), new commits, labels, title changes and comments on other people's pull requests are **Activity only**.
+- **Styles, per reason:** Off, Banner (hides after 5, 8, 12 or 20 seconds; hovering pauses it) or Alert (stays until you act), in **Settings → Notifications**.
+- **Defaults:** Alert for review requested, re-review, changes requested, CI failed, mentioned, assigned and new issue; Banner for team review, conflicts, new comments and ready to merge.
+- **The panel's title says what is asked of you:** "Review requested", "Re-review needed", "Changes requested", "CI failed", "Ready to merge"…
 - **One panel per pull request.** Several events on the same pull request merge into one panel; up to four panels are shown, the rest collapse into "+N more".
 - **On each panel:** **Open** (opens the pull request and marks it read), **Snooze** (15 minutes, 1 hour, 3 hours, tomorrow 9:00), **Mute PR** (**Mute Issue** on an issue), and a close button.
-- **Review reminders:** while your review is requested on an open, non-draft pull request, the "Review requested" panel shows again every 15, 30, 60 (default), 120 or 240 minutes, or never. It stops when you review, the request is removed, the pull request is merged or closed, or you mute or snooze it.
-- **Mute** keeps a pull request listed but silences its panels and reminders and leaves it out of the menu-bar count. **Snooze** silences them for a while. **Stop Tracking** removes the pull request and ignores it from then on (Edit → Undo brings it back).
+- **Review reminders:** while a review or re-review waits on you (a team request too, while its notification is on), the panel shows again every 15, 30, 60 (default), 120 or 240 minutes, or never. It stops when you review, the request is removed, the pull request is merged or closed, or you mute or snooze it.
+- **Remind Me** (row menu, Pull Request menu, ⌃⌘R or R): at the time you pick, the pull request is new and in Needs Me again, with an Alert panel titled **Reminder** (and your phone, if you tick Reminder in Settings → Phone). Reading it ends the reminder.
+- **Mute** keeps a pull request listed but silences its panels and reminders and leaves it out of the menu-bar count.
+  **Mute owner/name** (row menu, Pull Request menu) does that for every pull request and issue of the repository, new ones too; unmute
+  it the same way or in Settings → Repositories, or unmute one of its items on its own. **Snooze Notifications** silences them for a while and does nothing when it ends; Remind Me brings the item back. **Stop Tracking** removes the pull request and ignores it from then on (Edit → Undo brings it back).
 - **Pause:** right-click the menu-bar icon → **Pause Notifications** for 1 hour, 3 hours or until tomorrow 9:00. Panels, phone notifications and reminders stay quiet until then.
-- **Phone (ntfy):** in **Settings → Phone**, enter a server (default `https://ntfy.sh`) and a topic, subscribe to the same topic in the ntfy phone app, then tick the kinds of event to send, for your own pull requests and for others. Nothing is sent until you tick one. Sends follow the same rules as panels (never your own actions, never muted, snoozed or paused pull requests) but ignore the desktop style, so a kind can go to the phone only. An optional access token (for a protected server) and a fallback topic URL (used when the server fails) are kept in your login keychain. **Send Test Notification** checks the setup.
+- **Phone (ntfy):** in **Settings → Phone**, enter a server (default `https://ntfy.sh`) and a topic, subscribe to the same topic in the ntfy phone app, then tick the kinds of event to send, for your own pull requests and for others. Nothing is sent until you tick one. Sends follow the same rules as panels (never your own actions, never muted, snoozed or paused pull requests) but are chosen per kind of event, not per reason, so a merge can still go to your phone. An optional access token (for a protected server) and a fallback topic URL (used when the server fails) are kept in your login keychain. **Send Test Notification** checks the setup.
 - Your own actions never notify you. An optional sound plays once when panels appear. Every action on a panel also exists in the menu-bar panel and the menus, for keyboard and VoiceOver use.
 
 ### Activity
 
-**Activity**, in the main window's sidebar for All Accounts and for each account (also in the menu-bar icon's menu),
-keeps everything that happened, whether or not it showed a panel: every event on a tracked pull request or issue with
-what PullPing did with it (**Banner**, **Alert**, **Phone**, or **Not shown** and why: your own, notifications off,
-paused, muted, snoozed, or off in Settings), review reminders, and every automation run and Handle with Agent launch.
-Newest first, by day, with search. Select a row to see its pull request; double-click opens it in the browser, also
-once PullPing no longer tracks it. A newly tracked pull request's earlier history is not listed. Entries are kept for 30
-days (**Settings → General → Keep activity for**: 7, 30 or 90 days), at most 5000, in
-`~/Library/Application Support/PullPing/activity.jsonl`. `pullping activity [--since 2d] [--pr <ref>] [--json]` prints
-them, also while PullPing is not running.
+**Activity**, in the main window's sidebar for All Accounts and for each account (also in the menu-bar icon's menu and
+the panel's **Activity** button), is a read-only log of everything that happened, whether or not it showed a panel: every
+event on a tracked pull request or issue with chips for what PullPing did (**Notified**, **Phone**, and why a needed one
+stayed quiet: muted, snoozed, paused or notifications off), review reminders, and every automation run and Handle with
+Agent launch. Filter it by **All**, **Needs Me** (events that asked something of you), **My PRs**, **Reviews** or **Runs**.
+Entries since your last visit are under **New**, and the sidebar row shows a dot while there are any. Select a row to see
+its pull request; double-click opens it in the browser, also once PullPing no longer tracks it; right-click for **Copy
+Link**. A newly tracked pull request's earlier history is not listed. Entries are kept for 30 days (**Settings → General
+→ Keep activity for**: 7, 30 or 90 days), at most 5000, in `~/Library/Application Support/PullPing/activity.jsonl`.
+`pullping activity [--since 2d] [--pr <ref>] [--json]` prints them, also while PullPing is not running.
 
-<img src="docs/screenshots/activity.png" alt="The Activity list: today's events newest first, each with its pull request, the event and who did it, and badges such as Alert, Phone, Banner, Not shown: muted, Not shown: off in Settings and Ran Fix failing CI" width="380">
+<img src="docs/screenshots/activity.png" alt="The Activity list: a New section, then today; each entry with its pull request, who did what, and chips such as Notified, Phone and Ran Fix failing CI" width="380">
 
 ## Agent automations
 
 PullPing can start a local coding agent ([Claude Code](https://docs.anthropic.com/en/docs/claude-code) or
 [Codex](https://github.com/openai/codex)) in a terminal when a pull request event arrives. It writes the prompt to a
 file and a small script, opens a terminal that runs it, and stops there: it never talks to the agent, never reads its
-output and never adds a permission flag.
+output and never adds a permission flag. [Background runs](#background-runs-and-drafts), off by default, are the one
+exception: there the agent (Claude Code only, for now) only reads, and its answer is a draft you post yourself.
+
+### Set it up with your agent
+
+**The easiest way to configure all of this is to let your agent do it with you.** Paste this into Claude Code or
+Codex: it reads PullPing's own setup guide and asks you one question at a time.
+
+```
+Set up PullPing agent automations with me. Run `pullping setup guide` (the app itself:
+/Applications/PullPing.app/Contents/MacOS/PullPing setup guide), read all of it, then follow it step by step:
+ask me each question, apply my answers with the pullping commands it lists, and verify at the end. Do not turn on
+anything that runs automatically, reads my agent history or posts to GitHub unless I say yes to that exact question.
+```
+
+The guide is also on GitHub: [`docs/agent-setup.md`](docs/agent-setup.md). **Settings → Automations → Copy Setup
+Prompt** copies the same text. The guide the agent reads is the one inside your copy of PullPing, so it always matches
+your version; it never turns on automatic runs or the search through your agent history without your yes.
+
+### Rules, hooks and Handle with Agent
 
 - **Rules**, in **Settings → Automations → Add Rule…**: the kinds of event (comment, CI failed, review approved, …),
   which pull requests (Any, Mine, Others, optionally only some repositories `owner/name` or `owner/*` and only events
-  by some logins), a prompt, a working directory (default `{repo_dir}`, below), the agent and where it opens (Terminal,
-  iTerm2, Ghostty or Ghostex, whichever are installed, or your own command line). A rule runs at most 3 times per pull
-  request unless you change it (1 to 10).
+  by some logins), a prompt, a working directory (default `{repo_dir}`, below), the agent and where it opens (the
+  default under Open With, below, or another one). A rule runs at most 3 times per pull request unless you change it
+  (1 to 10).
   **Try with Latest Pull Request** runs it right away so you can check the prompt.
 - **Agent hooks**, added from the command line for one pull request or issue, usually by the agent that opened it:
   "resume this session when the pull request is approved or commented on". A hook runs once and is then removed;
   an unused one expires after 14 days.
 
-<img src="docs/screenshots/settings-automations.png" alt="Settings, Automations tab: Run Automations on, Handle with Agent on, three rules (one written from the command line, marked CLI) and the repository folders" width="340">
+<img src="docs/screenshots/settings-automations.png" alt="Settings, Automations tab: the Copy Setup Prompt note, Run Automations on, Handle with Agent on, three rules, Open With with Terminal (the default) and Ghostex, and Background Runs off" width="340">
 &nbsp;
-<img src="docs/screenshots/rule-editor.png" alt="The rule editor: agent, command, where it opens, working directory {worktree_dir}, the pull request's linked session as the session, and the prompt" width="420">
+<img src="docs/screenshots/rule-editor.png" alt="The rule editor from the top: name, events, which pull requests (Mine, octo-org/widgets), Ask mode, then agent, command, where it opens, working directory {worktree_dir} and the pull request's linked session as the session" width="420">
 
 **Ask or run.** An automation asks by default: the notification gets a **Run …** button (and stays until you act),
 and the pull request's right-click menu and the main window's toolbar get **Run Automation**. **Run automatically**
@@ -202,14 +251,17 @@ starts it at once. **Settings → Automations → Run Automations** (or `pullpin
 
 **Handle with Agent.** Turn it on in **Settings → Automations → Handle with Agent** (or `pullping handler on`) and the
 notifications you pick get a **Handle with Agent** button, and the pull request's menu the same item: one click starts
-your agent on that pull request or issue with a prompt you can edit (by default: read it with `gh`, work out what it
-needs, do it, ask when unsure). **Edit…** picks those notifications (`pullping handler set --on <kind,…|all>`; by
-default all but CI passed, new commits, merged, closed, draft, title and label changes), the agent, an optional wrapper
-command, where it opens and the working directory (`{repo_dir}`). When the pull request has a linked session (below),
-the button becomes **Resume Session** and **New Session**. It never runs on its own and has no run limit; a second click
-while the terminal opens does nothing.
+your agent on that pull request or issue with a prompt you can edit (by default: read it with `gh`, then the task of
+its scenario, [below](#prompts): explain and propose, then wait for your OK). **Edit…** picks those notifications
+(`pullping handler set --on <kind,…|all>`; by default all but CI passed, new commits, merged, closed, draft, title and
+label changes), the agent, an optional wrapper command and the working directory (`{repo_dir}`). When the pull request
+has a linked session (below), the button becomes **Resume Session** and **New Session**. The buttons open with the
+default under Open With; the chevron next to them, the pull request's **Handle with Agent ▸** menu (right-click a row,
+the detail toolbar, or the **Pull Request** menu) list every place and **Resume Without Prompt**, which continues the
+linked session without sending it anything. It never runs on its own and has no run limit; a second click while the
+terminal opens does nothing.
 
-<img src="docs/screenshots/notification-agent.png" alt="Two notifications: Changes requested with Resume Session and New Session buttons (the pull request has a linked session), and Comment added with a Handle with Agent button" width="460">
+<img src="docs/screenshots/notification-agent.png" alt="Two notifications: Changes requested with Resume Session and New Session buttons and a chevron with more agent options (the pull request has a linked session), and Re-review needed with a Handle with Agent button" width="460">
 
 **Repositories.** `{repo_dir}`, the default working directory, is where the repository is checked out. PullPing looks in
 **Settings → Automations → Repository Folders** (default `~/Code`; add `~/Code/Work`, `~/src`, …), up to 3 levels deep
@@ -224,11 +276,35 @@ repository folder that holds the clone. PullPing reads git's own files to find t
 `pullping automations folders list` shows how many clones it found; `folders add|rm <dir>` and `fallback <dir>` change
 the list.
 
+**Open With.** **Settings → Automations → Open With** (`pullping targets`) lists up to 5 places where a session opens;
+the first is the default, used by the notification buttons, `pullping session resume` and every rule that doesn't
+pick another one (`--target`). Drag a row (or right-click it: Move Up, Move Down, Make Default) to change the order.
+A Ghostex entry has **Focus the session if it is already running** (on by default); add a second Ghostex entry with it
+off if you sometimes want a fresh copy.
+
 **Where it opens.** Terminal and iTerm2 open the run's script file; Ghostty gets a new window through its AppleScript
-dictionary (macOS asks once to let PullPing control Ghostty); Ghostex through `ghostex terminal`. Only installed apps are
-offered; a rule whose app is gone shows "(not installed)" and its runs fail with that message. For any other terminal
-(WezTerm, kitty, Alacritty, cmux, …) choose **Custom command** and write the launch line with `{script}`, `{cwd}` and
-`{title}`; `pullping launchers` lists the built-in ones.
+dictionary (macOS asks once to let PullPing control Ghostty); Ghostex through `ghostex create-session --start` in the Ghostex project that holds the folder, and the new session comes to the front.
+Resuming a session that is already open in Ghostex focuses it instead of starting a second copy and types one line into
+its input, `Read <prompt file> and act on it.`, without pressing Return; an automatic run never does that, it asks with
+**Go to Session**. Terminal, iTerm2, Ghostty and custom commands can't find the window that holds a session, so a resume
+there always opens a new one. Only installed apps are
+offered; an entry whose app is gone shows "(not installed)" and its runs fail with that message. For any other terminal
+(WezTerm, kitty, Alacritty, cmux, …) add an entry with **Custom command** and write the launch line with `{script}`,
+`{cwd}` and `{title}`; `pullping launchers` lists the built-in ones. A rule whose entry was removed opens with the
+default, and Recent Runs says so.
+
+### Prompts
+
+What the agent is asked to do depends on what the pull request needs from you, its **scenario**: Review requested,
+Re-review, Changes requested, New comments or a mention, CI failed, Conflicts or behind base, Ready to merge, Assigned to
+me, New issue (triage an issue someone opened in your repository and draft a reply), or Anything else. It comes from the notification's reason (the most important one when a panel holds several), else
+from the pull request's place in Needs Me. A prompt is a frame (the Handle with Agent prompt, or a rule's) whose `{task}`
+line becomes the scenario's task text. The built-in texts ask the agent to explain and propose, then wait for your OK:
+for a review, draft it and don't post it; for changes requested, explain each request, say whether it agrees and propose
+the fix, then ask which to make. **Settings → Automations → Prompts** (`pullping prompts list|show|set|reset`) shows each
+text and lets you write your own (a review checklist, a language, how far the agent may go); the editor previews the
+whole prompt. A prompt without `{task}` is used exactly as written; a rule's editor has **Use the scenario's prompt** to
+add or remove the line. A prompt you edited before this version is kept as it was: add `{task}` where the task belongs.
 
 ### Linked sessions
 
@@ -278,8 +354,44 @@ pullping session resume --pr <url>          # Resume Session from the shell, the
 `session find` runs whatever the setting says and links only a session that created the pull request or worked on its
 branch (one that merely mentions it is printed, not linked). `session resume` has the button's gates and one more pair:
 it refuses a session whose transcript changed in the last 2 minutes (probably open in another terminal; `--force`
-starts it anyway), the calling session itself (even with `--force`) and a second hand-off on the same pull request
+starts it anyway; with Ghostex as the app, one open there is focused instead, with the prompt line typed in), the calling session itself (even with `--force`) and a second hand-off on the same pull request
 within a minute. Recent Runs shows who handed off (`--by`, default the calling session).
+
+### Background runs and drafts
+
+Off by default: **Settings → Automations → Background Runs**. Then each pull request's **Handle with Agent ▸** menu
+(the row's context menu, the detail toolbar, Pull Request in the menu bar, and the notification's ⌄ with Handle with Agent on) ends with **In
+Background**: **Review in Background** (others' open pull requests) and **Summarize**. PullPing starts Claude Code
+without a terminal, and the run ends in a **draft**: a notification **Review draft ready** with the agent's summary
+and the verdict it suggests, and **Review Draft…**, **Open Session** and **Discard**.
+
+<p align="center"><img src="docs/screenshots/notification-draft-ready.png" width="440" alt="A Review draft ready notification with Review Draft, Open Session and Discard"></p>
+
+**Review Draft…** opens the draft in a window: you edit the text, pick **Comment**, **Request changes** or
+**Approve** (the agent's suggestion is preselected; when the diff was cut at 400 KB the window says how much the agent
+saw and preselects Comment), and click Post. PullPing posts it as one review with the account
+that tracks the pull request, pinned to the commit the agent reviewed. Return only ever posts a comment; Approve and
+Request changes are refused once the pull request moved past that commit (**Run Again** drafts a new review). The
+first post per account asks once, since until then PullPing only read from GitHub. **Open Session** resumes the
+agent's session in a terminal, without a prompt, where you can ask it more.
+
+<p align="center"><img src="docs/screenshots/draft-window.png" width="560" alt="The draft window with the review text, Comment, Request changes and Approve, and Post"></p>
+
+A summary shows as a notification with **Copy** instead. The pull request's details show its latest draft (**Agent
+Draft**), and so does its Activity line (right-click → Review Draft…), for 7 days. A rule can run in the background
+too (**Run: Review in the background** in the rule editor, `--background review`), for example to draft a review
+whenever yours is requested; it then drafts one review per head commit.
+
+**Triage in Background** is in the same menu on open issues: the agent reads the issue, its discussion and the
+repository's labels (no diff), and the run ends in **Triage draft ready**. Review Draft… opens the reply; edit it and
+**Post Comment** posts it as one comment on the issue (the same one-time question per account). The kind of issue and
+the suggested labels show above the reply in the draft window; labels, assignment and closing stay suggestions. A rule
+can triage every new issue (`--on issueOpened --background triage`, **Triage a new issue in the background** in the
+rule editor); it triages each issue once.
+
+Limits: at most 2 runs at once and 10 waiting, 20 runs a day (Settings; automatic and manual together), 10 minutes
+per run (then it stops: "timed out"). Cancel Background Review in the same menu stops one; quitting PullPing
+interrupts running runs, and they are not restarted. A run uses Handle with Agent's agent and command, or the rule's.
 
 ### From the command line
 
@@ -294,6 +406,13 @@ A rule, the same as one written in Settings:
 
 ```bash
 pullping rule add --name "Fix failing CI" --on ciFailed --scope mine --repos octo-org/\*
+```
+
+A rule on new issues in your repositories (`issueOpened` fires only on issues opened by someone else, so `--scope mine`
+never matches it):
+
+```bash
+pullping rule add --name "Triage new issues" --on issueOpened --repos 'octo-org/*'
 ```
 
 A rule that resumes the pull request's linked session when someone comments:
@@ -311,11 +430,15 @@ pullping hook add --pr "$(gh pr view --json url -q .url)" --on reviewApproved,re
 ```
 
 Everything the Automations tab does has a command: `pullping rule|hook add|edit|show|list|enable|disable|rm`,
-`pullping session set|show|list|rm|find|resume` (linked and earlier sessions), `pullping handler show|set|on|off` (Handle with Agent),
+`pullping session set|show|list|rm|find|resume` (linked and earlier sessions; `resume --no-prompt`, `--target <id>`), `pullping handler show|set|on|off` (Handle with Agent;
+`handler run --pr <ref> --dry-run` prints what a click would start), `pullping targets list|add|edit|default|rm` (Open
+With), `pullping prompts list|show|set|reset` (Prompts), `pullping setup guide|prompt|status` (the agent setup),
 `pullping run <id> --pr <ref>` (Run Automation; `--dry-run` only prints what it would start), `pullping runs` (Recent
 Runs), `pullping automations on|off|status`, `pullping automations folders|fallback|repos` (Repository Folders),
-`pullping kinds` (the event names), `pullping launchers` (where it can open) and `pullping activity` (the
-[Activity](#activity) list). Every reader takes `--json` and
+`pullping kinds` (the event names), `pullping launchers` (where it can open), `pullping background
+on|off|status|set|run|list|cancel` and `pullping drafts list|show|discard` ([background runs](#background-runs-and-drafts);
+`background run review|summarize|triage --pr <ref> --dry-run` prints the agent's command line and prompt; no command posts a draft) and
+`pullping activity` (the [Activity](#activity) list). Every reader takes `--json` and
 prints what `automations.json` stores, so an agent can read an automation and write it back with flags.
 `pullping --help`, `pullping rule --help` and `pullping hook --help` list every option (Codex: `--agent codex --session
 <thread id>`; `--auto` starts without asking). It works while PullPing is not running: the app picks changes up within
@@ -341,9 +464,14 @@ link that folder into `~/.claude/skills/`.
 | `{session_id}` | The session being resumed, or empty |
 | `{cwd}` | The working directory |
 | `{automation}` | The rule or hook name |
+| `{task}` | The scenario's task text ([Prompts](#prompts)); filled in first, prompts only |
+| `{scenario}`, `{scenario_label}` | `changesRequested`, `Changes requested` |
+| `{resume_note}` | On a resume: "You are resumed in the session that worked on this pull request before; start from what changed since your last turn."; empty for a new session |
+| `{event_url}` | The comment or review that triggered it (only an `https` link on the pull request's own host), else `{pr_url}` |
+| `{reviewed_sha}` | The commit of your last review, or empty |
 | `{title}`, `{author}`, `{actor}`, `{summary}`, `{branch}` | Written by others on GitHub: control characters removed and shortened (`{summary}` is the first line of a comment, at most 120 characters; `{branch}` is the pull request's head branch, empty for an issue) |
 
-The working directory takes the same placeholders, except the five written by others, and `~`. Unknown `{…}` stays as
+The working directory takes the same placeholders, except the five written by others and the six prompt-only ones, and `~`. Unknown `{…}` stays as
 typed. A prompt that starts with a placeholder or a `-` gets a blank first line, so the agent never reads it as an option.
 
 ### Safety
@@ -371,16 +499,43 @@ An automation lets an event on GitHub start a process on your Mac, so PullPing k
   successful runs per pull request, and at most 3 automatic starts per check; the rest wait for a Run click.
 - **Agents' automations show.** Automations written by agents are marked CLI in Settings, and the first time one is
   set to run automatically PullPing tells you.
-- **The usual switches apply.** Pause, mute, snooze, hide and turning an account off stop automations too. An automatic
+- **The usual switches apply.** Pause, mute (a muted repository too), snooze, hide and turning an account off stop automations too. An automatic
   rule with no logins in "Only from" runs for anyone who can comment on the repository; add logins to narrow it.
+
+#### What a background agent can and cannot do
+
+- **It can read** the pull request's diff and discussion, which PullPing fetches first into the run's folder
+  (`runs/<id>/`, readable only by you; the diff is cut at 400 KB, the discussion at 200 KB), and the files of your
+  clone of the repository. Nothing else: Claude Code runs with `-p --restricted --tools Read,Grep,Glob`, no MCP server
+  (`--strict-mcp-config` with an empty list, `--disallowedTools 'mcp__*'`) and `--add-dir` for the run's folder.
+  `--restricted` also ignores your settings files, so an allow rule such as `Bash(*)` there adds nothing, keeps file
+  reads inside those two folders and refuses a permission bypass. `--safe-mode` loads no `CLAUDE.md` (yours, or the one
+  on the pull request's branch, which its author wrote), hooks, skills or plugins. It needs Claude Code 2.1.248 or
+  later; an older one fails the run.
+- **It cannot** run commands, reach the network, write files or talk to GitHub.
+- **Claude Code only, for now.** Codex has no switch that turns off its shell and its other tools (apps, plugins,
+  sub-agents, browser and computer use), so a background run with Codex as the agent is refused; Codex still works for
+  everything that opens a terminal.
+- **Its answer is untrusted input.** PullPing checks it before showing it: a summary of at most 600 characters, one of
+  four verdicts, a body of at most 60,000 characters, and at most 50 inline comments, each checked against the diff's
+  changed lines (one that isn't on one is marked) and listed under the body. Control and invisible characters (text
+  direction, zero-width, Unicode tags) are removed from all of it and again from the text you post, so nothing hides in
+  what you read. Anything else fails the run; its files stay in the run's folder.
+- **Nothing is posted without your click** in the draft window. There is no setting, no rule and no command that posts
+  a draft, approves or requests changes; the prompt tells the agent that text asking it to approve is a finding to
+  report. The pull request's own content (description, comments, code) is written by its author, who is the one who
+  gains from an approval: that is why the person reading the draft is the control.
+- **The session stays.** A background run is a normal agent session (Claude Code: an id PullPing picks). Open Session
+  resumes it in a terminal, where your usual permissions apply again.
 
 Rules, hooks, Handle with Agent and linked sessions (session ids and their folders) live in
 `~/Library/Application Support/PullPing/automations.json`; each run's prompt and script go in
-`runs/` beside it, readable only by you, and are deleted after 7 days.
+`runs/` beside it, readable only by you, and are deleted after 7 days, like background runs' folders and drafts.
 
 ## Permissions
 
-None. PullPing asks macOS for no permission: no Accessibility, no notification
+None. (On GitHub, PullPing only reads, except what you post from a background run's draft window: one review, or one
+comment on an issue, per click, with the account's own token.) PullPing asks macOS for no permission: no Accessibility, no notification
 authorization (the panels are PullPing's own), no Full Disk Access. Tokens are stored in your login keychain
 through macOS's `security` tool, which does not prompt either. Launch at login is optional, and
 only through the toggle you turn on yourself.
@@ -392,6 +547,7 @@ only through the toggle you turn on yourself.
 - **Fine-grained tokens and CI.** CI status may be incomplete with fine-grained tokens; use a classic token when CI matters.
 - **Sign in with GitHub** tokens can be blocked by organizations that restrict OAuth apps until an owner approves PullPing. Personal access tokens always work.
 - **GitHub.com only.** GitHub Enterprise Server is not supported yet.
+- **Issues in your repositories.** At most 20 Other Repositories and 20 Excluded Repositories. When the watched repositories hold more than 500 open issues, PullPing starts with the 500 newest and then follows every newer one; older ones are not listed.
 - **Rate limit.** GitHub gives each token a budget of 5,000 API points per hour; PullPing uses a small fraction. When a token runs low it pauses refreshing until the limit resets and shows "Rate limited" on the account.
 - **Not notarized.** See [First launch](#first-launch).
 
@@ -400,6 +556,8 @@ only through the toggle you turn on yourself.
 - **Tokens** live in your login keychain, one item per account (`com.padina.pullping.token.<id>`), plus `com.padina.pullping.token.<id>.refresh` for a Sign in with GitHub refresh token. They are sent only to GitHub and never written to a file or a log. The optional ntfy access token and fallback topic URL live there too (`com.padina.pullping.ntfy-token`, `com.padina.pullping.ntfy-fallback`).
 - **Your data stays on your Mac** in `~/Library/Application Support/PullPing` (pull request titles, activity and your mute and snooze choices) and in the app's preferences.
 - **Only `api.github.com`, `github.com` and `avatars.githubusercontent.com` are contacted** (`github.com` for Sign in with GitHub and the daily update check, whose download comes from `release-assets.githubusercontent.com`; the avatars host for account pictures), plus your ntfy server once you set up phone notifications: it receives the title, repository and latest activity of the pull requests you chose to send, and a footer line naming the sender as `pullping@<your Mac's short hostname>`.
+- **Background runs** (off by default) give your agent, on your Mac, the pull request's diff and discussion and your
+  clone's files; the agent's own provider (Anthropic, OpenAI) receives what it reads, as in any session you start.
 - **No analytics, no telemetry, no crash reporting, no accounts on any other service.**
 
 ## Uninstall
@@ -438,7 +596,7 @@ Free, open-source Mac menu-bar apps and terminal tools, all on one site: **[apps
 
 If PullPing saves you from a forgotten review, you can support its development. It's optional and always appreciated.
 
-Once in a while, PullPing asks too. A small receipt card shows up about 10 seconds after you close the menu-bar panel, when a pull request of yours was just merged or approved and nothing else needs you: no review asked of you, nothing to fix, no account error, no failure in the last hour. It only appears after PullPing has pinged you more than 50 updates (counted from the version that added this card) and at least 7 days have passed, and at most 3 times a year. "Ask me in 2 weeks" snoozes it, and "Nope, don't ask again" keeps it away until the next major version. If a notification or a PullPing window opens while the card is still open, it closes and counts as a snooze; one left unanswered for 5 minutes, or when you step away, fades and counts as a snooze too. It never takes keyboard focus (its answers are also in the right-click menu), and its counts stay on your Mac.
+Once in a while, PullPing asks too. A small receipt card shows up about 10 seconds after you close the menu-bar panel, when a pull request of yours was just merged or approved and nothing else needs you: no review asked of you, nothing to fix, no reminder due, no account error, no failure in the last hour. It only appears after PullPing has pinged you more than 50 updates (counted from the version that added this card) and at least 7 days have passed, and at most 3 times a year. "Ask me in 2 weeks" snoozes it, and "Nope, don't ask again" keeps it away until the next major version. If a notification or a PullPing window opens while the card is still open, it closes and counts as a snooze; one left unanswered for 5 minutes, or when you step away, fades and counts as a snooze too. It never takes keyboard focus (its answers are also in the right-click menu), and its counts stay on your Mac.
 
 [![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/roypadina)
 
