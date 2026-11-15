@@ -380,6 +380,7 @@ final class AttentionTests: XCTestCase {
             (.review, theirs([.reviewRequested], id: "7"), true), (.reReview, theirs([.reviewer], id: "8", review: "CHANGES_REQUESTED"), true),
             (.teamReview, theirs([.teamReviewRequested], id: "9"), true), (.reviewed, theirs([.reviewer], id: "10", review: "APPROVED"), false),
             (.issueAssigned, issue([.assigned]), false), (.issueMine, issue([.author]), false), (.issueMentioned, issue([.mentioned]), false),
+            (.issueWatched, watchedIssue([]), false),
             (.watching, theirs([.commenter], id: "14"), false), (.closed, theirs([.commenter], id: "15") { $0.state = .closed }, false),
         ]
         XCTAssertEqual(Set(fixtures.map(\.0)), Set(Bucket.allCases))
@@ -417,6 +418,56 @@ final class AttentionTests: XCTestCase {
         XCTAssertEqual([Signal(needs: 3, new: 2), Signal(needs: 3), Signal(new: 2), Signal()].map(\.spoken),
                        ["3 need you, 2 new", "3 need you", "2 new", ""])
         XCTAssertEqual(Signal(needs: 1, new: 2, newNeeds: 1) + Signal(needs: 2, new: 0), Signal(needs: 3, new: 2, newNeeds: 1))
+    }
+
+    // MARK: Issues in my repositories
+
+    /// alice's issue in a repository I watch; `kinds` by alice, one second apart from t0.
+    func watchedIssue(_ kinds: [EventKind] = [.issueOpened], roles: Set<Role> = []) -> TrackedPR {
+        var p = issue(roles)
+        p.watched = true
+        p.authorLogin = "alice"
+        p.events = kinds.enumerated().map { PREvent(id: "e\($0)", prID: "I", kind: $1, actor: "alice", at: t0.addingTimeInterval(Double($0)), summary: "",
+                                                    url: nil, isOwn: false) }
+        return p
+    }
+
+    func testIssuesInMyRepositories() {
+        XCTAssertEqual(Attention.bucket(watchedIssue(roles: [.assigned, .author, .mentioned])), .issueAssigned)
+        XCTAssertEqual(Attention.bucket(watchedIssue(roles: [.author, .mentioned])), .issueMine)
+        XCTAssertEqual(Attention.bucket(watchedIssue(roles: [.mentioned])), .issueWatched)
+        XCTAssertEqual(Attention.bucket(issue([.mentioned])), .issueMentioned)
+
+        // A new issue needs triage until read, and outranks a mention in it.
+        var new = watchedIssue()
+        XCTAssertEqual(Attention.needReason(new), .toTriage)
+        XCTAssertEqual(Attention.waitingSince(new, .toTriage), t0)
+        XCTAssertEqual(Attention.needReason(watchedIssue([.issueOpened, .mentioned])), .toTriage)
+        XCTAssertNil(Attention.needReason(new, counting: [.mentioned]))
+        XCTAssertEqual(Attention.lead(new), Attention.Lead(text: "New issue by @alice", symbol: "plus.circle", tone: .needsYou))
+        XCTAssertEqual(Attention.breakdown([new]), "1 to triage")
+        XCTAssertEqual(Attention.signals([new], now: t0), [.issueWatched: Signal(needs: 1, new: 1, newNeeds: 1)])
+        Attention.markRead(&new, now: t0.addingTimeInterval(10))
+        XCTAssertNil(Attention.needReason(new))
+        XCTAssertNil(Attention.lead(new))
+        XCTAssertEqual(Attention.bucket(new), .issueWatched, "listed while open, read or not")
+
+        // Mark as Unread and Remind Me bring it back.
+        var unread = new
+        Attention.markUnread(&unread)
+        XCTAssertEqual(Attention.needReason(unread), .toTriage)
+        var reminded = new
+        reminded.remindAt = t0.addingTimeInterval(60)
+        XCTAssertNotNil(Remind.fire(&reminded, now: t0.addingTimeInterval(60)))
+        XCTAssertEqual(Attention.needReason(reminded), .reminder)
+
+        // Comments by others: mine to answer on a watched issue, not on one I'm only mentioned in.
+        var commented = watchedIssue([.issueOpened, .comment])
+        commented.lastReadAt = t0  // read the new issue, not the comment after it
+        XCTAssertEqual(Attention.needReason(commented), .newComments)
+        var mentioned = issue([.mentioned])
+        (mentioned.events, mentioned.lastReadAt) = (commented.events, t0)
+        XCTAssertNil(Attention.needReason(mentioned))
     }
 
     // MARK: Mark as Unread, Remind Me, sticky rows

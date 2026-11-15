@@ -7,7 +7,7 @@ public enum PollReason: Sendable { case timer, manual, wake, networkBack, accoun
 /// Counts for logs and smoke mode.
 public struct PollStats: Sendable, Equatable {
     public var login = ""
-    public var involved = 0, requested = 0, reviewed = 0, issues = 0, pages = 0, discoverCost = 0
+    public var involved = 0, requested = 0, reviewed = 0, issues = 0, watched = 0, pages = 0, discoverCost = 0
     public var tracked = 0, changed = 0, new = 0, dropped = 0
     public var batches = 0, refreshed = 0, refreshCost = 0
     public var rateLimit: RateLimit?
@@ -183,13 +183,17 @@ public actor Poller {
         var stats = PollStats()
         let client = GitHubClient(transport: transport, token: token)
         do {
-            // 1. Discover open PRs (and open issues unless tracking them is off).
-            let trackIssues = settings().trackIssues
-            let found = try await client.discover(issues: trackIssues)
+            // 1. Discover open PRs (and open issues, mine and in repositories I watch, unless tracking them is off).
+            let s = settings(), trackIssues = s.trackIssues
+            let found = try await client.discover(issues: trackIssues,
+                                                  watched: trackIssues ? IssueWatch.query(owned: s.watchOwnedIssues, extra: s.watchedIssueRepos) : nil)
+            let patterns = trackIssues ? IssueWatch.patterns(login: found.login, owned: s.watchOwnedIssues, extra: s.watchedIssueRepos) : []
             stats.login = found.login
-            (stats.involved, stats.requested, stats.reviewed, stats.issues, stats.pages) = (found.involved, found.requested, found.reviewed, found.issues, found.pages)
+            (stats.involved, stats.requested, stats.reviewed, stats.issues, stats.watched, stats.pages)
+                = (found.involved, found.requested, found.reviewed, found.issues, found.watched, found.pages)
             stats.discoverCost = client.cost
             let before = store.state
+            let since = before.watchedSince?[account.id] ?? [:]
             var stamps = found.stamps.filter { !before.ignoredIDs.contains($0.key) }
 
             // 2. Stamps for tracked PRs the searches missed (closed ones in retention, search lag).
@@ -244,10 +248,21 @@ public actor Poller {
                 for snapshot in snapshots where !state.ignoredIDs.contains(snapshot.id) {
                     let stamp = stamps[snapshot.id]
                     let (pr, new) = EventEngine.diff(old: state.prs[snapshot.id], snapshot: snapshot, me: found.login, accountID: account.id,
-                                                     inRequestedSearch: stamp?.inRequested ?? false, inReviewedSearch: stamp?.inReviewed ?? false, now: t)
+                                                     inRequestedSearch: stamp?.inRequested ?? false, inReviewedSearch: stamp?.inReviewed ?? false,
+                                                     watchedSince: snapshot.isIssue ? IssueWatch.since(snapshot.repo, patterns: patterns, since: since, now: t) : nil,
+                                                     now: t)
                     state.prs[snapshot.id] = pr
                     events += new
                 }
+                for (id, pr) in state.prs where pr.isIssue && pr.accountID == account.id {
+                    let watched = IssueWatch.matches(pr.repo, patterns)
+                    // Left the watch list and I am not part of it: it goes (not ignored, so watching again brings it back).
+                    if pr.watched && !watched && pr.state == .open && stamps[id]?.inIssues != true { state.prs[id] = nil; continue }
+                    state.prs[id]?.watched = watched
+                }
+                var all = state.watchedSince ?? [:]
+                all[account.id] = trackIssues ? Dictionary(patterns.map { ($0, since[$0] ?? t) }, uniquingKeysWith: { a, _ in a }) : nil
+                state.watchedSince = all
                 StateStore.prune(&state, retentionDays: retention, now: t)
                 state.lastPollAt[account.id] = t
                 // Issues came after accounts were baselined: an account's first poll that tracks them is silent for issues.

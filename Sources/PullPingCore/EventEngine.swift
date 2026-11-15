@@ -5,8 +5,9 @@ public enum EventEngine {
     static let seenCap = 300
     static let eventCap = 50
 
+    /// `watchedSince`: when watching the issue's repository began (`IssueWatch.since`); nil = not watched.
     public static func diff(old: TrackedPR?, snapshot s: PRSnapshot, me: String, accountID: UUID,
-                            inRequestedSearch: Bool, inReviewedSearch: Bool, now: Date) -> (pr: TrackedPR, events: [PREvent]) {
+                            inRequestedSearch: Bool, inReviewedSearch: Bool, watchedSince: Date? = nil, now: Date) -> (pr: TrackedPR, events: [PREvent]) {
         let isNew = old == nil
         let meLower = me.lowercased()
         func mine(_ login: String?) -> Bool { login?.lowercased() == meLower }
@@ -21,6 +22,11 @@ public enum EventEngine {
             if silent && isNew { event.seeded = true }
             events.append(event)
             if kind == .mentioned && !mine(actor) { pr.roles.insert(.mentioned) }
+        }
+
+        // A new issue in a repository I watch, opened by someone else after watching began (`IssueWatch.since`).
+        if isNew, s.isIssue, let since = watchedSince, !mine(s.authorLogin), let created = s.createdAt, created >= since {
+            add("opened:\(s.id)", .issueOpened, s.authorLogin, created, firstLine(s.body), s.url, silent: false)
         }
 
         // Timeline. A new PR's seeded history is silent, except recent mentions of me by others.

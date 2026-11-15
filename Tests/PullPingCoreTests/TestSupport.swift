@@ -48,13 +48,16 @@ final class FakeTransport: GraphQLTransport, @unchecked Sendable {
     }
 }
 
-/// A tiny GitHub: open PRs found by the involved/requested searches, open issues by the issues search, node JSON per id, a rate limit.
+/// A tiny GitHub: open PRs found by the involved/requested searches, open issues by the issues and watched searches (the
+/// watched one pages on to `watchedPage2`), node JSON per id, a rate limit.
 final class FakeGitHub: @unchecked Sendable {
     struct PR { var updatedAt: Date; var state = "OPEN"; var node: String; var issue = false }
     var prs: [String: PR] = [:]
     var involved: [String] = []
     var requested: [String] = []
     var issues: [String] = []
+    var watched: [String] = []
+    var watchedPage2: [String] = []
     var remaining = 4000
     var failing = false
     lazy var transport = FakeTransport { [unowned self] in self.reply($0) }
@@ -63,16 +66,19 @@ final class FakeGitHub: @unchecked Sendable {
         if failing { return (500, [:], Data("oops".utf8)) }
         let (name, variables) = FakeTransport.operation(request)
         let rate = #""rateLimit": { "cost": 1, "remaining": \#(remaining), "resetAt": "\#(iso(t0.addingTimeInterval(3600)))" }"#
-        func search(_ ids: [String]) -> String {
+        func search(_ ids: [String], next: Bool = false) -> String {
             let nodes = ids.compactMap { id in prs[id].map { #"{ "id": "\#(id)", "updatedAt": "\#(iso($0.updatedAt))" }"# } }
-            return #"{ "issueCount": \#(nodes.count), "pageInfo": { "hasNextPage": false, "endCursor": null }, "nodes": [\#(nodes.joined(separator: ","))] }"#
+            return #"{ "issueCount": \#(nodes.count), "pageInfo": { "hasNextPage": \#(next), "endCursor": \#(next ? "\"w2\"" : "null") }, "nodes": [\#(nodes.joined(separator: ","))] }"#
         }
         let ids = variables["ids"] as? [String] ?? []
         let body: String
         switch name {
         case "Discover":
             let issuesAlias = variables["withIssues"] as? Bool == true ? #""issues": \#(search(issues)),"# : ""  // @include
-            body = #"{ "data": { "viewer": { "login": "dana" }, "involved": \#(search(involved)), "requested": \#(search(requested)), "reviewed": \#(search([])), \#(issuesAlias) \#(rate) } }"#
+            let watchedAlias = variables["withWatched"] as? Bool == true ? #""watched": \#(search(watched, next: !watchedPage2.isEmpty)),"# : ""
+            body = #"{ "data": { "viewer": { "login": "dana" }, "involved": \#(search(involved)), "requested": \#(search(requested)), "reviewed": \#(search([])), \#(issuesAlias) \#(watchedAlias) \#(rate) } }"#
+        case "Page":
+            body = #"{ "data": { "search": \#(search(watchedPage2)), \#(rate) } }"#
         case "Stamps":
             let nodes = ids.map { id in prs[id].map { #"{ "id": "\#(id)", "updatedAt": "\#(iso($0.updatedAt))", "\#($0.issue ? "issueState" : "state")": "\#($0.state)" }"# } ?? "null" }
             body = #"{ "data": { "nodes": [\#(nodes.joined(separator: ","))], \#(rate) } }"#
@@ -104,11 +110,12 @@ func prNode(_ id: String, number: Int, author: String = "dana", updatedAt: Date,
 
 /// A `Refresh` Issue node; `timeline` is a JSON array body.
 func issueNode(_ id: String, number: Int, author: String = "dana", updatedAt: Date, state: String = "OPEN", stateReason: String? = nil,
-               assignees: [String] = [], body: String = "", timeline: String = "") -> String {
+               assignees: [String] = [], body: String = "", timeline: String = "", repo: String = "octo-org/widgets", createdAt: Date? = nil) -> String {
     #"""
-    { "__typename": "Issue", "id": "\#(id)", "number": \#(number), "title": "Issue \#(number)", "url": "https://github.com/octo-org/widgets/issues/\#(number)",
+    { "__typename": "Issue", "id": "\#(id)", "number": \#(number), "title": "Issue \#(number)", "url": "https://github.com/\#(repo)/issues/\#(number)",
       "issueState": "\#(state)", "stateReason": \#(stateReason.map { "\"\($0)\"" } ?? "null"), "closedAt": \#(state == "OPEN" ? "null" : "\"\(iso(updatedAt))\""),
-      "updatedAt": "\#(iso(updatedAt))", "body": "\#(body)", "author": { "login": "\#(author)" }, "repository": { "nameWithOwner": "octo-org/widgets" },
+      "updatedAt": "\#(iso(updatedAt))", "createdAt": \#(createdAt.map { "\"\(iso($0))\"" } ?? "null"), "body": "\#(body)", "author": { "login": "\#(author)" },
+      "repository": { "nameWithOwner": "\#(repo)" },
       "assignees": { "nodes": [\#(assignees.map { #"{ "login": "\#($0)" }"# }.joined(separator: ","))] },
       "timelineItems": { "pageInfo": { "hasNextPage": false, "endCursor": null }, "nodes": [\#(timeline)] } }
     """#

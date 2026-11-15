@@ -42,6 +42,17 @@ final class NotifyTests: XCTestCase {
         XCTAssertNil(reason(event(.readyForReview), theirs([.commenter])))
     }
 
+    /// A new issue in a repository I watch is to triage; comments on it are mine to answer, as on my own issues.
+    func testIssuesInMyRepositories() {
+        var watched = theirs([])
+        (watched.isIssue, watched.watched) = (true, true)
+        XCTAssertEqual(reason(event(.issueOpened), watched), .toTriage)
+        XCTAssertEqual(reason(event(.comment), watched), .newComments)
+        XCTAssertNil(reason(event(.issueOpened, own: true), watched))
+        watched.watched = false
+        XCTAssertNil(reason(event(.comment), watched), "an issue I only follow: Activity only")
+    }
+
     func testPushesAndDismissalsOnlyForReReview() {
         XCTAssertEqual(reason(event(.newCommits), theirs([.reviewer], review: "CHANGES_REQUESTED")), .reReview)  // pushed since my review
         XCTAssertEqual(reason(event(.reviewDismissed), theirs([.reviewer], review: "DISMISSED")), .reReview)

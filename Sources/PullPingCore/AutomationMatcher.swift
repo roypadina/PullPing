@@ -67,7 +67,8 @@ public enum AutomationMatcher {
 
     /// One match per automation and pull request (its newest matching event). Auto matches past the budget become offers;
     /// offers skip the cooldown (the user decides) but not the other caps. Background rules match only with `background`
-    /// (Background Runs on), on pull requests their action allows, and a review rule once per head commit.
+    /// (Background Runs on), on pull requests and issues their action allows, a review rule once per head commit, a triage rule
+    /// once per issue.
     public static func plan(events: [PREvent], prs: [String: TrackedPR], automations: [Automation], runs: [RunRecord],
                             settingsEnabled: Bool, paused: Bool, accounts: [Account], now: Date, sessions: [SessionLink] = [],
                             background: Bool = false) -> (auto: [Match], offers: [Match]) {
@@ -79,7 +80,7 @@ public enum AutomationMatcher {
             for a in automations where matches(a, pr: pr, event: event, me: account.login, sessions: sessions) && (a.expiresAt ?? .distantFuture) > now {
                 if let action = a.backgroundAction {
                     guard background, BackgroundQueue.eligible(action, pr: pr) == nil,
-                          !(action == .review && BackgroundQueue.reviewed(prID: pr.id, head: pr.headOID, runs: runs)) else { continue }
+                          !(action != .summarize && BackgroundQueue.handled(action, prID: pr.id, head: pr.headOID, runs: runs)) else { continue }
                 }
                 // New commits after this automation started an agent here may be that agent's push (the head commit's author
                 // can't tell: an unlinked git identity, a cherry-pick): offer it, never start it on its own.

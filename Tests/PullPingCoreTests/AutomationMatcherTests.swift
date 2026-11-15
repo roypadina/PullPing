@@ -75,6 +75,28 @@ final class AutomationMatcherTests: XCTestCase {
         XCTAssertFalse(AutomationMatcher.matches(a, pr: pr(), event: event(by: "mallory"), me: me))
     }
 
+    /// `issueOpened` on an issue in a watched repository: repository patterns and actors apply; it is never mine, so a Mine
+    /// rule never matches it.
+    func testIssueOpenedRule() {
+        var issue = pr("I_1", repo: "octo-org/widgets", number: 140, mine: false)
+        (issue.isIssue, issue.watched, issue.roles) = (true, true, [])
+        var a = rule([.issueOpened])
+        a.repos = ["octo-org/*"]
+        let opened = event("opened:I_1", prID: "I_1", .issueOpened, by: "alice")
+        XCTAssertTrue(AutomationMatcher.matches(a, pr: issue, event: opened, me: me))
+        a.actors = ["dependabot[bot]"]
+        XCTAssertFalse(AutomationMatcher.matches(a, pr: issue, event: opened, me: me))
+        a.actors = []
+        a.repos = ["octo-org/gadgets"]
+        XCTAssertFalse(AutomationMatcher.matches(a, pr: issue, event: opened, me: me))
+        a.repos = []
+        a.scope = .mine
+        XCTAssertFalse(AutomationMatcher.matches(a, pr: issue, event: opened, me: me))
+        a.scope = .others
+        XCTAssertTrue(AutomationMatcher.matches(a, pr: issue, event: opened, me: me))
+        XCTAssertEqual(plan([opened], [issue], [a]).offers.map(\.event.id), ["opened:I_1"])
+    }
+
     func testHooksMatchByRepoAndNumberOnly() {
         XCTAssertTrue(AutomationMatcher.matches(hook(repo: "OCTO-ORG/widgets"), pr: pr(mine: true), event: event(), me: me))
         XCTAssertFalse(AutomationMatcher.matches(hook(number: 13), pr: pr(), event: event(), me: me))

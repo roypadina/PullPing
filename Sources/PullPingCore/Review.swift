@@ -2,7 +2,7 @@ import Foundation
 
 /// A background run's input, fetched by PullPing with the account's token before the agent starts (it has no network).
 public struct BackgroundContext: Sendable, Equatable {
-    /// The head commit when the discussion was fetched: the draft is pinned to it.
+    /// The head commit when the discussion was fetched: the draft is pinned to it. "" for an issue.
     public var head: String
     public var open: Bool
     public var isDraft: Bool
@@ -26,12 +26,35 @@ extension GitHubClient {
     }
     """
 
+    static let issueDiscussionQuery = """
+    query IssueDiscussion($id: ID!) {
+      node(id: $id) {
+        ... on Issue {
+          number title url state body createdAt
+          author { login }
+          labels(first: 20) { nodes { name } }
+          repository { labels(first: 50) { nodes { name } } }
+          comments(last: 100) { nodes { author { login } createdAt body } }
+        }
+      }
+      rateLimit { cost remaining resetAt }
+    }
+    """
+
     static let headQuery = "query Head($id: ID!) { node(id: $id) { ... on PullRequest { headRefOid state } } rateLimit { cost remaining resetAt } }"
 
-    /// The only write PullPing makes to GitHub: one review, on a click in the draft window (`postReview`).
+    /// One of the two writes PullPing makes to GitHub, both on a click in the draft window: one review (`postReview`), or one
+    /// comment on an issue (`postIssueComment`).
     static let addReviewMutation = """
     mutation AddReview($input: AddPullRequestReviewInput!) {
       addPullRequestReview(input: $input) { pullRequestReview { url state } }
+    }
+    """
+
+    /// The other write: a triage draft's reply (`postIssueComment`).
+    static let addCommentMutation = """
+    mutation AddComment($input: AddCommentInput!) {
+      addComment(input: $input) { commentEdge { node { url } } }
     }
     """
 
@@ -41,6 +64,14 @@ extension GitHubClient {
         guard let pr = data.node, let head = pr.headRefOid else { throw AccountStatus.failed("Not a pull request, or no access") }
         let discussion = BackgroundPlanner.capped(Data(Self.markdown(pr).utf8), cap: BackgroundPlanner.discussionCap, what: "discussion")
         return BackgroundContext(head: head, open: pr.state == "OPEN", isDraft: pr.isDraft ?? false, discussion: discussion.text, discussionCut: discussion.cut)
+    }
+
+    /// The issue (node id) as Markdown for `discussion.md`: description, comments, the repository's labels.
+    public func issueContext(issueID: String) async throws -> BackgroundContext {
+        let data: IssueDiscussionData = try await run(Self.issueDiscussionQuery, ["id": issueID])
+        guard let issue = data.node, issue.number != nil else { throw AccountStatus.failed("Not an issue, or no access") }
+        let discussion = BackgroundPlanner.capped(Data(Self.markdown(issue).utf8), cap: BackgroundPlanner.discussionCap, what: "discussion")
+        return BackgroundContext(head: "", open: issue.state == "OPEN", isDraft: false, discussion: discussion.text, discussionCut: discussion.cut)
     }
 
     /// `diff.patch`: the pull request's diff (REST, `application/vnd.github.diff`), capped (`BackgroundPlanner.diffCap`).
@@ -82,6 +113,38 @@ extension GitHubClient {
         throw AccountStatus.failed(decoded?.errors?.first.map { PromptTemplate.clean($0.message, max: 300) } ?? "HTTP \(http.statusCode)")
     }
 
+    /// The request `postIssueComment` sends (tests check it with a fake transport).
+    func commentRequest(issueID: String, body: String) throws -> URLRequest {
+        try request(Self.addCommentMutation, ["input": ["subjectId": issueID, "body": body]])
+    }
+
+    /// Posts one comment on an issue. Called only from the triage draft window's Post Comment button, never from the CLI or a
+    /// rule. GitHub's own refusal (a token without Issues write) comes back as the error's text.
+    public func postIssueComment(issueID: String, body: String) async throws -> URL? {
+        let request = try commentRequest(issueID: issueID, body: body)
+        let data: Data, http: HTTPURLResponse
+        do { (data, http) = try await transport.send(request) } catch { throw Self.status(for: error) }
+        let decoded = try? Self.decoder.decode(GraphQLResponse<AddCommentData>.self, from: data)
+        if let comment = decoded?.data?.addComment?.commentEdge?.node { return URL(string: comment.url ?? "") }
+        if http.statusCode == 401 { throw AccountStatus.badToken }
+        throw AccountStatus.failed(decoded?.errors?.first.map { PromptTemplate.clean($0.message, max: 300) } ?? "HTTP \(http.statusCode)")
+    }
+
+    /// An issue's `discussion.md`, as `markdown(_ pr:)`.
+    static func markdown(_ issue: IssueDiscussionData.Issue) -> String {
+        func who(_ login: Login?) -> String { "@" + (login?.login ?? "ghost") }
+        let labels = issue.labels?.items.map(\.name) ?? []
+        var lines = ["# \(issue.title ?? "") (#\(issue.number ?? 0))",
+                     "Author \(who(issue.author)) · \(issue.state ?? "") · labels: \(labels.isEmpty ? "none" : labels.joined(separator: ", "))",
+                     "", "## Description", "", (issue.body ?? "").isEmpty ? "(none)" : issue.body ?? ""]
+        let comments = issue.comments?.items ?? []
+        lines += ["", "## Comments (\(comments.count))"]
+        for c in comments { lines += ["", "### \(who(c.author)) · \(c.createdAt?.ISO8601Format() ?? "")", "", c.body ?? ""] }
+        let repoLabels = issue.repository?.labels?.items.map(\.name) ?? []
+        lines += ["", "## Labels in this repository", "", repoLabels.isEmpty ? "(none)" : repoLabels.joined(separator: ", ")]
+        return lines.joined(separator: "\n") + "\n"
+    }
+
     /// `discussion.md`. GitHub text as written (it is the agent's input), under headings that name who wrote it.
     static func markdown(_ pr: DiscussionData.PR) -> String {
         func who(_ login: Login?) -> String { "@" + (login?.login ?? "ghost") }
@@ -115,6 +178,16 @@ struct DiscussionData: Decodable {
     var node: PR?
 }
 
+struct IssueDiscussionData: Decodable {
+    struct Issue: Decodable {
+        struct Label: Decodable { var name: String }
+        struct Repo: Decodable { var labels: Nodes<Label>? }
+        var number: Int?; var title: String?; var url: String?; var state: String?; var body: String?; var author: Login?
+        var labels: Nodes<Label>?; var repository: Repo?; var comments: Nodes<DiscussionData.PR.Comment>?
+    }
+    var node: Issue?
+}
+
 struct HeadData: Decodable {
     struct Node: Decodable { var headRefOid: String?; var state: String? }
     var node: Node?
@@ -126,4 +199,12 @@ struct AddReviewData: Decodable {
         var pullRequestReview: Review?
     }
     var addPullRequestReview: Payload?
+}
+
+struct AddCommentData: Decodable {
+    struct Payload: Decodable {
+        struct Edge: Decodable { struct Node: Decodable { var url: String? }; var node: Node? }
+        var commentEdge: Edge?
+    }
+    var addComment: Payload?
 }

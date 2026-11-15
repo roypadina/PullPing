@@ -49,7 +49,9 @@ public enum HandlerMenuModel {
     /// The last section, "In Background" (Background Runs on): the actions this pull request allows, or Cancel Background
     /// Review while one runs on it. Empty when there is neither.
     public static func background(actions: [BackgroundAction], running: BackgroundAction?) -> [HandlerMenuSection] {
-        let items = running.map { [HandlerMenuItem(title: $0 == .review ? "Cancel Background Review" : "Cancel Summary", choice: .cancelBackground)] }
+        let items = running.map { r in
+            [HandlerMenuItem(title: r == .review ? "Cancel Background Review" : r == .triage ? "Cancel Background Triage" : "Cancel Summary", choice: .cancelBackground)]
+        }
             ?? actions.map { HandlerMenuItem(title: $0.title, choice: .background($0)) }
         return items.isEmpty ? [] : [HandlerMenuSection(title: "In Background", items: items)]
     }

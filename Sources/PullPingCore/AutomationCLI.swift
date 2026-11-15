@@ -102,7 +102,8 @@ public enum AutomationCLI {
           --expires <days>                    hooks only, 1 to 365; default 14
           --enable | --disable                default enabled
           --by <text>                         who wrote it, shown in Settings; default $CLAUDE_CODE_SESSION_ID
-          --background review|summarize|off   rules only: run headless and end in a draft (pullping background), instead
+          --background review|summarize|triage|off
+                                              rules only: run headless and end in a draft (pullping background), instead
                                               of a session in a terminal (Claude Code only, for now); --target,
                                               --session and --prompt are not used
           --json                              print the saved automation as JSON
@@ -140,8 +141,10 @@ public enum AutomationCLI {
 
         \(options)
 
-        Example:
+        Examples:
           pullping rule add --name "Fix failing CI" --on ciFailed --scope mine --repos 'octo-org/*'
+          pullping rule add --name "Triage new issues" --on issueOpened --repos 'octo-org/*'
+        (issueOpened fires only on issues opened by others, so --scope mine never matches it.)
         """
 
     public static let hookHelp = """
@@ -357,19 +360,20 @@ public enum AutomationCLI {
     public static let backgroundHelp = """
         Usage: pullping background status | on | off [--json]
                pullping background set --daily-cap <n>
-               pullping background run review|summarize --pr <url | owner/repo#n> [--dry-run] [--json]
+               pullping background run review|summarize|triage --pr <url | owner/repo#n> [--dry-run] [--json]
                pullping background list [--json]
                pullping background cancel <run id>
 
         Background runs (Settings → Automations → Background Runs; off by default): PullPing starts your agent without a
-        terminal on one pull request, and the run ends in a draft. The agent can only read: PullPing fetches the diff and
+        terminal on one pull request or issue, and the run ends in a draft. The agent can only read: PullPing fetches the diff and
         the discussion into the run's folder first, and the agent gets read-only file tools on that folder and the
         repository's folder: no shell, no network, no MCP servers, no write tools. Background runs need Claude Code
         (2.1.248 or later) for now: with Codex as the agent, a run is refused. Nothing is posted to GitHub until you click
         Post in PullPing's draft window: no command posts, and an approval or a change request is never automatic.
 
         review: others' open pull requests that are not drafts, with the Review requested task (Re-review when you
-        reviewed an older commit; pullping prompts). summarize: any pull request. At most 2 runs at once and 10 waiting,
+        reviewed an older commit; pullping prompts). summarize: any pull request. triage: an open issue; ends in a draft
+        reply (the New issue task, pullping prompts show issueTriage). At most 2 runs at once and 10 waiting,
         at most --daily-cap runs (default 20) in 24 hours, automatic and manual together; a run stops after 10 minutes.
         Runs use Handle with Agent's agent and command (pullping handler set); a rule with --background uses its own.
 
@@ -385,9 +389,10 @@ public enum AutomationCLI {
                pullping drafts show <run id> [--json]
                pullping drafts discard <run id>
 
-        What background runs drafted, kept 7 days: a review (summary, suggested verdict, body) or a summary. Read them
-        here; post a review only in PullPing's draft window (the notification's Review Draft…, or the pull request's
-        Agent Draft section), where you choose Comment, Request changes or Approve. No command posts. discard deletes one.
+        What background runs drafted, kept 7 days: a review (summary, suggested verdict, body), a summary or a triage
+        reply. Read them here; post a review or a reply only in PullPing's draft window (the notification's Review
+        Draft…, or the pull request's Agent Draft section), where you choose Comment, Request changes or Approve (a
+        triage reply posts as a comment). No command posts. discard deletes one.
         <run id>: a unique prefix of at least 4 characters (pullping drafts list).
         """
 
@@ -722,7 +727,7 @@ public enum AutomationCLI {
             a.expiresAt = now.addingTimeInterval(Double(days) * 86_400)
         }
         if let raw = values["background"] {
-            guard raw == "off" || BackgroundAction(rawValue: raw) != nil else { throw Usage(message: "--background must be review, summarize or off") }
+            guard raw == "off" || BackgroundAction(rawValue: raw) != nil else { throw Usage(message: "--background must be review, summarize, triage or off") }
             a.background = BackgroundAction(rawValue: raw)
         }
         if flags.contains("enable") { a.enabled = true }
@@ -848,7 +853,7 @@ public enum AutomationCLI {
                 + "\(agentWord(a)) (\(sessionWord(a))) in \(a.launcher.title), \(a.mode.rawValue)" + end
         }
         let repos = a.repos.isEmpty ? "" : " (\(a.repos.joined(separator: ", ")))"
-        let runs = a.background.map { "\(agentWord(a)) \($0 == .review ? "reviews" : "summarizes") in the background (a draft)" }
+        let runs = a.background.map { "\(agentWord(a)) \($0 == .review ? "reviews" : $0 == .triage ? "triages" : "summarizes") in the background (a draft)" }
             ?? "\(agentWord(a))\(a.usesLinkedSession ? " (linked session)" : "") in \(a.launcher.title)"
         return "\(verb) rule \(shortID(a)): \(a.name) — \(names.joined(separator: ", ")) on \(a.scope.rawValue)\(repos) → \(runs), \(a.mode.rawValue), \(a.maxRunsPerPR) \(a.maxRunsPerPR == 1 ? "run" : "runs") per pull request" + end
     }
@@ -1609,7 +1614,7 @@ extension AutomationCLI {
             guard let cap = Int(raw), BackgroundSettings.dailyCapRange.contains(cap) else { throw Usage(message: "--daily-cap must be 1 to 100") }
             return status(store.mutate { $0.background.dailyCap = cap; return $0 })
         case "run":
-            guard positional.count == 1, let action = BackgroundAction(rawValue: positional[0]) else { throw Usage(message: "run takes review or summarize") }
+            guard positional.count == 1, let action = BackgroundAction(rawValue: positional[0]) else { throw Usage(message: "run takes review, summarize or triage") }
             guard let ref = try ref(values["pr"]) else { throw Usage(message: "--pr is required") }
             let file = store.load()
             if let failure = store.failure { throw Failure(message: failure) }

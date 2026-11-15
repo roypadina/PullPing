@@ -5,12 +5,13 @@ enum GraphQL {
     static let me = "query Me { viewer { login avatarUrl } rateLimit { cost remaining resetAt } }"
 
     static let discover = """
-    query Discover($involved: String!, $requested: String!, $reviewed: String!, $issues: String!, $withIssues: Boolean!) {
+    query Discover($involved: String!, $requested: String!, $reviewed: String!, $issues: String!, $withIssues: Boolean!, $watched: String!, $withWatched: Boolean!) {
       viewer { login }
       involved:  search(query: $involved,  type: ISSUE, first: 100) { issueCount pageInfo { hasNextPage endCursor } nodes { ... on PullRequest { id updatedAt } } }
       requested: search(query: $requested, type: ISSUE, first: 100) { issueCount pageInfo { hasNextPage endCursor } nodes { ... on PullRequest { id updatedAt } } }
       reviewed:  search(query: $reviewed,  type: ISSUE, first: 100) { issueCount pageInfo { hasNextPage endCursor } nodes { ... on PullRequest { id updatedAt } } }
       issues:    search(query: $issues,    type: ISSUE, first: 100) @include(if: $withIssues) { issueCount pageInfo { hasNextPage endCursor } nodes { ... on Issue { id updatedAt } } }
+      watched:   search(query: $watched,   type: ISSUE, first: 100) @include(if: $withWatched) { issueCount pageInfo { hasNextPage endCursor } nodes { ... on Issue { id updatedAt } } }
       rateLimit { cost remaining resetAt }
     }
     """
@@ -62,7 +63,7 @@ enum GraphQL {
           }
         }
         ... on Issue {
-          id number title url issueState: state stateReason closedAt updatedAt body
+          id number title url issueState: state stateReason closedAt updatedAt createdAt body
           author { login avatarUrl }
           repository { nameWithOwner url isPrivate }
           assignees(first: 10) { nodes { login } }
@@ -141,6 +142,8 @@ struct DiscoverData: Decodable {
     var reviewed: SearchResult
     /// Absent when issue tracking is off (`@include`).
     var issues: SearchResult?
+    /// Issues in repositories I watch; absent when there is nothing to watch.
+    var watched: SearchResult?
 }
 
 struct PageData: Decodable { var search: SearchResult }
@@ -233,4 +236,5 @@ struct RawPR: Decodable {
     // Issue only.
     var issueState: String?
     var stateReason: String?
+    var createdAt: Date?
 }

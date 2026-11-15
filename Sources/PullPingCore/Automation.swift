@@ -318,8 +318,10 @@ extension Automation {
 
     /// A new handler's notifications: the ones an agent can act on (not CI passed, merged, closed, new commits, draft, title or
     /// labels). `reviewReminder` follows `reviewRequested`.
-    public static let defaultHandlerKinds: Set<EventKind> = [.comment, .mentioned, .reviewRequested, .reviewChangesRequested, .reviewCommented,
-                                                             .reviewApproved, .reviewDismissed, .assigned, .ciFailed, .readyForReview, .reopened]
+    public static let defaultHandlerKinds: Set<EventKind> = legacyHandlerKinds.union([.issueOpened])
+    /// The default kinds before `issueOpened` (file version 1): a handler that still has them exactly gains it on load.
+    static let legacyHandlerKinds: Set<EventKind> = [.comment, .mentioned, .reviewRequested, .reviewChangesRequested, .reviewCommented,
+                                                     .reviewApproved, .reviewDismissed, .assigned, .ciFailed, .readyForReview, .reopened]
 
     /// Handle with Agent: a button on the notifications of its `kinds`, off until turned on. A fixed `createdAt` keeps a default
     /// file equal to itself.
@@ -381,7 +383,7 @@ public struct RunRecord: Codable, Sendable, Hashable {
 
 public struct AutomationFile: Codable, Sendable, Equatable {
     public static let runCap = 500
-    public var version = 1
+    public var version = 2
     /// Settings > Automations > Run Automations (`pullping automations on|off`): here, not in the settings blob, so the CLI can write it.
     public var enabled = true
     public var automations: [Automation] = []
@@ -404,7 +406,7 @@ public struct AutomationFile: Codable, Sendable, Equatable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        version = try c.decodeIfPresent(Int.self, forKey: .version) ?? version
+        version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 1
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? enabled
         automations = try c.decodeIfPresent([Automation].self, forKey: .automations) ?? []
         runs = try c.decodeIfPresent([RunRecord].self, forKey: .runs) ?? []
@@ -423,6 +425,11 @@ public struct AutomationFile: Codable, Sendable, Equatable {
         // The old default prompts become the new ones (scenario prompts apply at once); any edited prompt stays as written.
         if handler.prompt == Automation.legacyHandlerPrompt { handler.prompt = Automation.defaultHandlerPrompt }
         for i in automations.indices where automations[i].prompt == Automation.legacyPrompt { automations[i].prompt = Automation.defaultPrompt }
+        // Version 2 adds `issueOpened` to the default handler kinds; kinds the user edited stay as they are.
+        if version < 2 {
+            if handler.kinds == Automation.legacyHandlerKinds { handler.kinds.insert(.issueOpened) }
+            version = 2
+        }
         mirrorTargets()
     }
 

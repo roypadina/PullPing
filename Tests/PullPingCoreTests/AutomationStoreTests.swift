@@ -168,7 +168,7 @@ final class AutomationStoreTests: XCTestCase {
         try Data(json.utf8).write(to: url)
         let file = AutomationStore(url: url).load()
         let a = try XCTUnwrap(file.automations.first)
-        XCTAssertEqual(file.version, 1)
+        XCTAssertEqual(file.version, 2)  // no version = 1, migrated on load
         XCTAssertTrue(file.enabled)
         XCTAssertEqual(a.kinds, [.comment])
         XCTAssertEqual([a.enabled, a.isHook], [true, false])
@@ -231,11 +231,32 @@ final class AutomationStoreTests: XCTestCase {
     /// A new handler gets the actionable kinds; one saved before the choice keeps [] (every kind).
     func testHandlerKinds() throws {
         XCTAssertEqual(Automation.defaultHandler().kinds, [.comment, .mentioned, .reviewRequested, .reviewChangesRequested, .reviewCommented,
-                                                           .reviewApproved, .reviewDismissed, .assigned, .ciFailed, .readyForReview, .reopened])
+                                                           .reviewApproved, .reviewDismissed, .assigned, .ciFailed, .readyForReview, .reopened, .issueOpened])
         XCTAssertEqual(AutomationFile().handler.kinds, Automation.defaultHandlerKinds)
         let old = #"{ "handler": { "id": "00000000-0000-4000-8000-00000000AC71", "name": "Handle with Agent", "kinds": [], "prompt": "p", "workingDirectory": "{repo_dir}", "createdAt": "\#(iso(t0))" } }"#
         try Data(old.utf8).write(to: url)
         XCTAssertEqual(AutomationStore(url: url).load().handler.kinds, [])
+    }
+
+    /// Version 2 adds `issueOpened` to a handler that still has version 1's default kinds; edited kinds, and a version 2
+    /// file without it, stay as they are.
+    func testHandlerKindsMigration() throws {
+        func load(version: Int, kinds: [EventKind]) throws -> AutomationFile {
+            let json = #"{ "version": \#(version), "handler": { "id": "00000000-0000-4000-8000-00000000AC71", "name": "Handle with Agent", "kinds": [\#(kinds.map { "\"\($0.rawValue)\"" }.joined(separator: ","))], "prompt": "p", "workingDirectory": "{repo_dir}", "createdAt": "\#(iso(t0))" } }"#
+            try Data(json.utf8).write(to: url)
+            return AutomationStore(url: url).load()
+        }
+        let legacy = Array(Automation.legacyHandlerKinds)
+        let migrated = try load(version: 1, kinds: legacy)
+        XCTAssertEqual(migrated.handler.kinds, Automation.defaultHandlerKinds)
+        XCTAssertEqual(migrated.version, 2)
+        AutomationStore(url: url).mutate { $0.findSessions = true }  // saved on the next change
+        let saved = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        XCTAssertEqual(saved["version"] as? Int, 2)
+        XCTAssertEqual(AutomationStore(url: url).load().handler.kinds, Automation.defaultHandlerKinds)
+        XCTAssertEqual(try load(version: 1, kinds: [.ciFailed, .comment]).handler.kinds, [.ciFailed, .comment], "edited kinds stay")
+        XCTAssertEqual(try load(version: 2, kinds: legacy).handler.kinds, Automation.legacyHandlerKinds, "a version 2 file is not migrated again")
+        XCTAssertEqual(AutomationFile().version, 2)
     }
 
     func testSetLinkReplacesCaseInsensitively() {

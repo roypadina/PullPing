@@ -18,6 +18,8 @@ final class CompatibilityTests: XCTestCase {
         XCTAssertNil(pr.stateReason)
         XCTAssertNil(pr.headRef)  // until the next refresh
         XCTAssertNil(state.baselinedIssueAccounts)  // issue baseline still to come
+        XCTAssertNil(state.watchedSince)
+        XCTAssertFalse(pr.watched)
         XCTAssertTrue(pr.muted)
         XCTAssertEqual(pr.events.count, 1)
         XCTAssertEqual(state.ignoredIDs, ["PR_9"])
@@ -44,11 +46,11 @@ final class CompatibilityTests: XCTestCase {
     /// them off sticks.
     func testAssignedReasonMigration() throws {
         let old = try JSONDecoder().decode(AppSettings.self, from: Data(#"{ "badgeReasons": ["to review", "mentioned"] }"#.utf8))
-        XCTAssertEqual(old.badgeReasons, [.toReview, .mentioned, .assigned, .reReview, .conflicts, .reminder])
+        XCTAssertEqual(old.badgeReasons, [.toReview, .mentioned, .assigned, .reReview, .conflicts, .reminder, .toTriage])
         var mine = old
         mine.badgeReasons.subtract([.assigned, .conflicts, .reminder])
         let again = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(mine))
-        XCTAssertEqual(again.badgeReasons, [.toReview, .mentioned, .reReview, .reminder], "a reminder I set always counts")
+        XCTAssertEqual(again.badgeReasons, [.toReview, .mentioned, .reReview, .reminder, .toTriage], "a reminder I set always counts")
         XCTAssertTrue(again.trackIssues)
     }
 
@@ -72,6 +74,8 @@ final class CompatibilityTests: XCTestCase {
         XCTAssertEqual(Attention.bucket(issue), .issueAssigned)
         XCTAssertEqual([mine.remindAt, theirs.remindAt], [nil, nil])
         XCTAssertEqual([mine.markedUnread, theirs.markedUnread], [false, false])
+        XCTAssertEqual([mine.watched, issue.watched], [false, false])  // set by the next poll
+        XCTAssertNil(state.watchedSince)
         // Remind Me and Mark as Unread survive a save and a reload.
         let store = StateStore(url: url)
         store.update { $0.prs["PR_2"]?.remindAt = t0; $0.prs["PR_2"]?.markedUnread = true }
@@ -106,7 +110,9 @@ final class CompatibilityTests: XCTestCase {
         XCTAssertEqual(h.prompt, (original["handler"] as? [String: Any])?["prompt"] as? String, "a custom prompt is untouched")
         XCTAssertFalse(h.prompt.contains("{task}"))
         XCTAssertTrue(h.enabled && file.findSessions && file.enabled)
-        XCTAssertEqual(h.kinds.count, 11)
+        XCTAssertEqual(h.kinds.count, 12, "the default kinds gain issueOpened")
+        XCTAssertTrue(h.kinds.contains(.issueOpened))
+        XCTAssertEqual(file.version, 2)
         XCTAssertEqual(file.sessions.map(\.sessionID), ["0f3c2a1e-5b7d-4c9e-8a10-2b4d6f8e1c3a"])
         XCTAssertEqual(file.runs.count, 1)
         XCTAssertEqual(file.repoFolders.overrides, ["octo-org/widgets": "~/src/widgets-main"])
@@ -122,7 +128,7 @@ final class CompatibilityTests: XCTestCase {
             return (h as NSDictionary, kinds)
         }
         XCTAssertEqual(handler(saved).0, handler(original).0, "0.7 reads the same handler")
-        XCTAssertEqual(handler(saved).1, handler(original).1)
+        XCTAssertEqual(handler(saved).1, handler(original).1.union(["issueOpened"]))
         XCTAssertEqual(saved["sessions"] as? NSArray, original["sessions"] as? NSArray)
         XCTAssertEqual(saved["repoFolders"] as? NSDictionary, original["repoFolders"] as? NSDictionary)
         XCTAssertEqual(AutomationStore(url: url).load().targets, file.targets)

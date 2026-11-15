@@ -103,7 +103,8 @@ Check: `pullping automations folders list` ends with `repos scanned: N`. When N 
 ## Step 4: the Handle with Agent button
 
 Ask: "Turn on the Handle with Agent button on notifications? (default: yes)". Then ask: "On which notifications?
-(default: comments, mentions, review requests, reviews, assignments, CI failed, ready for review, reopened)".
+(default: comments, mentions, review requests, reviews, assignments, CI failed, ready for review, reopened, new
+issues)".
 `pullping kinds` lists the names.
 
 ```bash
@@ -200,6 +201,16 @@ anyone who can request your review can start one. (default: no)". On a yes, add 
 ```bash
 pullping rule add --name "Draft my reviews" --on reviewRequested --scope others --background review --by "<your agent> setup"
 pullping rule edit <its id> --auto --by "<your agent> setup"
+```
+
+New issues: PullPing also tracks every open issue in the repositories the user's accounts own (Settings → General),
+and someone else opening one raises `issueOpened` ("New issue"). Its task text is the `issueTriage` prompt
+(`pullping prompts show issueTriage`); Triage in Background drafts a reply the user can edit and post as a comment,
+nothing else. Only after the yes above, ask: "Draft a triage reply whenever someone opens an issue in your
+repositories? (default: no)". On a yes:
+
+```bash
+pullping rule add --name "Triage new issues" --on issueOpened --background triage --by "<your agent> setup"
 ```
 
 Check: `pullping background status` and `pullping rule list`. To show the user what a run would do, ask for a pull

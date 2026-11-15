@@ -38,7 +38,7 @@ enum Filter: String, CaseIterable {
         switch Attention.bucket(pr) {
         case .fix, .merge, .waitingReview, .waitingCI, .waitingMerge, .draft: return .myPRs
         case .review, .reReview, .teamReview, .reviewed: return .reviews
-        case .issueAssigned, .issueMine, .issueMentioned: return .issues
+        case .issueAssigned, .issueMine, .issueWatched, .issueMentioned: return .issues
         case .watching: return .watching
         case .closed: return .closed
         }
@@ -58,7 +58,7 @@ enum Filter: String, CaseIterable {
     /// `newNeeds`. Muted & Hidden has neither.
     func signal(_ map: [Bucket: Signal]) -> Signal {
         func sum(_ buckets: [Bucket]) -> Signal { buckets.compactMap { map[$0] }.reduce(Signal(), +) }
-        let reviews: [Bucket] = [.review, .reReview, .teamReview], issues: [Bucket] = [.issueAssigned, .issueMine, .issueMentioned]
+        let reviews: [Bucket] = [.review, .reReview, .teamReview], issues: [Bucket] = [.issueAssigned, .issueMine, .issueWatched, .issueMentioned]
         switch self {
         case .needsMe:
             let all = sum(Bucket.allCases)
@@ -80,24 +80,26 @@ enum Filter: String, CaseIterable {
             switch self {
             case .needsMe:
                 if [.review, .reReview, .teamReview].contains(bucket) { return "To Review" }
+                if bucket == .issueWatched { return "Issues in My Repositories" }  // by bucket: reading it doesn't move the row
                 return !pr.isIssue && pr.roles.contains(.author) ? "Your Pull Requests" : "Mentions, Assigned & Reminders"
             case .myPRs: return [.fix, .merge].contains(bucket) ? "Your Turn" : bucket == .draft ? "Drafts" : "Waiting on Others"
             case .reviews: return [.review, .reReview].contains(bucket) ? "Needs Your Review" : bucket == .teamReview ? "Team Requests" : "Reviewed"
-            case .issues: return bucket == .issueAssigned ? "Assigned to Me" : bucket == .issueMine ? "Opened by Me" : "Mentioned"
+            case .issues:
+                return bucket == .issueAssigned ? "Assigned to Me" : bucket == .issueMine ? "Opened by Me" : bucket == .issueWatched ? "In My Repositories" : "Mentioned"
             case .watching, .closed: return ""
             case .mutedHidden: return pr.hidden ? "Hidden" : "Muted"
             }
         }
         let order: [String] = switch self {
-        case .needsMe: ["To Review", "Your Pull Requests", "Mentions, Assigned & Reminders"]
+        case .needsMe: ["To Review", "Your Pull Requests", "Mentions, Assigned & Reminders", "Issues in My Repositories"]
         case .myPRs: ["Your Turn", "Waiting on Others", "Drafts"]
         case .reviews: ["Needs Your Review", "Team Requests", "Reviewed"]
-        case .issues: ["Assigned to Me", "Opened by Me", "Mentioned"]
+        case .issues: ["Assigned to Me", "Opened by Me", "In My Repositories", "Mentioned"]
         case .watching, .closed: [""]
         case .mutedHidden: ["Muted", "Hidden"]
         }
         let queues: Set<String> = ["To Review", "Your Pull Requests", "Mentions, Assigned & Reminders", "Your Turn", "Needs Your Review", "Team Requests",
-                                   "Assigned to Me", "Opened by Me", "Mentioned"]
+                                   "Assigned to Me", "Opened by Me", "Mentioned", "Issues in My Repositories", "In My Repositories"]
         let grouped = Dictionary(grouping: prs, by: by)
         return order.compactMap { title in
             grouped[title].map { ListSection(title: title, prs: queues.contains(title) ? $0 : Attention.sorted($0, counting: []), collapsed: title == "Drafts") }
@@ -481,7 +483,7 @@ final class Store {
             let scope = switch a.scope { case .any: "pull requests"; case .mine: "your pull requests"; case .others: "others' pull requests" }
             let place = a.pr.map { "\($0.repo) #\($0.number)" } ?? scope + (a.repos.isEmpty ? "" : " in \(a.repos.joined(separator: ", "))")
             let by = a.by.isEmpty ? "" : " (by \(a.by.count > 12 ? a.by.prefix(12) + "…" : a.by))"
-            let does = a.backgroundAction.map { "drafts a \($0 == .review ? "review" : "summary") in the background (it posts nothing)" }
+            let does = a.backgroundAction.map { "drafts a \($0 == .review ? "review" : $0 == .triage ? "triage reply" : "summary") in the background (it posts nothing)" }
                 ?? (a.usesLinkedSession ? "resumes the pull request's linked session" : "starts \(AutomationCLI.agentWord(a)) in \(a.launcher.title)")
             NotificationPanels.shared.show(
                 note: "Added from the command line\(by). PullPing \(does) without asking when \(kinds) arrives on \(place).",
@@ -1191,8 +1193,8 @@ final class Store {
         pumpBackground()
     }
 
-    /// The result's panel (an alert: it stays): a review draft (Review Draft…, Open Session, Discard), a summary (Open
-    /// Session, Copy), or a failure. The agent's summary is shown as cleaned plain text.
+    /// The result's panel (an alert: it stays): a review or triage draft (Review Draft…, Open Session, Discard), a summary
+    /// (Open Session, Copy), or a failure. The agent's summary is shown as cleaned plain text.
     private func showBackground(_ run: RunRecord, draft: BackgroundDraft?, pr: TrackedPR, title: String) {
         guard let runID = run.runID else { return }
         let id = UUID(uuidString: runID) ?? Automation.backgroundID
@@ -1208,8 +1210,10 @@ final class Store {
             }, symbol: "doc.on.doc")
             return NotificationPanels.shared.show(note: "\(place)\n\(draft.summary)", title: "Summary ready", id: id, actions: open + [copy])
         }
+        let triage = draft.action == .triage
         NotificationPanels.shared.show(
-            note: "\(place)\nSuggests: \(draft.verdict.phrase). \(draft.summary)", title: "Review draft ready", id: id,
+            note: triage ? "\(place)\n\(draft.summary)" : "\(place)\nSuggests: \(draft.verdict.phrase). \(draft.summary)",
+            title: triage ? "Triage draft ready" : "Review draft ready", id: id,
             actions: [PanelAction(id: id, title: "Review Draft…", run: { [weak self] in self.map { DraftWindows.shared.show(store: $0, runID: runID) } }, symbol: "doc.text.magnifyingglass")]
                 + open + [PanelAction(id: id, title: "Discard", run: { [weak self] in self?.discardDraft(runID) }, symbol: "trash")])
     }
@@ -1288,11 +1292,13 @@ final class Store {
 
     /// The draft window's Post, the only path that writes to GitHub: one review with the account that tracks the pull request,
     /// the edited body and the chosen event, pinned to the draft's commit (`DraftPost.refusal`, checked again against a fresh
-    /// head right before). nil = posted (the draft is used up); else why not, and the draft stays. `askedNow`: the user just
+    /// head right before); a triage draft posts one comment on its issue, nothing else. nil = posted (the draft is used up);
+    /// else why not, and the draft stays. `askedNow`: the user just
     /// answered the one-time "Post as @login?" question; it is remembered only once the post went through.
     func postDraft(_ draft: BackgroundDraft, body: String, event: DraftPost.Event, askedNow: Bool = false) async -> String? {
         guard persist else { return "Not in the demo." }
-        guard draft.action == .review else { return "Only a review draft can be posted." }
+        guard draft.action != .summarize else { return "Only a review or triage draft can be posted." }
+        let triage = draft.action == .triage, event = triage ? .comment : event
         guard askedNow || postConfirmed(draft.login) else { return "PullPing has not posted as @\(draft.login) before: confirm it first." }
         let body = BackgroundPlanner.clean(body)  // what the window showed: draft.json may have been edited since
         guard let account = account(draft.accountID) else { return "@\(draft.login) is no longer an account in PullPing." }
@@ -1302,9 +1308,13 @@ final class Store {
         }
         let client = GitHubClient(transport: URLSessionTransport(), token: Keychain.get(account.tokenService))
         do {
-            let now = try await client.pullRequestHead(prID: draft.prID)
-            if let reason = DraftPost.refusal(event, body: body, draftHead: draft.head, head: now.head, open: now.open) { return reason }
-            _ = try await client.postReview(prID: draft.prID, commitOID: draft.head, event: event, body: body)
+            if triage {
+                _ = try await client.postIssueComment(issueID: draft.prID, body: body)
+            } else {
+                let now = try await client.pullRequestHead(prID: draft.prID)
+                if let reason = DraftPost.refusal(event, body: body, draftHead: draft.head, head: now.head, open: now.open) { return reason }
+                _ = try await client.postReview(prID: draft.prID, commitOID: draft.head, event: event, body: body)
+            }
         } catch {
             return "GitHub didn't take it: \((error as? AccountStatus)?.word ?? error.localizedDescription)"
         }
@@ -1315,9 +1325,9 @@ final class Store {
         }
         if let file = BackgroundDraft.url(runID: draft.runID, runsDir: AgentLauncher.runsDir) { try? FileManager.default.removeItem(at: file) }
         reload()
-        record([ActivityEntry(background: "Review: \(event.title) as @\(account.login)", stage: .posted, pr: pr ?? draft.pr, account: account.login,
+        record([ActivityEntry(background: "\(triage ? "Triage" : "Review"): \(event.title) as @\(account.login)", stage: .posted, pr: pr ?? draft.pr, account: account.login,
                               runID: draft.runID, at: Date())])
-        BackgroundRunner.log.info("posted a review (\(event.rawValue, privacy: .public)) on \(draft.repo, privacy: .public) #\(draft.number)")
+        BackgroundRunner.log.info("posted a \(triage ? "comment" : "review") (\(event.rawValue, privacy: .public)) on \(draft.repo, privacy: .public) #\(draft.number)")
         UUID(uuidString: draft.runID).map { NotificationPanels.shared.dismiss(prID: "note:\($0)") }
         return nil
     }

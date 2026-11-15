@@ -42,6 +42,7 @@ extension GitHubClient {
         s.mergeState = raw.mergeStateStatus ?? ""
         s.updatedAt = raw.updatedAt
         s.closedAt = raw.closedAt ?? raw.mergedAt
+        s.createdAt = raw.createdAt
         s.headOID = raw.headRefOid ?? ""
         s.headRef = raw.headRefName
         let commit = raw.commits?.items.first?.commit

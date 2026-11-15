@@ -23,6 +23,9 @@ final class BackgroundCLITests: XCTestCase {
             if mine { pr.roles = [.author] }
             state.prs[id] = pr
         }
+        var issue = TrackedPR(id: "I_9", accountID: UUID(), firstTrackedAt: t0)
+        (issue.repo, issue.number, issue.url, issue.title, issue.isIssue, issue.watched) = ("octo-org/widgets", 9, URL(string: "https://github.com/octo-org/widgets/issues/9")!, "Crash", true, true)
+        state.prs[issue.id] = issue
         return state
     }
 
@@ -86,6 +89,28 @@ final class BackgroundCLITests: XCTestCase {
             XCTAssertEqual(run(line).error, "pullping: Background runs need Claude Code for now")
         }
         XCTAssertEqual(runs.count, count)
+    }
+
+    /// Triage in Background: open issues only; a rule with `--background triage`.
+    func testTriage() throws {
+        run(["background", "on"])
+        XCTAssertEqual(run(["background", "run", "triage", "--pr", "octo-org/widgets#7"]).error, "pullping: Triage in Background is for issues")
+        XCTAssertEqual(run(["background", "run", "review", "--pr", "octo-org/widgets#9"]).error, "pullping: Review in Background is for pull requests")
+        let dry = run(["background", "run", "triage", "--pr", "octo-org/widgets#9", "--dry-run"])
+        XCTAssertEqual(dry.status, 0, dry.error)
+        XCTAssertTrue(dry.output.contains("  You run unattended on issue octo-org/widgets #9"), dry.output)
+        XCTAssertFalse(dry.output.contains("diff.patch"))
+        let queued = run(["background", "run", "triage", "--pr", "octo-org/widgets#9"])
+        XCTAssertEqual(queued.status, 0, queued.error)
+        XCTAssertEqual(runs.last?.background, .triage)
+        XCTAssertEqual(runs.last?.head, "")
+        XCTAssertEqual(run(["background", "run", "bogus", "--pr", "octo-org/widgets#9"]).error, "pullping: run takes review, summarize or triage\nRun `pullping background --help` for usage.")
+        let added = run(["rule", "add", "--name", "Triage new issues", "--on", "issueOpened", "--background", "triage"])
+        XCTAssertEqual(added.status, 0, added.error)
+        XCTAssertEqual(store.load().automations.last?.background, .triage)
+        XCTAssertTrue(added.output.contains("→ claude triages in the background (a draft), ask"), added.output)
+        XCTAssertTrue(run(["rule", "add", "--name", "x", "--on", "comment", "--background", "post"]).error.hasPrefix("pullping: --background must be review, summarize, triage or off"))
+        XCTAssertTrue(AutomationCLI.backgroundHelp.contains("pullping background run review|summarize|triage --pr"))
     }
 
     func testDryRunWritesNothing() throws {

@@ -119,17 +119,20 @@ final class ScreenshotRenderTests: XCTestCase {
         func sections(_ filter: Filter) -> [String] {
             filter.sections(store.prs(.all, filter)).map { "\($0.title): " + $0.prs.map(\.id).joined(separator: " ") }
         }
-        XCTAssertEqual(sections(.needsMe), ["To Review: PR_3 PR_9 PR_13", "Your Pull Requests: PR_2 PR_1", "Mentions, Assigned & Reminders: PR_15 I_1"])
+        XCTAssertEqual(sections(.needsMe), ["To Review: PR_3 PR_9 PR_13", "Your Pull Requests: PR_2 PR_1", "Mentions, Assigned & Reminders: PR_15 I_1",
+                                         "Issues in My Repositories: I_5"])
         XCTAssertEqual(sections(.myPRs), ["Your Turn: PR_2 PR_1", "Waiting on Others: PR_11 PR_12 PR_10", "Drafts: PR_4"])
         XCTAssertEqual(sections(.reviews), ["Needs Your Review: PR_3 PR_9", "Team Requests: PR_13", "Reviewed: PR_8 PR_14"])
-        XCTAssertEqual(sections(.issues), ["Assigned to Me: I_4", "Opened by Me: I_1"])
+        XCTAssertEqual(sections(.issues), ["Assigned to Me: I_4", "Opened by Me: I_1", "In My Repositories: I_5 I_6"])
+        XCTAssertEqual(Attention.lead(store.tracked.prs["I_5"]!)?.text, "New issue by @dave")
+        XCTAssertNil(Attention.lead(store.tracked.prs["I_6"]!), "read: no chip")
         XCTAssertEqual(sections(.watching), [": PR_15 PR_5 PR_6"])
         XCTAssertEqual(sections(.closed), [": I_2 I_3 PR_7"])
         XCTAssertEqual(sections(.mutedHidden), ["Muted: PR_6", "Hidden: PR_16"])
         XCTAssertTrue(Filter.myPRs.sections(store.prs(.all, .myPRs)).last!.collapsed, "Drafts start collapsed")
         let map = store.signals(.all)
-        XCTAssertEqual(Filter.allCases.map { $0.signal(map).needs }, [7, 2, 3, 1, 0, 0, 0])
-        XCTAssertEqual(Filter.allCases.map { $0.signal(map).new }, [6, 2, 2, 1, 2, 1, 0], "PR_6 muted, PR_16 hidden: no dot")
+        XCTAssertEqual(Filter.allCases.map { $0.signal(map).needs }, [8, 2, 3, 2, 0, 0, 0])
+        XCTAssertEqual(Filter.allCases.map { $0.signal(map).new }, [7, 2, 2, 2, 2, 1, 0], "PR_6 muted, PR_16 hidden: no dot")
         XCTAssertEqual(Set(NeedReason.notifyOrder), Set(NeedReason.allCases).subtracting([.reminder]), "a reminder you set is not a setting")
     }
 
@@ -164,11 +167,11 @@ final class ScreenshotRenderTests: XCTestCase {
                    to: URL(fileURLWithPath: dir).appendingPathComponent("status-panel-end.png"))
         let pr = { store.tracked.prs[$0]! }
         let panels = VStack(spacing: 10) {
-            ForEach(["PR_9", "PR_3", "PR_13", "PR_15", "PR_1", "I_4"], id: \.self) { id in
+            ForEach(["PR_9", "PR_3", "PR_13", "PR_15", "PR_1", "I_4", "I_5"], id: \.self) { id in
                 self.panel(PanelModel(pr: pr(id), events: Array(pr(id).events.suffix(1)), alert: true, account: "@dana"))
             }
         }
-        try save("panels", panels, NSSize(width: Theme.panelWidth + 40, height: (Theme.panelHeight + 50) * 6))
+        try save("panels", panels, NSSize(width: Theme.panelWidth + 40, height: (Theme.panelHeight + 50) * 7))
         try save("note", panel({ let m = PanelModel(pr: pr("PR_1"), events: [], alert: true, account: nil, actions: [PanelAction(id: UUID(), title: "Notification Settings") {}]); m.note = ("New in PullPing 0.7",
             "Lists sort by whose turn it is: Needs Me first. A notification now means something needs you; merges, CI passes and other updates are listed in Activity."); return m }()),
                  NSSize(width: Theme.panelWidth + 40, height: Theme.panelHeight + 40))
@@ -275,6 +278,13 @@ final class ScreenshotRenderTests: XCTestCase {
         var summary = Self.sampleDraft(store)
         (summary.action, summary.verdict, summary.body) = (.summarize, .none, "Bumps the build tools to 2.4.\nStill open: the lockfile.\nNeeds you: a review.")
         try save("draft-summary", DraftView(store: store, draft: summary) {}, NSSize(width: 620, height: 420))
+        let issue = store.tracked.prs["I_5"]!
+        let triage = BackgroundDraft(runID: "0f3c1234-5678-4abc-8def-0123456789ac", action: .triage, prID: issue.id, repo: issue.repo, number: issue.number,
+                                     url: issue.url, title: issue.title, accountID: issue.accountID, login: "dana", head: "", agent: .claude,
+                                     sessionID: "0f3c1234-5678-4abc-8def-0123456789ac", cwd: "/tmp/widgets", notCloned: false,
+                                     createdAt: store.now.addingTimeInterval(-240), summary: "A bug report; suggested labels: bug, needs-repro.",
+                                     verdict: .none, body: "Thanks for the report, @dave. Which version are you on, and does it happen with an empty list only?")
+        try save("draft-triage", DraftView(store: store, draft: triage) {}, NSSize(width: 620, height: 560))
         var rule = Automation(name: "Draft my reviews", kinds: [.reviewRequested], workingDirectory: "{worktree_dir}")
         rule.background = .review
         rule.scope = .others
@@ -314,7 +324,7 @@ final class ScreenshotRenderTests: XCTestCase {
         XCTAssertEqual(store.handlerSections(store.tracked.prs["PR_3"]!).map(\.title), ["In Background"])
         XCTAssertEqual(store.handlerSections(store.tracked.prs["PR_3"]!).last?.items.map(\.title), ["Review in Background", "Summarize"])
         XCTAssertEqual(store.handlerSections(store.tracked.prs["PR_1"]!).last?.items.map(\.title), ["Summarize"], "my own pull request: no review")
-        XCTAssertEqual(store.handlerSections(store.tracked.prs["I_1"]!), [], "issues: no background runs")
+        XCTAssertEqual(store.handlerSections(store.tracked.prs["I_1"]!).last?.items.map(\.title), ["Triage in Background"], "issues: triage only")
     }
 
     /// Dev-only: the attention indicators (number = need you, dot = new). Sidebar per account with Work read (3/0 rows),

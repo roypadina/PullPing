@@ -215,6 +215,21 @@ enum Fixtures {
                 $0.mergeState = ""
                 $0.events = [event("E27", "I_4", .assigned, "carol", 1200, "")]
             },
+            // Issues in a watched repository: a new one to triage, one already read.
+            pr("I_5", personal, "octo-org/widgets", 140, "Crash when the list is empty", author: "dave", roles: []) {
+                $0.isIssue = true
+                $0.watched = true
+                $0.url = URL(string: "https://github.com/octo-org/widgets/issues/140")!
+                $0.mergeState = ""
+                $0.events = [event("E28", "I_5", .issueOpened, "dave", 6, "The app crashes on launch when the widget list is empty.")]
+            },
+            pr("I_6", personal, "octo-org/widgets", 128, "Support custom date formats", author: "dave", roles: []) {
+                $0.isIssue = true
+                $0.watched = true
+                $0.url = URL(string: "https://github.com/octo-org/widgets/issues/128")!
+                $0.mergeState = ""
+                $0.events = [event("E29", "I_6", .issueOpened, "dave", 2600, "Dates always use the system format.")]
+            },
             pr("I_3", work, "octo-org/docs", 20, "Add a dark mode screenshot to the README", author: "erin", roles: [.commenter]) {
                 $0.isIssue = true
                 $0.url = URL(string: "https://github.com/octo-org/docs/issues/20")!

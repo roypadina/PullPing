@@ -28,7 +28,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
     /// Settings > Notifications, one row per reason.
     public static let defaultNeedStyles: [NeedReason: NotificationStyle] = [
         .toReview: .alert, .reReview: .alert, .teamToReview: .banner, .changesRequested: .alert, .ciFailed: .alert, .conflicts: .banner,
-        .mentioned: .alert, .assigned: .alert, .newComments: .banner, .readyToMerge: .banner,
+        .toTriage: .alert, .mentioned: .alert, .assigned: .alert, .newComments: .banner, .readyToMerge: .banner,
         .reminder: .alert,  // not a setting: a reminder I set always stays until dismissed
     ]
 
@@ -61,6 +61,10 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var phoneOthers: Set<EventKind> = []
     /// Open issues I'm involved in are tracked alongside pull requests (Settings > General > Tracking).
     public var trackIssues = true
+    /// With `trackIssues`: every open issue in repositories the account owns (`IssueWatch`).
+    public var watchOwnedIssues = true
+    /// With `trackIssues`: more repositories, `owner/name` or `owner/*` (`IssueWatch.parse`d patterns).
+    public var watchedIssueRepos: [String] = []
     /// Days the activity log keeps (`ActivityLog`, also capped at 5000 entries).
     public var activityDays = 30
     /// Settings > General > Mark as read when selected (`markReadOptions`).
@@ -94,11 +98,15 @@ public struct AppSettings: Codable, Sendable, Equatable {
         phoneMine = try value(.phoneMine, phoneMine)
         phoneOthers = try value(.phoneOthers, phoneOthers)
         trackIssues = try value(.trackIssues, trackIssues)
+        watchOwnedIssues = try value(.watchOwnedIssues, watchOwnedIssues)
+        watchedIssueRepos = try value(.watchedIssueRepos, watchedIssueRepos)
         activityDays = try value(.activityDays, activityDays)
         markReadSeconds = try value(.markReadSeconds, markReadSeconds)
         singleKeyShortcuts = try value(.singleKeyShortcuts, singleKeyShortcuts)
         // Saved before issue tracking (no trackIssues key): the newer `assigned` reason starts on, like the rest.
         if !c.contains(.trackIssues) { badgeReasons.insert(.assigned) }
+        // Saved before issues in my repositories: the new `toTriage` reason starts counted.
+        if !c.contains(.watchOwnedIssues) { badgeReasons.insert(.toTriage) }
         // Saved before 0.7.0 (no needStyles key): styles come from the per-kind ones, the new reasons start counted.
         if let saved = try c.decodeIfPresent([NeedReason: NotificationStyle].self, forKey: .needStyles) {
             needStyles = saved

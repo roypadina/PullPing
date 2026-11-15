@@ -3,7 +3,7 @@ import Foundation
 /// What an agent run is about, from the `NeedReason` of the pull request: picks the task text that fills a prompt's `{task}`
 /// (Settings → Automations → Prompts, `pullping prompts`).
 public enum Scenario: String, CaseIterable, Codable, Sendable, Identifiable {
-    case review, reReview, changesRequested, comments, ciFailed, conflicts, readyToMerge, assigned, general
+    case review, reReview, changesRequested, comments, ciFailed, conflicts, readyToMerge, assigned, issueTriage, general
 
     public var id: String { rawValue }
 
@@ -18,6 +18,7 @@ public enum Scenario: String, CaseIterable, Codable, Sendable, Identifiable {
         case .conflicts: "Conflicts or behind base"
         case .readyToMerge: "Ready to merge"
         case .assigned: "Assigned to me"
+        case .issueTriage: "New issue"
         case .general: "Anything else"
         }
     }
@@ -33,6 +34,7 @@ public enum Scenario: String, CaseIterable, Codable, Sendable, Identifiable {
         case .conflicts: self = .conflicts
         case .readyToMerge: self = .readyToMerge
         case .assigned: self = .assigned
+        case .toTriage: self = .issueTriage
         case .reminder, nil: self = .general
         }
     }
@@ -66,6 +68,8 @@ public enum Scenario: String, CaseIterable, Codable, Sendable, Identifiable {
             "My pull request is approved and its checks pass. Do a last check: open threads, leftover TODOs or debug code in the diff, a stale title or description, the repository's merge method. Report what you find. Do not merge."
         case .assigned:
             "This was assigned to me. Read it and its discussion, find the code it is about, and give me a short plan: what is asked, where the change goes, open questions. Do not change code before I agree."
+        case .issueTriage:
+            "Someone opened this issue in a repository I maintain. Read it and its discussion (in a terminal: `gh issue view {pr_number} --repo {repo} --comments`), look for duplicates among open and closed issues when you can search them, and find the code it is about. Tell me: what is asked or reported, in three lines; whether it is a bug, a feature request, a question or spam; what is missing to act on it; the labels you would add; then a reply I could post. Do not comment, label, assign or close anything on GitHub: draft the reply and wait for my OK."
         case .general:
             "Work out what this needs from me and tell me. Ask before you change, push or post anything."
         }

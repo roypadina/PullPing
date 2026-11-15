@@ -158,6 +158,7 @@ final class AutomationCLITests: XCTestCase {
         XCTAssertTrue(kinds.contains { $0.hasPrefix("reviewApproved") && $0.hasSuffix("Review approved") })
         XCTAssertFalse(kinds.contains { $0.hasPrefix("reviewReminder") })
         XCTAssertFalse(kinds.contains { $0.hasPrefix("reminder") }, "Remind Me never comes from a poll")
+        XCTAssertTrue(kinds.contains("issueOpened" + String(repeating: " ", count: 13) + "New issue"))
         let helps = [["hook", "--help"]: "hook", ["hook"]: "hook", ["hook", "help"]: "hook", ["hook", "add", "--pr", "x", "--help"]: "hook",
                      ["rule"]: "rule", ["rule", "edit", "--help"]: "rule", ["runs", "--help"]: "runs", ["automations"]: "automations",
                      ["automations", "on", "--help"]: "automations", ["--help"]: "<command>", ["help"]: "<command>", []: "<command>",
@@ -241,6 +242,19 @@ final class AutomationCLITests: XCTestCase {
         var expected = Automation(id: rule.id, name: "Fix failing CI", kinds: [.ciFailed], workingDirectory: "~/Code/{repo_name}", createdAt: t0)
         expected.source = "cli"
         XCTAssertEqual(rule, expected)  // the rule editor's defaults: any, ask, claude, Terminal, 3 runs, default prompt, no expiry
+    }
+
+    /// New issues in my repositories: a rule on `issueOpened`, the example in the help, the New issue prompt.
+    func testIssueOpenedRuleAndPrompt() throws {
+        let added = run(["rule", "add", "--name", "Triage new issues", "--on", "issueOpened", "--repos", "octo-org/*"])
+        XCTAssertEqual(added.status, 0, added.error)
+        XCTAssertEqual(hooks.first?.kinds, [.issueOpened])
+        XCTAssertTrue(added.output.contains("Triage new issues — issueOpened on any (octo-org/*) → claude in Terminal, ask"), added.output)
+        XCTAssertTrue(AutomationCLI.ruleHelp.contains(#"pullping rule add --name "Triage new issues" --on issueOpened --repos 'octo-org/*'"#))
+        let shown = run(["prompts", "show", "issueTriage"])
+        XCTAssertEqual(shown.status, 0, shown.error)
+        XCTAssertTrue(shown.output.hasPrefix("issueTriage — New issue"), shown.output)
+        XCTAssertTrue(shown.output.contains(Scenario.issueTriage.builtIn))
     }
 
     func testRuleAddEveryOption() throws {
@@ -813,7 +827,7 @@ final class AutomationCLITests: XCTestCase {
 
     /// `--on` picks the notifications with the buttons; `all` stores [] (every kind), shown as all.
     func testHandlerOn() throws {
-        XCTAssertTrue(run(["handler", "show"]).output.contains("\nkinds           comment,mentioned,reviewApproved,reviewChangesRequested,reviewCommented,reviewRequested,assigned,ciFailed,readyForReview,reopened,reviewDismissed\n"))
+        XCTAssertTrue(run(["handler", "show"]).output.contains("\nkinds           comment,mentioned,reviewApproved,reviewChangesRequested,reviewCommented,reviewRequested,assigned,ciFailed,readyForReview,reopened,reviewDismissed,issueOpened\n"))
         XCTAssertEqual(run(["handler", "set", "--on", "ciFailed,comment", "--by", "agent-2"]).status, 0)
         XCTAssertEqual(store.load().handler.kinds, [.ciFailed, .comment])
         XCTAssertEqual([store.load().handler.source, store.load().handler.by], ["cli", "agent-2"])

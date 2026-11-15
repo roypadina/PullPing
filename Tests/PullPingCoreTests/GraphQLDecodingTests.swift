@@ -130,6 +130,43 @@ final class GraphQLDecodingTests: XCTestCase {
         XCTAssertEqual(variables.first?["issues"] as? String, SearchQueries.issues)
     }
 
+    /// The watched search runs with Track Issues and a query; `inIssues` comes only from the involves search; it pages.
+    func testDiscoverWatchedSearch() async throws {
+        let github = FakeGitHub()
+        for id in ["I_1", "I_2", "I_3"] { github.prs[id] = .init(updatedAt: t0, node: "", issue: true) }
+        github.issues = ["I_1"]
+        github.watched = ["I_1", "I_2"]
+        github.watchedPage2 = ["I_3"]
+        let client = GitHubClient(transport: github.transport, token: "t")
+        let query = "is:issue is:open archived:false sort:created-desc user:@me"
+        let on = try await client.discover(issues: true, watched: query)
+        XCTAssertEqual(Set(on.stamps.keys), ["I_1", "I_2", "I_3"])
+        XCTAssertEqual([on.stamps["I_1"]?.inIssues, on.stamps["I_2"]?.inIssues, on.stamps["I_3"]?.inIssues], [true, false, false])
+        XCTAssertEqual(on.watched, 2)
+        let none = try await client.discover(issues: true)
+        XCTAssertEqual(Set(none.stamps.keys), ["I_1"])
+        XCTAssertEqual(none.watched, 0)
+        _ = try await client.discover(issues: false, watched: query)
+        let operations = github.transport.requests.map(FakeTransport.operation)
+        let discovers = operations.filter { $0.name == "Discover" }.map(\.variables)
+        XCTAssertEqual(discovers.map { $0["withWatched"] as? Bool }, [true, false, false])
+        XCTAssertEqual(discovers.map { $0["watched"] as? String }, [query, "", query])
+        XCTAssertEqual(operations.filter { $0.name == "Page" }.map { $0.variables["q"] as? String }, [query])
+    }
+
+    func testIssueCreatedAtAndDiscoverWithoutWatched() async throws {
+        let github = FakeGitHub()
+        github.prs["I_1"] = .init(updatedAt: t0, node: issueNode("I_1", number: 7, updatedAt: t0, createdAt: t0.addingTimeInterval(-60)), issue: true)
+        github.prs["I_2"] = .init(updatedAt: t0, node: issueNode("I_2", number: 8, updatedAt: t0), issue: true)
+        github.prs["PR_1"] = .init(updatedAt: t0, node: prNode("PR_1", number: 1, updatedAt: t0))
+        let snapshots = try await GitHubClient(transport: github.transport, token: "t").refresh(["I_1", "I_2", "PR_1"], since: nil)
+        XCTAssertEqual(snapshots.map(\.createdAt), [t0.addingTimeInterval(-60), nil, nil])
+        XCTAssertTrue(GraphQL.refresh.contains("issueState: state stateReason closedAt updatedAt createdAt body"))
+        let (client, _) = client(["Discover": fixture("discover"), "Page": fixture("page")])
+        let found = try await client.discover(issues: true, watched: "q")  // a response without the alias (an older fixture)
+        XCTAssertEqual(found.watched, 0)
+    }
+
     func testIssueStampsAndMixedRefresh() async throws {
         let github = FakeGitHub()
         let timeline = [

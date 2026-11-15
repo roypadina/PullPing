@@ -231,7 +231,7 @@ struct AddAccountSheet: View {
 
 struct NotificationsTab: View {
     @Bindable var store: Store
-    static let height: CGFloat = 820  // the whole tab, no scrolling
+    static let height: CGFloat = 860  // the whole tab, no scrolling
 
     var body: some View {
         Form {
@@ -284,7 +284,7 @@ struct NotificationsTab: View {
 
 /// ntfy pushes (MeetAlert pattern): server and topic in settings, access token and fallback URL in the keychain.
 struct PhoneTab: View {
-    static let height: CGFloat = 640  // plan height; the 21-row table scrolls
+    static let height: CGFloat = 640  // plan height; the 22-row table scrolls
     @Bindable var store: Store
     @State private var sending = false
     @State private var testResult: Bool?
@@ -367,7 +367,7 @@ struct PhoneTab: View {
 
 /// The icon, its count and dot, and what the count counts (was part of General; split so neither pane scrolls, SET-8).
 struct MenuBarTab: View {
-    static let height: CGFloat = 700
+    static let height: CGFloat = 740
     @Bindable var store: Store
     @AppStorage(DefaultsKey.showMenuBarIcon) private var showIcon = true
 
@@ -479,8 +479,17 @@ struct ShortcutsTab: View {
 // MARK: General
 
 struct GeneralTab: View {
-    static let height: CGFloat = 740
+    static let height: CGFloat = 830
     @Bindable var store: Store
+    /// Other Repositories as typed; parsed and saved on Return and when the field loses focus (SET-4).
+    @State private var repos: String
+    @State private var rejected: [String] = []
+    @FocusState private var reposFocused: Bool
+
+    init(store: Store) {
+        self.store = store
+        _repos = State(initialValue: store.settings.watchedIssueRepos.joined(separator: ", "))
+    }
 
     var body: some View {
         Form {
@@ -509,6 +518,18 @@ struct GeneralTab: View {
             Section {
                 Toggle("Track Issues", isOn: $store.settings.trackIssues).controlSize(.mini)
                     .onChange(of: store.settings.trackIssues) { store.refresh() }  // the next poll adds or drops them
+                Toggle("Track Issues in My Repositories", isOn: $store.settings.watchOwnedIssues).controlSize(.mini)
+                    .disabled(!store.settings.trackIssues)
+                    .onChange(of: store.settings.watchOwnedIssues) { store.refresh() }
+                TextField("Other Repositories", text: $repos, prompt: Text(verbatim: "octo-org/widgets, octo-org/*"))
+                    .disabled(!store.settings.trackIssues)
+                    .focused($reposFocused)
+                    .onSubmit(commitRepos)
+                    .onChange(of: reposFocused) { if !reposFocused { commitRepos() } }
+                if !rejected.isEmpty {
+                    Text(verbatim: "Not added: \(rejected.joined(separator: ", ")). Use owner/name, or owner/* for every repository of an owner (at most \(IssueWatch.maxRepos)).")
+                        .font(.subheadline).foregroundStyle(Theme.bad)
+                }
                 Picker("Keep merged and closed pull requests for", selection: $store.settings.retentionDays) {
                     ForEach(AppSettings.retentionOptions, id: \.self) { Text($0 == 1 ? "1 day" : "\($0) days").tag($0) }
                 }
@@ -522,7 +543,7 @@ struct GeneralTab: View {
             } header: {
                 Text("Tracking")
             } footer: {
-                Text("Track Issues adds open issues you opened, are assigned to, are mentioned in or comment on. Turning it off removes them from the lists. Activity, in the window's sidebar, lists every event and run, at most 5000.").formFooter()
+                Text("Track Issues adds open issues you opened, are assigned to, are mentioned in or comment on. Track Issues in My Repositories adds every open issue in repositories your accounts own, and tells you when someone opens a new one; Other Repositories adds more. Both need Track Issues. Turning one off removes its issues from the lists. Activity, in the window's sidebar, lists every event and run, at most 5000.").formFooter()
             }
             Section("About") {
                 // Two per row: four in one row truncated at 520 pt.
@@ -538,12 +559,21 @@ struct GeneralTab: View {
         }
         .formStyle(.grouped)
     }
+
+    private func commitRepos() {
+        let parsed = IssueWatch.parse(repos)
+        rejected = parsed.rejected
+        repos = parsed.patterns.joined(separator: ", ")
+        guard parsed.patterns != store.settings.watchedIssueRepos else { return }
+        store.settings.watchedIssueRepos = parsed.patterns
+        store.refresh()
+    }
 }
 
 extension NeedReason {
     /// Settings > Notifications, in this order (0.7.0 design §4.2).
     static let notifyOrder: [NeedReason] = [.toReview, .reReview, .teamToReview, .changesRequested, .ciFailed, .conflicts, .mentioned, .assigned,
-                                            .newComments, .readyToMerge]
+                                            .toTriage, .newComments, .readyToMerge]
 
     /// Settings > Notifications.
     var notifyLabel: String {
@@ -554,6 +584,7 @@ extension NeedReason {
         case .changesRequested: "Changes requested on your pull request"
         case .ciFailed: "CI failed on your pull request"
         case .conflicts: "Conflicts on your pull request"
+        case .toTriage: "New issue in your repositories"
         case .mentioned: "Mentioned"
         case .assigned: "Assigned to you"
         case .newComments: "New comments on your pull requests and issues"
@@ -570,6 +601,7 @@ extension NeedReason {
         case .conflicts: "Conflicts on my pull requests"
         case .teamToReview: "Review requested from my team"
         case .assigned: "Assigned to me"
+        case .toTriage: "New issues in my repositories"
         case .changesRequested: "Changes requested on my pull requests"
         case .ciFailed: "CI failed on my pull requests"
         case .mentioned: "Unread mentions of me"
@@ -944,7 +976,7 @@ private struct RuleRow: View {
     private var summary: String {
         let scope = switch rule.scope { case .any: "Any"; case .mine: "Mine"; case .others: "Others" }
         return "\(rule.kinds.count) \(rule.kinds.count == 1 ? "event" : "events") · \(scope) · \(rule.mode == .auto ? "Automatic" : "Ask") · "
-            + "\(rule.agent.title) " + (rule.background.map { $0 == .review ? "· background review" : "· background summary" } ?? "in \(store.automationFile.target(for: rule).target.name)")
+            + "\(rule.agent.title) " + (rule.background.map { "· background " + ($0 == .review ? "review" : $0 == .triage ? "triage" : "summary") } ?? "in \(store.automationFile.target(for: rule).target.name)")
             + (rule.source == "cli" ? " · CLI" : "")
     }
 }
@@ -1082,6 +1114,7 @@ struct RuleEditorSheet: View {
                             Text("In a terminal").tag(BackgroundAction?.none)
                             Text("Review in the background (a draft)").tag(BackgroundAction?.some(.review))
                             Text("Summarize in the background").tag(BackgroundAction?.some(.summarize))
+                            Text("Triage a new issue in the background (a draft reply)").tag(BackgroundAction?.some(.triage))
                         }
                     }
                     if !handler {  // the handler opens with the default

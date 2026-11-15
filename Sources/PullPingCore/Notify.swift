@@ -7,7 +7,7 @@ public enum Notify {
     public static func reason(_ event: PREvent, pr: TrackedPR) -> NeedReason? {
         guard !event.isOwn else { return nil }
         let bucket = Attention.bucket(pr)
-        let mine = pr.roles.contains(.author) || (pr.isIssue && pr.roles.contains(.assigned))
+        let mine = Attention.mine(pr)
         switch event.kind {
         case .reviewRequested: return event.summary.hasPrefix("via team") ? .teamToReview : pr.myReview != nil ? .reReview : .toReview
         case .reviewReminder: return bucket == .teamReview ? .teamToReview : bucket == .reReview ? .reReview : .toReview
@@ -21,6 +21,7 @@ public enum Notify {
         case .mentioned: return .mentioned
         case .assigned: return .assigned
         case .reminder: return .reminder
+        case .issueOpened: return .toTriage
         default: return nil
         }
     }

@@ -66,6 +66,7 @@ extension EventKind {
         case .conflicts: ("Conflicts with base", "exclamationmark.triangle", Theme.bad)
         case .readyToMerge: ("Ready to merge", "checkmark.circle", Theme.good)
         case .reminder: ("reminded you", "alarm", Theme.needsYou)
+        case .issueOpened: ("opened this issue", "plus.circle", Theme.needsYou)
         }
     }
 
@@ -151,6 +152,7 @@ extension NeedReason {
         case .changesRequested: "Changes requested"
         case .ciFailed: "CI failed"
         case .conflicts: "Conflicts with base"
+        case .toTriage: "New issue"
         case .mentioned: "Mentioned"
         case .assigned: "Assigned to you"
         case .newComments: "New comments"
@@ -169,6 +171,7 @@ extension NeedReason {
         case .changesRequested: ("exclamationmark.bubble", Theme.bad)
         case .ciFailed: ("xmark.octagon", Theme.bad)
         case .conflicts: ("exclamationmark.triangle", Theme.bad)
+        case .toTriage: ("plus.circle", Theme.needsYou)
         case .mentioned: ("at", Theme.needsYou)
         case .assigned: ("person.crop.circle.badge.checkmark", Theme.needsYou)
         case .newComments: ("bubble.left", Theme.needsYou)

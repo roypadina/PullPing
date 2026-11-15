@@ -201,6 +201,37 @@ final class EventEngineTests: XCTestCase {
         XCTAssertEqual(prClosed.map(\.summary), [""])
     }
 
+    /// A new issue in a repository I watch, opened by someone else after watching began: one `issueOpened`, its first event.
+    func testIssueOpenedInAWatchedRepository() {
+        let since = t0.addingTimeInterval(-3600)
+        func issue(author: String = "alice", created: Date? = t0.addingTimeInterval(-60), isIssue: Bool = true) -> PRSnapshot {
+            var s = snap("I_1", author: author, timeline: [node("IC_1", by: "carol", at: t0.addingTimeInterval(-30), body: "@dana fyi")],
+                         body: "\n  The list crashes when empty.\nSteps: …")
+            (s.isIssue, s.createdAt) = (isIssue, created)
+            return s
+        }
+        func opened(_ s: PRSnapshot, old: TrackedPR? = nil, watchedSince: Date? = since) -> [PREvent] {
+            EventEngine.diff(old: old, snapshot: s, me: me, accountID: account, inRequestedSearch: false, inReviewedSearch: false,
+                             watchedSince: watchedSince, now: t0).events.filter { $0.kind == .issueOpened }
+        }
+        let (pr, events) = EventEngine.diff(old: nil, snapshot: issue(), me: me, accountID: account, inRequestedSearch: false, inReviewedSearch: false,
+                                            watchedSince: since, now: t0)
+        XCTAssertEqual(events.map(\.kind), [.issueOpened, .mentioned])
+        let event = try! XCTUnwrap(events.first)
+        XCTAssertEqual([event.id, event.actor, event.summary], ["opened:I_1", "alice", "The list crashes when empty."])
+        XCTAssertEqual(event.at, t0.addingTimeInterval(-60))
+        XCTAssertFalse(event.isOwn)
+        XCTAssertNil(event.seeded)
+        XCTAssertEqual(pr.events.first, event)
+        XCTAssertEqual(opened(issue(created: since)).count, 1, "at the moment watching began")
+        XCTAssertTrue(opened(issue(created: since.addingTimeInterval(-1))).isEmpty, "already open when watching began")
+        XCTAssertTrue(opened(issue(author: "Dana")).isEmpty, "mine")
+        XCTAssertTrue(opened(issue(), old: pr).isEmpty, "not new")
+        XCTAssertTrue(opened(issue(), watchedSince: nil).isEmpty, "not watched")
+        XCTAssertTrue(opened(issue(created: nil)).isEmpty, "no creation date")
+        XCTAssertTrue(opened(issue(isIssue: false)).isEmpty, "a pull request")
+    }
+
     func testRequestRemovedDropsRoleWithoutEvent() {
         let old = diff(tracked(), snap(requested: [me]), requestedSearch: true).pr
         XCTAssertTrue(old.roles.contains(.reviewRequested))

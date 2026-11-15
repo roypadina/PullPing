@@ -83,11 +83,17 @@ enum BackgroundRunner {
         // 1. The input, fetched by PullPing.
         let client = GitHubClient(transport: URLSessionTransport(), token: input.token)
         let context: BackgroundContext, diff: String, diffCut: BackgroundDraft.Cut?
+        let triage = input.action == .triage  // an issue: its discussion only, no diff
         do {
-            context = try await client.backgroundContext(prID: input.pr.id)
-            (diff, diffCut) = try await client.diff(repo: input.pr.repo, number: input.pr.number)
+            if triage {
+                context = try await client.issueContext(issueID: input.pr.id)
+                (diff, diffCut) = ("", nil)
+            } else {
+                context = try await client.backgroundContext(prID: input.pr.id)
+                (diff, diffCut) = try await client.diff(repo: input.pr.repo, number: input.pr.number)
+            }
         } catch {
-            return failed("Couldn't fetch the pull request: \((error as? AccountStatus)?.word ?? error.localizedDescription)")
+            return failed("Couldn't fetch the \(triage ? "issue" : "pull request"): \((error as? AccountStatus)?.word ?? error.localizedDescription)")
         }
         if let stop = job.stopped { return Outcome(status: stop, error: stop.word.capitalized, head: context.head) }
         // 2. The run folder.
@@ -97,7 +103,7 @@ enum BackgroundRunner {
         do {
             plan = try BackgroundPlanner.plan(input.action, pr: pr, file: input.file, rule: input.rule, runDir: dir, sessionID: UUID().uuidString.lowercased(),
                                               home: NSHomeDirectory(), index: input.index)
-            for (name, text) in [("diff.patch", diff), ("discussion.md", context.discussion), ("prompt.md", plan.prompt), ("schema.json", BackgroundPlanner.schema)] {
+            for (name, text) in (triage ? [] : [("diff.patch", diff)]) + [("discussion.md", context.discussion), ("prompt.md", plan.prompt), ("schema.json", BackgroundPlanner.schema)] {
                 try write(text, to: dir.appendingPathComponent(name).path, mode: 0o600)
             }
             try write(plan.script, to: dir.appendingPathComponent("command").path, mode: 0o700)

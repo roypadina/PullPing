@@ -21,7 +21,7 @@ final class ScenarioTests: XCTestCase {
         let expected: [NeedReason?: Scenario] = [
             .toReview: .review, .teamToReview: .review, .reReview: .reReview, .changesRequested: .changesRequested,
             .newComments: .comments, .mentioned: .comments, .ciFailed: .ciFailed, .conflicts: .conflicts,
-            .readyToMerge: .readyToMerge, .assigned: .assigned, .reminder: .general, nil: .general,
+            .readyToMerge: .readyToMerge, .assigned: .assigned, .toTriage: .issueTriage, .reminder: .general, nil: .general,
         ]
         XCTAssertEqual(Set(expected.keys.compactMap { $0 }), Set(NeedReason.allCases))
         for (reason, scenario) in expected { XCTAssertEqual(Scenario(reason), scenario, "\(String(describing: reason))") }
@@ -43,6 +43,16 @@ final class ScenarioTests: XCTestCase {
         XCTAssertEqual(Scenario.derive(events: [event(.labeled)], pr: pr([.reviewer])), .general)
         XCTAssertEqual(Scenario.derive(events: [event(.reviewRequested)], pr: pr([.reviewRequested])), .review)
         XCTAssertEqual(Scenario.derive(events: [event(.reviewRequested, summary: "via team core")], pr: pr([.teamReviewRequested])), .review)
+    }
+
+    /// A new issue in a repository I watch: its event, or an item still to triage, picks the New issue task.
+    func testIssueTriage() {
+        let watched = pr([]) { $0.isIssue = true; $0.watched = true; $0.events = [self.event(.issueOpened)] }
+        XCTAssertEqual(Scenario.derive(events: [event(.issueOpened)], pr: watched), .issueTriage)
+        XCTAssertEqual(Scenario.derive(events: [], pr: watched), .issueTriage)
+        XCTAssertEqual(Scenario.issueTriage.label, "New issue")
+        XCTAssertTrue(Scenario.issueTriage.builtIn.contains("Do not comment, label, assign or close anything on GitHub: draft the reply and wait for my OK."))
+        XCTAssertTrue(Scenario.issueTriage.builtIn.contains("`gh issue view {pr_number} --repo {repo} --comments`"))
     }
 
     func testTaskTextOverrides() {

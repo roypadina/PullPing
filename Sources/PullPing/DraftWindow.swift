@@ -17,7 +17,7 @@ final class DraftWindows {
         }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 560), styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered, defer: false)
-        window.title = draft.action == .review ? "Review Draft" : "Summary"
+        window.title = switch draft.action { case .review: "Review Draft"; case .triage: "Triage Draft"; case .summarize: "Summary" }
         window.subtitle = "\(draft.repo) #\(draft.number)"
         window.isReleasedWhenClosed = false
         window.contentMinSize = NSSize(width: 540, height: 420)
@@ -32,7 +32,7 @@ final class DraftWindows {
 
 /// The draft, editable, and the only Post button in PullPing. The agent's verdict is preselected, but Approve is never the
 /// default button (Return posts a comment only), and Approve and Request Changes are refused once the pull request moved
-/// past the draft's commit (`DraftPost.refusal`).
+/// past the draft's commit (`DraftPost.refusal`). A triage draft posts one comment on its issue.
 struct DraftView: View {
     let store: Store
     let draft: BackgroundDraft
@@ -61,10 +61,11 @@ struct DraftView: View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(verbatim: "\(draft.repo) #\(draft.number) · \(draft.title)").font(.headline).lineLimit(2)
-                Text(verbatim: "Drafted by \(draft.agent.title) · at commit \(draft.head.prefix(7)) · \(relativeAge(draft.createdAt, now: store.now))")
+                Text(verbatim: "Drafted by \(draft.agent.title)" + (triage ? "" : " · at commit \(draft.head.prefix(7))") + " · \(relativeAge(draft.createdAt, now: store.now))")
                     .font(.callout).foregroundStyle(.secondary)
                 if draft.notCloned {
-                    Text("Not cloned on this Mac: drafted from the diff and the discussion only.").font(.callout).foregroundStyle(.secondary)
+                    Text(triage ? "Not cloned on this Mac: drafted from the issue only." : "Not cloned on this Mac: drafted from the diff and the discussion only.")
+                        .font(.callout).foregroundStyle(.secondary)
                 }
                 if let cut = draft.diffCut {
                     Label("The diff was cut: the agent saw \(kb(cut.kept)) of \(kb(cut.total)). Read the rest on GitHub before you approve.", systemImage: "exclamationmark.triangle")
@@ -74,12 +75,14 @@ struct DraftView: View {
                     Text("The discussion was cut: the agent saw \(kb(cut.kept)) of \(kb(cut.total)).").font(.callout).foregroundStyle(.secondary)
                 }
             }
-            if draft.action == .review {
+            if draft.action != .summarize {
                 TextEditor(text: $text)
                     .font(.body)
-                    .accessibilityLabel("Review text")
+                    .accessibilityLabel(triage ? "Reply text" : "Review text")
                     .padding(6)  // the text kept off the border
                     .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
+            }
+            if draft.action == .review {
                 Picker("Post as @\(draft.login):", selection: $event) {
                     ForEach(DraftPost.Event.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
@@ -93,12 +96,12 @@ struct DraftView: View {
                             .help("A new background review at the current commit")
                     }
                 }
-            } else {
+            } else if draft.action == .summarize {
                 ScrollView {
                     Text(verbatim: draft.body.isEmpty ? draft.summary : draft.body).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            if let message = error ?? (draft.action == .review ? refusal : nil) {
+            if let message = error ?? (draft.action != .summarize ? refusal : nil) {
                 Text(verbatim: message).font(.callout).foregroundStyle(Theme.bad).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
             }
             HStack {
@@ -107,11 +110,11 @@ struct DraftView: View {
                     .help("Resume the agent's session in a terminal, without a prompt")
                 Button("Open on GitHub") { if draft.url.scheme == "https" { NSWorkspace.shared.open(draft.url) } }
                 Spacer()
-                if draft.action == .review {
+                if draft.action != .summarize {
                     Button(postTitle) { post() }
                         .keyboardShortcut(event == .comment ? .defaultAction : nil)  // Return never approves or requests changes
                         .disabled(posting || refusal != nil)
-                        .help(refusal ?? "Posts on GitHub as @\(draft.login), at commit \(draft.head.prefix(7))")
+                        .help(refusal ?? (triage ? "Posts a comment on the issue as @\(draft.login)" : "Posts on GitHub as @\(draft.login), at commit \(draft.head.prefix(7))"))
                 } else {
                     Button("Copy") {
                         NSPasteboard.general.clearContents()
@@ -135,6 +138,8 @@ struct DraftView: View {
             Text("The agent's \(draft.action.result) is deleted. Its session stays and Open Session in Recent Runs still finds it.")
         }
     }
+
+    private var triage: Bool { draft.action == .triage }
 
     private func kb(_ bytes: Int) -> String { ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file) }
 
@@ -172,7 +177,7 @@ struct AgentDraftRow: View {
                 if run.status?.isActive == true {
                     Button("Cancel") { store.cancelBackground(id) }
                 } else if let draft {
-                    Button(draft.action == .review ? "Review Draft…" : "Show Summary…") { DraftWindows.shared.show(store: store, runID: id) }
+                    Button(draft.action == .summarize ? "Show Summary…" : "Review Draft…") { DraftWindows.shared.show(store: store, runID: id) }
                 } else if run.sessionID != nil {
                     Button("Open Session") { store.openBackgroundSession(runID: id) }
                 }
@@ -180,11 +185,16 @@ struct AgentDraftRow: View {
         }
     }
 
-    /// "Review draft · suggests request changes · 4 min. ago", "Review in Background · running · 1 min. ago", or the run's detail.
+    /// "Review draft · suggests request changes · 4 min. ago", "Triage draft by Claude · 4 min. ago", "Review in Background ·
+    /// running · 1 min. ago", or the run's detail.
     private func line(_ draft: BackgroundDraft?) -> String {
         let age = relativeAge(run.at, now: store.now)
         if let draft {
-            return draft.action == .review ? "Review draft by \(draft.agent.title) · suggests \(draft.verdict.phrase) · \(age)" : "Summary · \(draft.summary)"
+            switch draft.action {
+            case .review: return "Review draft by \(draft.agent.title) · suggests \(draft.verdict.phrase) · \(age)"
+            case .triage: return "Triage draft by \(draft.agent.title) · \(age)"
+            case .summarize: return "Summary · \(draft.summary)"
+            }
         }
         let title = run.background?.title ?? ""
         return run.status?.isActive == true ? "\(title) · \(run.status?.word ?? "") · \(age)" : "\(title) · \(run.detail) · \(age)"

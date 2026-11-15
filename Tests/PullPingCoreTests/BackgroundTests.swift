@@ -261,7 +261,11 @@ final class BackgroundTests: XCTestCase {
         XCTAssertEqual(BackgroundQueue.eligible(.review, pr: pr(author: true)), "Review in Background is for others' pull requests")
         XCTAssertEqual(BackgroundQueue.eligible(.review, pr: pr(draft: true)), "The pull request is a draft")
         XCTAssertEqual(BackgroundQueue.eligible(.review, pr: pr(state: .merged)), "The pull request is not open")
-        XCTAssertEqual(BackgroundQueue.eligible(.summarize, pr: pr(issue: true)), "Background runs are for pull requests")
+        XCTAssertEqual(BackgroundQueue.eligible(.summarize, pr: pr(issue: true)), "Summarize is for pull requests")
+        XCTAssertEqual(BackgroundQueue.eligible(.review, pr: pr(issue: true)), "Review in Background is for pull requests")
+        XCTAssertEqual(BackgroundQueue.eligible(.triage, pr: pr()), "Triage in Background is for issues")
+        XCTAssertEqual(BackgroundQueue.eligible(.triage, pr: pr(state: .closed, issue: true)), "The issue is not open")
+        XCTAssertNil(BackgroundQueue.eligible(.triage, pr: pr(author: true, issue: true)))
         XCTAssertNil(BackgroundQueue.eligible(.summarize, pr: pr(author: true, draft: true, state: .closed)))
     }
 
@@ -442,6 +446,124 @@ final class BackgroundTests: XCTestCase {
         }
     }
 
+    // MARK: Triage (issues in my repositories)
+
+    func testTriagePlanTaskAndAnswer() throws {
+        let issue = pr("I_9", issue: true, head: "")
+        var file = AutomationFile()
+        XCTAssertEqual(BackgroundPlanner.task(.triage, pr: issue, file: file), Scenario.issueTriage.builtIn)
+        let runDir = dir.appendingPathComponent("runs/r2")
+        let plan = try BackgroundPlanner.plan(.triage, agent: .claude, agentCommand: "", pr: issue, runDir: runDir, location: nil,
+                                              task: BackgroundPlanner.task(.triage, pr: issue, file: file), sessionID: session, home: dir.path)
+        XCTAssertTrue(plan.prompt.hasPrefix("You run unattended on issue octo-org/widgets #7 (https://github.com/octo-org/widgets/pull/7)."), plan.prompt)
+        XCTAssertFalse(plan.prompt.contains("diff.patch"))
+        XCTAssertTrue(plan.prompt.contains("are in \(runDir.path)/discussion.md, the repository in \(runDir.path) (not cloned on this Mac: the issue is all you have)."), plan.prompt)
+        XCTAssertTrue(plan.prompt.contains("`gh issue view 7 --repo octo-org/widgets --comments`"), plan.prompt)
+        XCTAssertTrue(plan.prompt.contains("Do not comment, label, assign or close anything on GitHub"))
+        XCTAssertTrue(plan.prompt.contains("verdict none, body (Markdown: the reply to post as a comment), comments empty."))
+        XCTAssertTrue(plan.script.contains("--tools 'Read,Grep,Glob'"), "the same read-only command line")
+        file.scenarioPrompts["issueTriage"] = "Label it."
+        XCTAssertEqual(BackgroundPlanner.task(.triage, pr: issue, file: file), "Label it.")
+        // The answer: no verdict, no inline comments, the body is the reply.
+        let out = try output(["summary": "A bug; labels: bug.", "verdict": "approve", "body": "Thanks, confirmed.", "comments": [["path": "a", "line": 1, "body": "b"]]],
+                             action: .triage)
+        XCTAssertEqual(out.verdict, BackgroundDraft.Verdict.none)
+        XCTAssertEqual(out.body, "Thanks, confirmed.")
+        XCTAssertEqual([BackgroundAction.triage.title, BackgroundAction.triage.result], ["Triage in Background", "triage draft"])
+    }
+
+    /// Rules triage an issue once (its head is ""); a click may triage again.
+    func testTriageOncePerIssue() {
+        var on = BackgroundSettings()
+        on.enabled = true
+        let issue = pr("I_9", issue: true, head: "")
+        func triage(_ status: BackgroundStatus) -> RunRecord {
+            var r = RunRecord.background(.triage, pr: issue, rule: nil, eventID: "E", runID: UUID().uuidString.lowercased(), at: t0)
+            r.status = status
+            return r
+        }
+        XCTAssertTrue(BackgroundQueue.handled(.triage, prID: "I_9", head: "", runs: [triage(.done)]))
+        XCTAssertFalse(BackgroundQueue.handled(.triage, prID: "I_9", head: "", runs: [triage(.failed)]))
+        XCTAssertFalse(BackgroundQueue.handled(.review, prID: "I_9", head: "", runs: [triage(.done)]))
+        XCTAssertTrue(BackgroundQueue.handled(.review, prID: "PR_7", head: "abc1234", runs: [record(status: .queued)]))
+        XCTAssertEqual(BackgroundQueue.admit(.triage, pr: issue, settings: on, runs: [triage(.done)], now: t0, auto: true), "Already triaged")
+        XCTAssertNil(BackgroundQueue.admit(.triage, pr: issue, settings: on, runs: [triage(.done)], now: t0, auto: false))
+        XCTAssertEqual(BackgroundQueue.admit(.triage, pr: issue, settings: on, runs: [triage(.running)], now: t0, auto: false),
+                       "Triage in Background is already running on this issue")
+        XCTAssertEqual(HandlerMenuModel.background(actions: [.triage], running: .triage).first?.items,
+                       [HandlerMenuItem(title: "Cancel Background Triage", choice: .cancelBackground)])
+    }
+
+    /// A triage draft posts one comment: the window preselects Comment, the empty and length checks apply, and the request is
+    /// `addComment` on the issue (built through the fake transport only).
+    func testTriageDraftPostsOneComment() async throws {
+        let draft = BackgroundDraft(runID: "0f3c1234-bbbb", action: .triage, prID: "I_9", repo: "octo-org/widgets", number: 9,
+                                    url: URL(string: "https://github.com/octo-org/widgets/issues/9")!, title: "Crash", accountID: UUID(), login: "dana",
+                                    head: "", agent: .claude, sessionID: session, cwd: "/tmp", notCloned: false, createdAt: t0,
+                                    summary: "s", verdict: .none, body: "b")
+        XCTAssertEqual(draft.initialEvent(head: ""), .comment)
+        XCTAssertNotNil(DraftPost.refusal(.comment, body: " ", draftHead: "", head: "", open: true))
+        XCTAssertNil(DraftPost.refusal(.comment, body: "Thanks!", draftHead: "", head: "", open: true))
+        let transport = FakeTransport { _ in (200, [:], Data(#"{"data":{"addComment":{"commentEdge":{"node":{"url":"https://github.com/octo-org/widgets/issues/9#issuecomment-1"}}}}}"#.utf8)) }
+        let url = try await GitHubClient(transport: transport, token: "t0ken").postIssueComment(issueID: "I_9", body: "Thanks!")
+        XCTAssertEqual(url?.absoluteString, "https://github.com/octo-org/widgets/issues/9#issuecomment-1")
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(transport.requests.count, 1)
+        XCTAssertEqual(request.url, GitHubClient.endpoint)
+        let (name, variables) = FakeTransport.operation(request)
+        XCTAssertEqual(name, "AddComment")
+        XCTAssertEqual(variables["input"] as? [String: String], ["subjectId": "I_9", "body": "Thanks!"])
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: request.httpBody!) as? [String: Any])
+        XCTAssertTrue((body["query"] as? String ?? "").contains("addComment(input: $input) { commentEdge { node { url } } }"))
+        let refused = FakeTransport { _ in (200, [:], Data(#"{"data":{"addComment":null},"errors":[{"type":"FORBIDDEN","message":"Resource not accessible by personal access token"}]}"#.utf8)) }
+        do {
+            _ = try await GitHubClient(transport: refused, token: "t").postIssueComment(issueID: "I_9", body: "x")
+            XCTFail("expected a refusal")
+        } catch {
+            XCTAssertEqual(error as? AccountStatus, .failed("Resource not accessible by personal access token"))
+        }
+    }
+
+    func testIssueContextFetch() async throws {
+        let discussion = #"""
+            {"data":{"node":{"number":9,"title":"Crash","url":"https://github.com/octo-org/widgets/issues/9","state":"OPEN","body":"It crashes.",
+             "createdAt":"2026-11-01T10:00:00Z","author":{"login":"alice"},"labels":{"nodes":[{"name":"bug"}]},
+             "repository":{"labels":{"nodes":[{"name":"bug"},{"name":"question"}]}},
+             "comments":{"nodes":[{"author":{"login":"dave"},"createdAt":"2026-11-02T10:00:00Z","body":"Same here."}]}},
+             "rateLimit":{"cost":1,"remaining":4999,"resetAt":"2026-11-14T10:00:00Z"}}}
+            """#
+        let transport = FakeTransport { _ in (200, [:], Data(discussion.utf8)) }
+        let context = try await GitHubClient(transport: transport, token: "t").issueContext(issueID: "I_9")
+        XCTAssertEqual(context.head, "")
+        XCTAssertTrue(context.open)
+        XCTAssertFalse(context.isDraft)
+        XCTAssertEqual(context.discussion, """
+            # Crash (#9)
+            Author @alice · OPEN · labels: bug
+
+            ## Description
+
+            It crashes.
+
+            ## Comments (1)
+
+            ### @dave · 2026-11-02T10:00:00Z
+
+            Same here.
+
+            ## Labels in this repository
+
+            bug, question
+
+            """)
+        XCTAssertEqual(transport.requests.map { FakeTransport.operation($0).name }, ["IssueDiscussion"])
+        XCTAssertTrue(transport.requests.allSatisfy { FakeTransport.isRead($0) })
+        let pullRequest = FakeTransport { _ in (200, [:], Data(#"{"data":{"node":{}}}"#.utf8)) }
+        do { _ = try await GitHubClient(transport: pullRequest, token: "t").issueContext(issueID: "PR_7"); XCTFail("expected an error") } catch {
+            XCTAssertEqual(error as? AccountStatus, .failed("Not an issue, or no access"))
+        }
+    }
+
     // MARK: Stored shapes
 
     func testRecordsAndSettingsDecodeLeniently() throws {
@@ -511,6 +633,27 @@ final class BackgroundTests: XCTestCase {
         XCTAssertEqual(plan(true, pr: mine), 0, "review is for others' pull requests")
     }
 
+    /// A background triage rule runs once per issue and never on a pull request.
+    func testMatcherTriagesIssuesOnce() {
+        let account = Account(login: "dana", avatarURL: nil, authKind: .pat)
+        var issue = pr("I_9", issue: true, head: "")
+        issue.accountID = account.id
+        var rule = Automation(name: "Triage new issues", kinds: [.issueOpened], workingDirectory: "~")
+        (rule.background, rule.mode, rule.repos) = (.triage, .auto, ["octo-org/*"])
+        let event = PREvent(id: "opened:I_9", prID: "I_9", kind: .issueOpened, actor: "alice", at: t0, summary: "", url: nil, isOwn: false)
+        func plan(_ target: TrackedPR, runs: [RunRecord] = []) -> Int {
+            AutomationMatcher.plan(events: [event], prs: ["I_9": target], automations: [rule], runs: runs, settingsEnabled: true, paused: false,
+                                   accounts: [account], now: t0, background: true).auto.count
+        }
+        XCTAssertEqual(plan(issue), 1)
+        var queued = RunRecord.background(.triage, pr: issue, rule: rule, eventID: "x", runID: "r", at: t0 - 3600)
+        queued.status = .done
+        XCTAssertEqual(plan(issue, runs: [queued]), 0, "once per issue")
+        var pull = issue
+        pull.isIssue = false
+        XCTAssertEqual(plan(pull), 0, "never on a pull request")
+    }
+
     func testActivityLines() {
         let p = pr()
         XCTAssertEqual(ActivityEntry(background: "Review in Background", stage: .ready, pr: p, account: "dana", runID: "r", at: t0).what, "Ready: Review in Background")
@@ -526,7 +669,7 @@ final class BackgroundTests: XCTestCase {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         for file in ["Sources/PullPingCore/AutomationCLI.swift", "Sources/PullPing/RunCLI.swift", "Sources/PullPing/main.swift"] {
             let text = try String(contentsOf: root.appendingPathComponent(file), encoding: .utf8)
-            for name in ["postReview", "addPullRequestReview", "postDraft", "reviewRequest("] { XCTAssertFalse(text.contains(name), "\(file) names \(name)") }
+            for name in ["postReview", "addPullRequestReview", "postDraft", "reviewRequest(", "postIssueComment", "addComment", "commentRequest("] { XCTAssertFalse(text.contains(name), "\(file) names \(name)") }
         }
         let store = AutomationStore(url: nil)
         XCTAssertEqual(AutomationCLI.run(["drafts", "post", "abcd"], store: store, env: [:], now: t0).status, 2)

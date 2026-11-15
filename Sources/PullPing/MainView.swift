@@ -317,7 +317,8 @@ struct EmptyState: View {
                                                      : "\(waiting) of your pull requests \(waiting == 1 ? "is" : "are") waiting on others."))
         } else {
             ContentUnavailableView("Nothing Here", systemImage: filter.symbol,
-                                   description: Text("Nothing in \(filter.title) right now."))
+                                   description: Text(filter == .issues ? "Open issues you are part of, and issues in repositories you track, appear here."
+                                                     : "Nothing in \(filter.title) right now."))
         }
     }
 }

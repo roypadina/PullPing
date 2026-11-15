@@ -7,10 +7,11 @@ final class PollerTests: XCTestCase {
     let clock = Clock()
     var store = StateStore(url: nil)
 
-    func poller(_ transport: GraphQLTransport? = nil, trackIssues: Bool = true) -> Poller {
+    func poller(_ transport: GraphQLTransport? = nil, trackIssues: Bool = true, owned: Bool = true, watch: [String] = []) -> Poller {
         let clock = clock
         var settings = AppSettings()
         settings.trackIssues = trackIssues
+        (settings.watchOwnedIssues, settings.watchedIssueRepos) = (owned, watch)
         return Poller(transport: transport ?? github.transport, tokenProvider: { _ in "test-token" }, state: store, settings: { settings }, now: { clock.now })
     }
 
@@ -376,5 +377,128 @@ final class PollerTests: XCTestCase {
         seedIssue(updatedAt: t0.addingTimeInterval(100), timeline: comment("IC_9", at: t0.addingTimeInterval(100)))
         let next = try await polled(poller())
         XCTAssertEqual(next.events.map(\.kind), [.comment])
+    }
+
+    // MARK: Issues in my repositories
+
+    /// alice's open issue in `repo`, created `created`, in the watched search.
+    func watchedIssue(_ id: String, _ number: Int, repo: String = "dana/app", created: Date, updatedAt: Date = t0, author: String = "alice") {
+        github.prs[id] = .init(updatedAt: updatedAt, node: issueNode(id, number: number, author: author, updatedAt: updatedAt, body: "It crashes.",
+                                                                     repo: repo, createdAt: created), issue: true)
+        if !github.watched.contains(id) { github.watched.append(id) }
+    }
+
+    func opened(_ result: AccountResult) -> [String] { result.events.filter { $0.kind == .issueOpened && !$0.isOwn }.map(\.prID) }
+
+    /// An account baselined before the feature: open issues already there are listed, read and silent; a newer one notifies.
+    func testUpgradeListsExistingIssuesSilentlyThenANewOneNotifies() async throws {
+        seed()
+        _ = try await polled(poller(owned: false))  // baselined (pull requests and issues) before watching
+        for (i, id) in ["I_1", "I_2", "I_3"].enumerated() { watchedIssue(id, i + 1, created: t0.addingTimeInterval(-86_400 * Double(30 - i))) }
+        clock.now = t0.addingTimeInterval(180)
+        let upgrade = try await polled(poller())
+        XCTAssertEqual(upgrade.stats.watched, 3)
+        XCTAssertTrue(upgrade.events.filter { !$0.isOwn }.isEmpty)
+        for id in ["I_1", "I_2", "I_3"] {
+            let issue = try XCTUnwrap(store.state.prs[id])
+            XCTAssertTrue(issue.watched)
+            XCTAssertEqual(Attention.bucket(issue), .issueWatched)
+            XCTAssertNil(Attention.needReason(issue))
+        }
+        XCTAssertEqual(store.state.watchedSince?[account.id], ["dana/*": clock.now])
+        let discover = github.transport.requests.map(FakeTransport.operation).last { $0.name == "Discover" }
+        XCTAssertEqual(discover?.variables["watched"] as? String, "is:issue is:open archived:false sort:created-desc user:@me")
+        XCTAssertEqual(discover?.variables["withWatched"] as? Bool, true)
+
+        clock.now = t0.addingTimeInterval(360)
+        watchedIssue("I_4", 4, created: t0.addingTimeInterval(300), updatedAt: t0.addingTimeInterval(300))
+        let next = try await polled(poller())
+        XCTAssertEqual(opened(next), ["I_4"])
+        XCTAssertEqual(next.events.first { $0.prID == "I_4" }?.id, "opened:I_4")
+        XCTAssertEqual(Attention.needReason(store.state.prs["I_4"]!), .toTriage)
+        XCTAssertEqual(store.state.watchedSince?[account.id], ["dana/*": t0.addingTimeInterval(180)], "kept, not moved")
+    }
+
+    /// A repository added later: its open issues are silent, a newer one notifies; one opened while PullPing was off still
+    /// notifies days later; an old one sliding into the newest-500 window stays silent.
+    func testWatchBaselinePerPattern() async throws {
+        seed()
+        _ = try await polled(poller())
+        clock.now = t0.addingTimeInterval(180)
+        watchedIssue("I_7", 7, repo: "octo-org/tools", created: t0.addingTimeInterval(-86_400))
+        let added = try await polled(poller(watch: ["octo-org/*"]))
+        XCTAssertTrue(opened(added).isEmpty, "already open when the pattern was added")
+        XCTAssertEqual(store.state.watchedSince?[account.id], ["dana/*": t0, "octo-org/*": t0.addingTimeInterval(180)])
+        XCTAssertTrue(store.state.prs["I_7"]!.watched)
+
+        // The Mac was off for three days; an issue opened on the first one.
+        clock.now = t0.addingTimeInterval(3 * 86_400)
+        watchedIssue("I_8", 8, repo: "octo-org/tools", created: t0.addingTimeInterval(86_400), updatedAt: t0.addingTimeInterval(86_400))
+        watchedIssue("I_9", 9, repo: "octo-org/tools", created: t0.addingTimeInterval(-40 * 86_400), updatedAt: t0.addingTimeInterval(86_400))
+        let monday = try await polled(poller(watch: ["octo-org/*"]))
+        XCTAssertEqual(opened(monday), ["I_8"], "I_9 was open before watching began")
+        XCTAssertNil(Attention.needReason(store.state.prs["I_9"]!))
+    }
+
+    /// My own new issue never notifies; the watched search pages like the others.
+    func testOwnIssueIsSilentAndWatchedSearchPages() async throws {
+        seed()
+        _ = try await polled(poller())
+        clock.now = t0.addingTimeInterval(180)
+        watchedIssue("I_1", 1, created: t0.addingTimeInterval(100), author: "dana")
+        github.prs["I_2"] = .init(updatedAt: t0, node: issueNode("I_2", number: 2, author: "alice", updatedAt: t0, repo: "dana/app",
+                                                                 createdAt: t0.addingTimeInterval(120)), issue: true)
+        github.watchedPage2 = ["I_2"]
+        let next = try await polled(poller())
+        XCTAssertEqual(opened(next), ["I_2"])
+        XCTAssertEqual(Attention.bucket(store.state.prs["I_1"]!), .issueMine)
+        let page = github.transport.requests.map(FakeTransport.operation).last { $0.name == "Page" }
+        XCTAssertEqual(page?.variables["q"] as? String, IssueWatch.query(owned: true, extra: []))
+    }
+
+    /// A pattern removed: issues watched only through it go (open ones), one I am part of stays without the flag.
+    func testRemovedPatternDropsWatchedOnlyIssues() async throws {
+        seed()
+        _ = try await polled(poller(watch: ["octo-org/*"]))
+        clock.now = t0.addingTimeInterval(180)
+        watchedIssue("I_1", 1, repo: "octo-org/widgets", created: t0.addingTimeInterval(-86_400))
+        github.prs["I_2"] = .init(updatedAt: t0, node: issueNode("I_2", number: 2, author: "alice", updatedAt: t0, assignees: [me],
+                                                                 createdAt: t0.addingTimeInterval(-86_400)), issue: true)
+        github.watched.append("I_2")
+        github.issues = ["I_2"]
+        _ = try await polled(poller(watch: ["octo-org/*"]))
+        XCTAssertEqual([store.state.prs["I_1"]?.watched, store.state.prs["I_2"]?.watched], [true, true])
+
+        clock.now = t0.addingTimeInterval(360)
+        let removed = try await polled(poller(owned: false))
+        XCTAssertTrue(removed.events.filter { !$0.isOwn }.isEmpty)
+        XCTAssertNil(store.state.prs["I_1"])
+        XCTAssertEqual(store.state.prs["I_2"]?.watched, false)
+        XCTAssertEqual(Attention.bucket(store.state.prs["I_2"]!), .issueAssigned)
+        XCTAssertFalse(store.state.ignoredIDs.contains("I_1"), "not ignored: watching again brings it back")
+        let discover = github.transport.requests.map(FakeTransport.operation).last { $0.name == "Discover" }
+        XCTAssertEqual(discover?.variables["withWatched"] as? Bool, false, "nothing to watch: no search")
+        XCTAssertEqual(store.state.watchedSince?[account.id], [:])
+    }
+
+    /// Track Issues off drops them and forgets when watching began; on again, they come back silently.
+    func testTrackIssuesOffForgetsTheWatchBaseline() async throws {
+        seed()
+        _ = try await polled(poller())
+        watchedIssue("I_1", 1, created: t0.addingTimeInterval(-86_400))
+        clock.now = t0.addingTimeInterval(180)
+        _ = try await polled(poller())
+        clock.now = t0.addingTimeInterval(360)
+        _ = try await polled(poller(trackIssues: false))
+        XCTAssertNil(store.state.prs["I_1"])
+        XCTAssertNil(store.state.watchedSince?[account.id])
+        XCTAssertEqual(github.transport.requests.map(FakeTransport.operation).last { $0.name == "Discover" }?.variables["withWatched"] as? Bool, false)
+
+        clock.now = t0.addingTimeInterval(540)
+        watchedIssue("I_2", 2, created: t0.addingTimeInterval(400), updatedAt: t0.addingTimeInterval(400))  // opened while off
+        let on = try await polled(poller())
+        XCTAssertTrue(on.events.filter { !$0.isOwn }.isEmpty)
+        XCTAssertEqual(store.state.prs["I_1"]?.watched, true)
+        XCTAssertEqual(store.state.watchedSince?[account.id], ["dana/*": clock.now])
     }
 }

@@ -4,7 +4,7 @@ import Foundation
 /// breakdown wording and the stored key, so it never changes.
 public enum NeedReason: String, Codable, Sendable, CaseIterable, CodingKeyRepresentable {
     case toReview = "to review", reReview = "to re-review", changesRequested = "changes requested", ciFailed = "CI failed"
-    case conflicts = "with conflicts", mentioned, assigned, reminder = "reminder due", newComments = "with new comments", readyToMerge = "ready to merge"
+    case conflicts = "with conflicts", toTriage = "to triage", mentioned, assigned, reminder = "reminder due", newComments = "with new comments", readyToMerge = "ready to merge"
     case teamToReview = "team review"
 }
 
@@ -14,7 +14,7 @@ public enum Bucket: String, Sendable, CaseIterable {
     case fix, merge, waitingReview, waitingCI, waitingMerge, draft
     /// Others' pull requests. Needs your review: `review`, `reReview`. Then `teamReview`, `reviewed`.
     case review, reReview, teamReview, reviewed
-    case issueAssigned, issueMine, issueMentioned
+    case issueAssigned, issueMine, issueWatched, issueMentioned
     /// Open, not mine, no review role (commented, mentioned, assigned); merged or closed.
     case watching, closed
 }
@@ -88,8 +88,7 @@ public enum Attention {
     public static func markUnread(_ pr: inout TrackedPR) {
         pr.markedUnread = true
         let others = pr.events.filter { !$0.isOwn }
-        let mine = pr.roles.contains(.author) || (pr.isIssue && pr.roles.contains(.assigned))
-        let reasons = Set<EventKind>([.mentioned, .assigned, .reminder]).union(mine ? talk : [])
+        let reasons = Set<EventKind>([.mentioned, .assigned, .reminder, .issueOpened]).union(mine(pr) ? talk : [])
         guard let newest = others.filter({ reasons.contains($0.kind) }).map(\.at).max() ?? others.map(\.at).max(),
               let read = pr.lastReadAt, read >= newest else { return }
         // Whole seconds: the state file stores ISO-8601 dates without fractions.
@@ -97,9 +96,14 @@ public enum Attention {
     }
 
     /// A Remind Me reminder fired and is not read yet.
-    public static func reminderDue(_ pr: TrackedPR) -> Bool {
-        pr.events.contains { $0.kind == .reminder && !$0.isOwn && $0.at > (pr.lastReadAt ?? .distantPast) }
+    public static func reminderDue(_ pr: TrackedPR) -> Bool { unreadEvent(pr, .reminder) }
+
+    static func unreadEvent(_ pr: TrackedPR, _ kind: EventKind) -> Bool {
+        pr.events.contains { $0.kind == kind && !$0.isOwn && $0.at > (pr.lastReadAt ?? .distantPast) }
     }
+
+    /// Mine to answer: what I opened, issues assigned to me, issues in repositories I watch.
+    static func mine(_ pr: TrackedPR) -> Bool { pr.roles.contains(.author) || (pr.isIssue && (pr.roles.contains(.assigned) || pr.watched)) }
 
     public static func awaitingMyReview(_ pr: TrackedPR) -> Bool {
         pr.state == .open && !pr.isDraft && !pr.roles.isDisjoint(with: [.reviewRequested, .teamReviewRequested])
@@ -132,7 +136,9 @@ public enum Attention {
     public static func bucket(_ pr: TrackedPR) -> Bucket {
         guard pr.state == .open else { return .closed }
         let roles = pr.roles
-        if pr.isIssue { return roles.contains(.assigned) ? .issueAssigned : roles.contains(.author) ? .issueMine : .issueMentioned }
+        if pr.isIssue {
+            return roles.contains(.assigned) ? .issueAssigned : roles.contains(.author) ? .issueMine : pr.watched ? .issueWatched : .issueMentioned
+        }
         if roles.contains(.author) {
             let decision = decision(pr)
             if pr.isDraft { return .draft }
@@ -157,7 +163,8 @@ public enum Attention {
         public var text: String, symbol: String, tone: Tone
     }
 
-    /// The status chip of an item's bucket; nil for open issues and Watching (their other chips say enough).
+    /// The status chip of an item's bucket; nil for open issues (except a new one in a repository I watch) and Watching (their
+    /// other chips say enough).
     public static func lead(_ pr: TrackedPR) -> Lead? {
         let requester = pr.events.last { $0.kind == .reviewRequested && !$0.summary.hasPrefix("via team") }?.actor ?? pr.authorLogin
         switch bucket(pr) {
@@ -204,23 +211,26 @@ public enum Attention {
             if pr.isIssue && pr.stateReason == "COMPLETED" { return Lead(text: "Completed", symbol: "checkmark.circle", tone: .merged) }
             if pr.isIssue && pr.stateReason == "NOT_PLANNED" { return Lead(text: "Not planned", symbol: "slash.circle", tone: .neutral) }
             return Lead(text: "Closed", symbol: "xmark.circle", tone: .neutral)
-        case .issueAssigned, .issueMine, .issueMentioned, .watching: return nil
+        case .issueWatched where unreadEvent(pr, .issueOpened):
+            return Lead(text: "New issue by @\(pr.authorLogin)", symbol: "plus.circle", tone: .needsYou)
+        case .issueAssigned, .issueMine, .issueWatched, .issueMentioned, .watching: return nil
         }
     }
 
-    /// Why an open, shown, unmuted item needs me, from its bucket, plus unread mentions, assignments and (my pull requests and
-    /// issues, or issues assigned to me) unread comments or reviews. Only reasons in `counting` (Settings > Menu Bar) apply;
+    /// Why an open, shown, unmuted item needs me, from its bucket, plus unread new issues, mentions, assignments and (`mine`)
+    /// unread comments or reviews. Only reasons in `counting` (Settings > Menu Bar) apply;
     /// the first match in `NeedReason` order wins, so each item counts once.
     public static func needReason(_ pr: TrackedPR, counting: Set<NeedReason> = Set(NeedReason.allCases)) -> NeedReason? {
         guard pr.state == .open, !pr.muted, !pr.hidden else { return nil }
         let unread = pr.events.filter { !$0.isOwn && $0.at > (pr.lastReadAt ?? .distantPast) }
-        let mine = pr.roles.contains(.author) || (pr.isIssue && pr.roles.contains(.assigned)), bucket = bucket(pr)
+        let mine = Attention.mine(pr), bucket = bucket(pr)
         let checks: [(NeedReason, Bool)] = [
             (.toReview, bucket == .review),
             (.reReview, bucket == .reReview),
             (.changesRequested, bucket == .fix && decision(pr) == "CHANGES_REQUESTED"),
             (.ciFailed, bucket == .fix && pr.ci == .failure),
             (.conflicts, bucket == .fix && conflicted(pr)),
+            (.toTriage, unread.contains { $0.kind == .issueOpened }),
             (.mentioned, unread.contains { $0.kind == .mentioned }),
             (.assigned, unread.contains { $0.kind == .assigned }),
             (.reminder, unread.contains { $0.kind == .reminder }),
@@ -245,6 +255,7 @@ public enum Attention {
         case .changesRequested: [.reviewChangesRequested]
         case .ciFailed: [.ciFailed]
         case .conflicts: [.conflicts]
+        case .toTriage: [.issueOpened]
         case .mentioned: [.mentioned]
         case .assigned: [.assigned]
         case .reminder: [.reminder]

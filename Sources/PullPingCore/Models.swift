@@ -121,6 +121,8 @@ public struct PRSnapshot: Codable, Sendable, Equatable {
     public var autoMerge: Bool?
     public var updatedAt = Date.distantPast
     public var closedAt: Date?
+    /// Issues only (`issueOpened`); nil for pull requests.
+    public var createdAt: Date?
     public var timeline: [TimelineNode] = []
 
     public init(id: String) { self.id = id }
@@ -172,6 +174,8 @@ public struct TrackedPR: Identifiable, Codable, Sendable, Equatable {
     public var remindAt: Date?
     /// Mark as Unread: unread without an event by someone else. Cleared by mark-read.
     @FalseIfMissing public var markedUnread = false
+    /// An issue in a repository I watch (`IssueWatch`). Set by the Poller every poll, so `Attention.bucket` stays settings-free.
+    @FalseIfMissing public var watched = false
 
     public init(id: String, accountID: UUID, firstTrackedAt: Date) {
         self.id = id
@@ -199,7 +203,7 @@ extension KeyedDecodingContainer {
 public enum EventKind: String, Codable, Sendable, CaseIterable, CodingKeyRepresentable {
     case comment, mentioned, reviewApproved, reviewChangesRequested, reviewCommented, reviewRequested, assigned, newCommits,
          ciPassed, ciFailed, readyForReview, convertedToDraft, merged, closed, reopened, reviewDismissed, retitled, labeled, reviewReminder,
-         conflicts, readyToMerge, reminder
+         conflicts, readyToMerge, reminder, issueOpened
 }
 
 extension EventKind {
@@ -228,13 +232,14 @@ extension EventKind {
         case .conflicts: "Conflicts"
         case .readyToMerge: "Ready to merge"
         case .reminder: "Reminder"
+        case .issueOpened: "New issue"
         }
     }
 }
 
 public struct PREvent: Identifiable, Codable, Sendable, Equatable {
     /// GitHub node id, or "ci:<oid>:<state>", "head:<oid>", "conflict:<oid>", "ready:<oid>", "rr:<login>:<date>", "assign:<login>:<date>", "reminder:<date>",
-    /// "remind:<date>" (Remind Me).
+    /// "remind:<date>" (Remind Me), "opened:<issue id>" (`issueOpened`).
     /// Unique per PR only: key lists that mix PRs by `prID` + `id`.
     public let id: String
     public var prID: String
@@ -262,5 +267,7 @@ public struct TrackedState: Codable, Sendable, Equatable {
     /// Accounts whose issues have had their silent first sync; nil in files from before issue tracking.
     public var baselinedIssueAccounts: Set<UUID>?
     public var lastPollAt: [UUID: Date] = [:]
+    /// Per account, watch pattern → when PullPing first polled it (`IssueWatch.since`); nil in files from before.
+    public var watchedSince: [UUID: [String: Date]]?
     public init() {}
 }
